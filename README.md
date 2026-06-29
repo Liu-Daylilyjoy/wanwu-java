@@ -73,7 +73,7 @@ http://127.0.0.1:8848/nacos
 
 ## 纯 Docker 启动 BFF
 
-如果本机不安装 Java/Maven，只依赖 Docker，可以直接构建并启动 BFF 骨架服务：
+如果本机不安装 Java/Maven，只依赖 Docker，可以直接构建并启动 BFF 骨架服务。Compose 会同时启动 Nacos，BFF 默认注册到 `nacos://nacos:8848`：
 
 ```powershell
 docker compose --profile app up --build bff
@@ -86,12 +86,40 @@ http://127.0.0.1:8080/internal/health
 http://127.0.0.1:8080/api/bff/service-info
 ```
 
-如果要让 Dubbo 注册到 Nacos，先启动 Nacos，再设置注册中心地址：
+## Docker 一键启动前后端最小闭环
+
+本阶段已经把前端也纳入 Compose。只需要 Docker，不要求本机安装 Java、Maven 或 Node：
 
 ```powershell
-docker compose up -d nacos
-$env:DUBBO_REGISTRY_ADDRESS = "nacos://nacos:8848"
-docker compose --profile app up --build bff
+docker compose --profile full up -d --build
+```
+
+启动后访问前端：
+
+```text
+http://127.0.0.1:3000/aibase/login
+```
+
+开发环境内置登录信息：
+
+```text
+用户名：admin
+密码：任意非空值，例如 x
+验证码：1234
+```
+
+登录成功后会进入：
+
+```text
+http://127.0.0.1:3000/aibase/appSpace/agent
+```
+
+当前最小闭环使用内存数据：IAM 返回开发账号、默认组织和权限，App 服务返回空智能体列表，因此页面会显示“暂无数据”。
+
+停止服务：
+
+```powershell
+docker compose --profile full down
 ```
 
 ## 健康检查

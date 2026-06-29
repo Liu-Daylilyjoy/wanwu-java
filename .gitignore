@@ -14,6 +14,8 @@ web/node_modules/
 # Logs
 logs/
 *.log
+.playwright-cli/
+output/playwright/
 
 # Local env
 .env
