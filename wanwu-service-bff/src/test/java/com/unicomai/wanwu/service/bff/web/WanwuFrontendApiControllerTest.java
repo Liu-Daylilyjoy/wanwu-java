@@ -1,6 +1,9 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -19,8 +22,10 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -82,6 +87,143 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.list", hasSize(0)));
 
         verify(appService).listAssistants(any(ApplicationListQuery.class));
+    }
+
+    @Test
+    public void createAssistantReturnsFrontendAssistantId() throws Exception {
+        when(appService.createAssistant(any(AssistantCreateCommand.class)))
+                .thenReturn(new AssistantCreateResult("assistant-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"category\":1,\"name\":\"DemoAgent\",\"desc\":\"A demo agent\",\"avatar\":{\"key\":\"avatars/demo.png\",\"path\":\"/static/demo.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"))
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-001"));
+
+        org.mockito.ArgumentCaptor<AssistantCreateCommand> captor = forClass(AssistantCreateCommand.class);
+        verify(appService).createAssistant(captor.capture());
+        assertEquals("DemoAgent", captor.getValue().getName());
+        assertEquals("A demo agent", captor.getValue().getDesc());
+        assertEquals(1, captor.getValue().getCategory());
+        assertEquals("avatars/demo.png", captor.getValue().getAvatarKey());
+        assertEquals("/static/demo.png", captor.getValue().getAvatarPath());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void assistantListReturnsFrontendCardShape() throws Exception {
+        Map<String, Object> avatar = new LinkedHashMap<>();
+        avatar.put("key", "avatars/demo.png");
+        avatar.put("path", "/static/demo.png");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("uniqueId", "agent_assistant-001");
+        item.put("appId", "assistant-001");
+        item.put("appType", "agent");
+        item.put("avatar", avatar);
+        item.put("name", "DemoAgent");
+        item.put("desc", "A demo agent");
+        item.put("createdAt", "2026-06-29 10:00:00");
+        item.put("updatedAt", "2026-06-29 10:00:00");
+        item.put("publishType", "private");
+        item.put("category", 1);
+        item.put("version", "v0.0.1");
+        when(appService.listAssistants(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(item)));
+
+        mockMvc.perform(get("/user/api/v1/appspace/assistant/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Demo"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list", hasSize(1)))
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.list[0].appType").value("agent"))
+                .andExpect(jsonPath("$.data.list[0].name").value("DemoAgent"))
+                .andExpect(jsonPath("$.data.list[0].avatar.path").value("/static/demo.png"));
+
+        org.mockito.ArgumentCaptor<ApplicationListQuery> captor = forClass(ApplicationListQuery.class);
+        verify(appService).listAssistants(captor.capture());
+        assertEquals("Demo", captor.getValue().getName());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void assistantDraftReturnsPersistedEditorShape() throws Exception {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("assistantId", "assistant-001");
+        draft.put("uuid", "assistant-001");
+        draft.put("name", "DemoAgent");
+        draft.put("desc", "A demo agent");
+        draft.put("publishType", "private");
+        draft.put("modelConfig", Collections.singletonMap("config", null));
+        draft.put("rerankConfig", Collections.singletonMap("modelId", ""));
+        when(appService.getAssistantDraft(any(AssistantDetailQuery.class))).thenReturn(draft);
+
+        mockMvc.perform(get("/user/api/v1/assistant/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.name").value("DemoAgent"))
+                .andExpect(jsonPath("$.data.modelConfig").exists())
+                .andExpect(jsonPath("$.data.rerankConfig.modelId").value(""));
+
+        org.mockito.ArgumentCaptor<AssistantDetailQuery> captor = forClass(AssistantDetailQuery.class);
+        verify(appService).getAssistantDraft(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
+        mockMvc.perform(get("/user/api/v1/model/select/llm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)))
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        mockMvc.perform(get("/user/api/v1/prompt/template/list"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        mockMvc.perform(get("/user/api/v1/assistant/conversation/draft/detail")
+                        .param("assistantId", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/version/list")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/select")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+    }
+
+    @Test
+    public void appOpenUrlReturnsEmptyStringUntilPublishIsImplemented() throws Exception {
+        mockMvc.perform(get("/user/api/v1/appspace/app/url")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(""));
     }
 
     private LoginResult devAdminResult() {

@@ -8,13 +8,21 @@ public class ApplicationListQuery implements Serializable {
 
     private String appType;
     private String name;
+    private String userId;
+    private String orgId;
 
     public ApplicationListQuery() {
     }
 
     public ApplicationListQuery(String appType, String name) {
+        this(appType, name, "", "");
+    }
+
+    public ApplicationListQuery(String appType, String name, String userId, String orgId) {
         this.appType = appType;
         this.name = name;
+        this.userId = userId;
+        this.orgId = orgId;
     }
 
     public String getAppType() {
@@ -31,5 +39,21 @@ public class ApplicationListQuery implements Serializable {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    public String getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(String orgId) {
+        this.orgId = orgId;
     }
 }

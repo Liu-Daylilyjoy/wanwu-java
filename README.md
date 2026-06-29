@@ -114,7 +114,28 @@ http://127.0.0.1:3000/aibase/login
 http://127.0.0.1:3000/aibase/appSpace/agent
 ```
 
-当前最小闭环使用内存数据：IAM 返回开发账号、默认组织和权限，App 服务返回空智能体列表，因此页面会显示“暂无数据”。
+当前最小闭环已经接入 MySQL：IAM 返回开发账号、默认组织和权限；前端可零改动创建智能体；App 服务会把智能体写入 `app_service.apps` 和 `app_service.assistant_drafts`，并在列表和草稿详情中读回。
+
+页面验收路径：
+
+1. 登录后进入 `应用空间 -> 智能体`。
+2. 点击创建按钮，新建一个智能体。
+3. 创建成功后会进入智能体编辑页；当前模型、知识库、工具等下拉接口先返回空集合占位。
+4. 回到智能体列表，可以看到刚创建的智能体。
+
+命令行快速验收：
+
+```powershell
+$body = @{ category = 1; name = 'DockerAgent'; desc = 'Created through BFF'; avatar = @{ key = ''; path = '' } } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/user/api/v1/assistant' -Headers @{ Authorization = 'Bearer dev-token' } -ContentType 'application/json' -Body $body
+Invoke-RestMethod -Uri 'http://localhost:8080/user/api/v1/appspace/assistant/list?name=Docker' -Headers @{ Authorization = 'Bearer dev-token' }
+```
+
+查看 MySQL 表和 Flyway 版本：
+
+```powershell
+docker exec wanwu-java-mysql mysql -uroot -e "USE app_service; SHOW TABLES; SELECT version, description, success FROM flyway_schema_history;"
+```
 
 停止服务：
 
