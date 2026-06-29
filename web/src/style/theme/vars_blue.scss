@@ -1,0 +1,16 @@
+// 主题色
+$color: #5983ff; // 整体主题色（ 蓝：#6B80DF）
+$color_opacity: #f2f7ff; // 主题色透明
+$color_highlight: $color; // 文本高亮色
+$select_active_bg: $color_opacity; // 下拉点击选中色
+$content_bg: linear-gradient(1deg, #ffffff 50%, #f6f9ff 98%); // 背景渐变色
+$btn_bg: $color; // 按钮背景
+$color_title: #434c6c; // 表头、重点突出文字颜色
+$border_color: #2d69dd; // 选中边框颜色
+$create_card_border_color: #5983FF; // 创建卡片边框色
+$create_card_text_color: #434c6c; // 创建卡片文字色
+$menu_text_color: #32374A; // 菜单颜色
+$detail_title_color: #101219; // 广场详情页标题颜色
+
+$tag_bg: #e6f0ff; // 标签背景色
+$tag_color: #3562e7; // 标签文字颜色

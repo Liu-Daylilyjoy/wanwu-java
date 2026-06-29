@@ -1,0 +1,40 @@
+.tabs-x-bottom {
+  margin: 0 20px;
+  padding-bottom: 20px;
+}
+
+.tabs-x-top {
+  margin: 0 20px;
+  padding-top: 20px;
+}
+
+.tabs-spacing {
+  margin: 0 20px;
+  padding-top: 20px;
+  padding-bottom: 5px;
+}
+
+.tabs-px {
+  padding: 0 10px;
+}
+
+.tabs {
+  .tab {
+    font-size: 13px;
+    display: inline-block;
+    vertical-align: middle;
+    padding: 0 3px;
+    margin-left: 0;
+    margin-right: 14px;
+    height: 36px;
+    line-height: 36px;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .active {
+    color: $color;
+    border-bottom: 2.5px solid $color;
+    font-weight: bold;
+  }
+}

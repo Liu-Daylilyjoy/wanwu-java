@@ -1,0 +1,37 @@
+ARG MAVEN_IMAGE=maven:3.8.8-eclipse-temurin-8
+ARG RUNTIME_IMAGE=eclipse-temurin:8-jre
+
+FROM ${MAVEN_IMAGE} AS builder
+WORKDIR /workspace
+
+COPY pom.xml .
+COPY wanwu-api/pom.xml wanwu-api/pom.xml
+COPY wanwu-common-core/pom.xml wanwu-common-core/pom.xml
+COPY wanwu-common-web/pom.xml wanwu-common-web/pom.xml
+COPY wanwu-common-rpc/pom.xml wanwu-common-rpc/pom.xml
+COPY wanwu-common-data/pom.xml wanwu-common-data/pom.xml
+COPY wanwu-service-bff/pom.xml wanwu-service-bff/pom.xml
+COPY wanwu-service-iam/pom.xml wanwu-service-iam/pom.xml
+COPY wanwu-service-model/pom.xml wanwu-service-model/pom.xml
+COPY wanwu-service-knowledge/pom.xml wanwu-service-knowledge/pom.xml
+COPY wanwu-service-agent/pom.xml wanwu-service-agent/pom.xml
+COPY wanwu-service-assistant/pom.xml wanwu-service-assistant/pom.xml
+COPY wanwu-service-app/pom.xml wanwu-service-app/pom.xml
+COPY wanwu-service-mcp/pom.xml wanwu-service-mcp/pom.xml
+COPY wanwu-service-operate/pom.xml wanwu-service-operate/pom.xml
+COPY wanwu-service-rag/pom.xml wanwu-service-rag/pom.xml
+
+COPY . .
+ARG SERVICE_MODULE=wanwu-service-bff
+RUN mvn -B -pl ${SERVICE_MODULE} -am -DskipTests package
+
+FROM ${RUNTIME_IMAGE}
+WORKDIR /app
+
+ARG SERVICE_MODULE=wanwu-service-bff
+ARG SERVICE_VERSION=0.1.0-SNAPSHOT
+COPY --from=builder /workspace/${SERVICE_MODULE}/target/${SERVICE_MODULE}-${SERVICE_VERSION}.jar /app/app.jar
+
+ENV JAVA_OPTS=""
+EXPOSE 8080 20880
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/app.jar"]
