@@ -50,6 +50,7 @@ import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
@@ -110,17 +111,26 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private KnowledgeService knowledgeService;
+
     public WanwuFrontendApiController() {
     }
 
     public WanwuFrontendApiController(IamService iamService, AppService appService) {
-        this(iamService, appService, null);
+        this(iamService, appService, null, null);
     }
 
     public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService) {
+        this(iamService, appService, modelService, null);
+    }
+
+    public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
+                                      KnowledgeService knowledgeService) {
         this.iamService = iamService;
         this.appService = appService;
         this.modelService = modelService;
+        this.knowledgeService = knowledgeService;
     }
 
     @GetMapping("/base/captcha")
@@ -1035,8 +1045,516 @@ public class WanwuFrontendApiController {
     }
 
     @PostMapping("/knowledge/select")
-    public FrontendResponse<Map<String, Object>> emptyPostSelectResult() {
-        return FrontendResponse.ok(emptyListResult());
+    public FrontendResponse<Map<String, Object>> selectKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.selectKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge")
+    public FrontendResponse<Map<String, Object>> createKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PutMapping("/knowledge")
+    public FrontendResponse<Map<String, Object>> updateKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge")
+    public FrontendResponse<Map<String, Object>> deleteKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping({"/knowledge/hit", "/knowledge/qa/hit"})
+    public FrontendResponse<Map<String, Object>> hitKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.hitKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/tag")
+    public FrontendResponse<Map<String, Object>> listKnowledgeTags(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listTags(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/tag")
+    public FrontendResponse<Map<String, Object>> createKnowledgeTag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createTag(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PutMapping("/knowledge/tag")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeTag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateTag(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/tag")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeTag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteTag(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/tag/bind/count")
+    public FrontendResponse<Map<String, Object>> countKnowledgeTagBindings(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.countTagBindings(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/tag/bind")
+    public FrontendResponse<Map<String, Object>> bindKnowledgeTags(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.bindTags(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/splitter")
+    public FrontendResponse<Map<String, Object>> listKnowledgeSplitters(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listSplitters(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/splitter")
+    public FrontendResponse<Map<String, Object>> createKnowledgeSplitter(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createSplitter(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PutMapping("/knowledge/splitter")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeSplitter(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateSplitter(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/splitter")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeSplitter(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteSplitter(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeDocs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listDocs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/config")
+    public FrontendResponse<Map<String, Object>> getKnowledgeDocConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getDocConfig(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/import/tip")
+    public FrontendResponse<Map<String, Object>> getKnowledgeDocImportTip(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getDocImportTip(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/upload/limit")
+    public FrontendResponse<Map<String, Object>> getKnowledgeDocUploadLimit(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getDocUploadLimit(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/segment/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeDocSegments(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listDocSegments(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/segment/child/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeDocChildSegments(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listDocChildSegments(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/url/analysis")
+    public FrontendResponse<Map<String, Object>> analyzeKnowledgeDocUrls(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.analyzeDocUrls(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/import")
+    public FrontendResponse<Map<String, Object>> importKnowledgeDocs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.importDocs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/update/config")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocConfig(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/reimport")
+    public FrontendResponse<Map<String, Object>> reimportKnowledgeDocs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.reimportDocs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/doc")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeDocs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteDocs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/export")
+    public FrontendResponse<Map<String, Object>> exportKnowledgeDocs() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("recordCreated", false);
+        return FrontendResponse.ok(result);
+    }
+
+    @PostMapping({"/knowledge/doc/meta", "/knowledge/meta/value/update"})
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocMeta(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocMeta(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/meta/batch")
+    public FrontendResponse<Map<String, Object>> batchUpdateKnowledgeDocMeta(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.batchUpdateDocMeta(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/meta/select")
+    public FrontendResponse<Map<String, Object>> selectKnowledgeMetaKeys(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.selectMetaKeys(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/meta/value/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeMetaValues(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listMetaValues(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping({
+            "/knowledge/doc/segment/status/update",
+            "/knowledge/doc/segment/labels",
+            "/knowledge/doc/segment/create",
+            "/knowledge/doc/segment/batch/create",
+            "/knowledge/doc/segment/update",
+            "/knowledge/doc/segment/child/create",
+            "/knowledge/doc/segment/child/update"
+    })
+    public FrontendResponse<Map<String, Object>> mutateKnowledgeSegments(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
+        });
+    }
+
+    @DeleteMapping({"/knowledge/doc/segment/delete", "/knowledge/doc/segment/child/delete"})
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeSegments(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
+        });
+    }
+
+    @GetMapping("/knowledge/graph")
+    public FrontendResponse<Map<String, Object>> getKnowledgeGraph(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getKnowledgeGraph(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/org")
+    public FrontendResponse<Map<String, Object>> listKnowledgeOrgs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listKnowledgeOrgs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/user")
+    public FrontendResponse<Map<String, Object>> listKnowledgeUsers(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listKnowledgeUsers(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/user/no/permit")
+    public FrontendResponse<Map<String, Object>> listKnowledgeUsersWithoutPermit(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listUsersWithoutPermit(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/user/add")
+    public FrontendResponse<Map<String, Object>> addKnowledgeUsers(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.addKnowledgeUsers(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/user/edit")
+    public FrontendResponse<Map<String, Object>> editKnowledgeUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.editKnowledgeUser(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/user/delete")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteKnowledgeUser(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/user/admin/transfer")
+    public FrontendResponse<Map<String, Object>> transferKnowledgeAdmin(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.transferKnowledgeAdmin(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/report/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeReports(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listReports(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping({"/knowledge/report/generate", "/knowledge/report/update", "/knowledge/report/add", "/knowledge/report/batch/add"})
+    public FrontendResponse<Map<String, Object>> mutateKnowledgeReports(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
+        });
+    }
+
+    @DeleteMapping("/knowledge/report/delete")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeReport(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
+        });
+    }
+
+    @GetMapping("/knowledge/export/record/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeExportRecords(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listExportRecords(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/export/record")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeExportRecord(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteExportRecord(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/doc/by/name")
+    public FrontendResponse<Map<String, Object>> getKnowledgeDocByName(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getDocByName(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping({"/knowledge/qa/pair", "/knowledge/qa/pair/import"})
+    public FrontendResponse<Map<String, Object>> mutateQaPairPost() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping({"/knowledge/qa/pair", "/knowledge/qa/pair/switch"})
+    public FrontendResponse<Map<String, Object>> mutateQaPairPut() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping("/knowledge/qa/pair")
+    public FrontendResponse<Map<String, Object>> deleteQaPair() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PostMapping("/knowledge/qa/pair/list")
+    public FrontendResponse<Map<String, Object>> listQaPairs(@RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> safe = objectMap(request);
+        Map<String, Object> result = emptyListResult();
+        result.put("pageNo", intParam(safe.get("pageNo"), 1));
+        result.put("pageSize", intParam(safe.get("pageSize"), 10));
+        return FrontendResponse.ok(result);
+    }
+
+    @GetMapping("/knowledge/qa/pair/import/tip")
+    public FrontendResponse<Map<String, Object>> qaImportTip(@RequestParam Map<String, String> request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("msg", "");
+        result.put("uploadstatus", 2);
+        result.put("knowledgeId", request.get("knowledgeId"));
+        return FrontendResponse.ok(result);
+    }
+
+    @GetMapping("/knowledge/qa/export")
+    public FrontendResponse<Map<String, Object>> exportQaPairs() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @GetMapping("/knowledge/external/api/select")
+    public FrontendResponse<Map<String, Object>> listExternalKnowledgeApis() {
+        return FrontendResponse.ok(singleton("externalApiList", Collections.emptyList()));
+    }
+
+    @GetMapping("/knowledge/external/select")
+    public FrontendResponse<Map<String, Object>> listExternalKnowledge() {
+        return FrontendResponse.ok(singleton("externalKnowledgeList", Collections.emptyList()));
+    }
+
+    @PostMapping("/knowledge/external/api")
+    public FrontendResponse<Map<String, Object>> createExternalKnowledgeApi() {
+        return FrontendResponse.ok(singleton("externalApiId", "external-api-dev"));
+    }
+
+    @PostMapping("/knowledge/external")
+    public FrontendResponse<Map<String, Object>> createExternalKnowledge() {
+        return FrontendResponse.ok(singleton("knowledgeId", "external-knowledge-dev"));
+    }
+
+    @PutMapping({"/knowledge/external/api", "/knowledge/external"})
+    public FrontendResponse<Map<String, Object>> updateExternalKnowledge() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping({"/knowledge/external/api", "/knowledge/external"})
+    public FrontendResponse<Map<String, Object>> deleteExternalKnowledge() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    private FrontendResponse<Map<String, Object>> knowledgeResponse(
+            String authorization, Map<?, ?> request, KnowledgeCall call) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(call.execute(userContext, objectMap(request)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    private FrontendResponse<Map<String, Object>> knowledgeVoidResponse(
+            String authorization, Map<?, ?> request, KnowledgeVoidCall call) {
+        try {
+            UserContext userContext = userContext(authorization);
+            call.execute(userContext, objectMap(request));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    private Map<String, Object> objectMap(Map<?, ?> request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (request == null) {
+            return result;
+        }
+        for (Map.Entry<?, ?> entry : request.entrySet()) {
+            if (entry.getKey() != null) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> singleton(String key, Object value) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put(key, value);
+        return result;
+    }
+
+    private int intParam(Object value, int fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value != null) {
+            try {
+                return Integer.parseInt(String.valueOf(value));
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private interface KnowledgeCall {
+        Map<String, Object> execute(UserContext userContext, Map<String, Object> request);
+    }
+
+    private interface KnowledgeVoidCall {
+        void execute(UserContext userContext, Map<String, Object> request);
     }
 
     private String extractToken(String authorization) {

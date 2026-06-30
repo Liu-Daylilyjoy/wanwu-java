@@ -33,7 +33,8 @@ public class IamServiceImpl implements IamService {
             "app",
             "app.agent",
             "api_key",
-            "api_key.api_key_management"
+            "api_key.api_key_management",
+            "resource.knowledge"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -320,7 +321,8 @@ public class IamServiceImpl implements IamService {
                 )),
                 route("API Key", "api_key", Collections.singletonList(
                         route("API Key Management", "api_key.api_key_management", Collections.<Map<String, Object>>emptyList())
-                ))
+                )),
+                route("Knowledge", "resource.knowledge", Collections.<Map<String, Object>>emptyList())
         );
     }
 
@@ -362,6 +364,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("api_key.api_key_management".equals(perm)) {
             return "API Key Management";
+        }
+        if ("resource.knowledge".equals(perm)) {
+            return "Knowledge";
         }
         return perm;
     }

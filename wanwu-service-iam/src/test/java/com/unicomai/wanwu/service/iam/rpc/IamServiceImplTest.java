@@ -47,10 +47,11 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("permission.role"));
         assertTrue(permissions.contains("model"));
         assertTrue(permissions.contains("model.model_management"));
+        assertTrue(permissions.contains("resource.knowledge"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(10, permissions.size());
+        assertEquals(11, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -76,7 +77,8 @@ public class IamServiceImplTest {
         assertEquals(java.util.Arrays.asList(
                 "permission", "permission.user", "permission.org", "permission.role",
                 "model", "model.model_management",
-                "app", "app.agent", "api_key", "api_key.api_key_management"),
+                "app", "app.agent", "api_key", "api_key.api_key_management",
+                "resource.knowledge"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");

@@ -34,7 +34,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; model select endpoints covered; user/file/doc selects still missing |
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
 | `v1/guest.go` | 13 | Missing |
-| `v1/knowledge.go` | 79 | Missing |
+| `v1/knowledge.go` | 79 | Partially covered; knowledge CRUD/list, tags, splitters, docs empty state/config/import-tip/upload-limit, metadata shell, permissions, graph/report/export empty contracts, QA/external stubs covered for frontend navigation; real doc import/indexing/QA/report/RAG integration missing |
 | `v1/mcp_square.go` | 3 | Missing |
 | `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
@@ -56,14 +56,14 @@ Measured from this Java repo before the full reproduction pass:
 | `AppService` | 41 | Partially covered for publish/version/OpenURL/app keys/API keys; explore/statistics missing |
 | `AssistantService` | 67 | Partially covered through Java `AppService`; assistant-side tool/skill/workflow/multi-agent/WGA missing |
 | `IAMService` | 49 | Development login, frontend permission split, and IAM user/role/org read compatibility covered; persisted user/org/role/OAuth writes still missing |
-| `KnowledgeBaseDocService` | 26 | Missing |
-| `KnowledgeBaseKeywordsService` | 5 | Missing |
-| `KnowledgeBasePermissionService` | 6 | Missing |
-| `KnowledgeBaseQAService` | 10 | Missing |
-| `KnowledgeBaseReportService` | 6 | Missing |
-| `KnowledgeBaseService` | 28 | Missing |
-| `KnowledgeBaseSplitterService` | 4 | Missing |
-| `KnowledgeBaseTagService` | 6 | Missing |
+| `KnowledgeBaseDocService` | 26 | Frontend-compatible list/config/import-tip/upload-limit/segment shell covered; real file import, parsing, chunk indexing, export, and reimport missing |
+| `KnowledgeBaseKeywordsService` | 5 | Missing beyond empty metadata/list compatibility shells |
+| `KnowledgeBasePermissionService` | 6 | Partially covered with owner/admin/user/org frontend compatibility |
+| `KnowledgeBaseQAService` | 10 | Route stubs covered; real QA pair storage/import/export/search missing |
+| `KnowledgeBaseReportService` | 6 | Empty list/mutation contracts covered; report generation missing |
+| `KnowledgeBaseService` | 28 | Partially covered with in-memory CRUD/list/hit shell |
+| `KnowledgeBaseSplitterService` | 4 | Partially covered with preset and custom splitter CRUD |
+| `KnowledgeBaseTagService` | 6 | Partially covered with tag CRUD/bind/count |
 | `MCPService` | 65 | Placeholder-level |
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
+- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`, `resource.knowledge`.
 - `app` / token `dev-token-app`: `app` and `app.agent` only.
 
-Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. Knowledge is exposed because the frontend can now create/list/update/delete a knowledge base and enter the main empty-state detail views without 404s; document import/indexing, QA, report generation, external knowledge, and RAG integration remain later slices. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model/knowledge persistence model.
 
 ## Operating Rule
 

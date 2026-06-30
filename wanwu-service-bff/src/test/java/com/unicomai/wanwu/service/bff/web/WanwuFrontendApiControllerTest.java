@@ -47,6 +47,7 @@ import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
@@ -93,8 +94,9 @@ public class WanwuFrontendApiControllerTest {
     private final IamService iamService = mock(IamService.class);
     private final AppService appService = mock(AppService.class);
     private final ModelService modelService = mock(ModelService.class);
+    private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new WanwuFrontendApiController(iamService, appService, modelService))
+            .standaloneSetup(new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService))
             .build();
 
     @Test
@@ -363,6 +365,149 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listModelExperienceDialogRecords(any());
         verify(modelService).deleteModelExperienceDialog(any());
         verify(modelService, times(2)).saveModelExperienceDialogRecord(any());
+    }
+
+    @Test
+    public void knowledgeRoutesReturnFrontendContracts() throws Exception {
+        when(knowledgeService.selectKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(knowledgeList(knowledgeItem("knowledge-001", "Dev KB", 0)));
+        when(knowledgeService.createKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeId", "knowledge-001"));
+        when(knowledgeService.listTags(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeTagList", Collections.singletonList(tag("tag-001", "Backend", true))));
+        when(knowledgeService.countTagBindings(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("tagBindCount", 1));
+        when(knowledgeService.listSplitters(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeSplitterList", Collections.singletonList(splitter("splitter-001", "paragraph", "\n\n", "preset"))));
+        when(knowledgeService.listDocs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(docPage("knowledge-001", "Dev KB"));
+        when(knowledgeService.getDocConfig(anyString(), anyString(), any(Map.class)))
+                .thenReturn(docConfig());
+        when(knowledgeService.getDocImportTip(anyString(), anyString(), any(Map.class)))
+                .thenReturn(docImportTip("knowledge-001", "Dev KB"));
+        when(knowledgeService.getDocUploadLimit(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("uploadLimitList", Collections.singletonList(uploadLimit("document", 50, "txt", "pdf", "docx"))));
+        when(knowledgeService.listKnowledgeUsers(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeUserInfoList", Collections.singletonList(knowledgeUser("perm-001", "dev-admin", 20))));
+        when(knowledgeService.listKnowledgeOrgs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowOrgInfoList", Collections.singletonList(orgInfoBrief("default-org", "Default Organization"))));
+        when(knowledgeService.listUsersWithoutPermit(anyString(), anyString(), any(Map.class)))
+                .thenReturn(orgUsers("default-org", "Default Organization"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dev\",\"tagId\":[\"tag-001\"],\"category\":0,\"external\":-1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.knowledgeList[0].knowledgeId").value("knowledge-001"))
+                .andExpect(jsonPath("$.data.knowledgeList[0].permissionType").value(20))
+                .andExpect(jsonPath("$.data.knowledgeList[0].embeddingModelInfo.modelId").value("2"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dev KB\",\"description\":\"docs\",\"embeddingModelInfo\":{\"modelId\":\"2\"},\"knowledgeGraph\":{\"switch\":false},\"category\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeId").value("knowledge-001"));
+
+        mockMvc.perform(put("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"name\":\"Dev KB 2\",\"description\":\"updated\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/tag")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001")
+                        .param("tagName", "Back"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeTagList[0].tagId").value("tag-001"))
+                .andExpect(jsonPath("$.data.knowledgeTagList[0].selected").value(true));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/tag")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tagName\":\"Backend\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/tag/bind")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"tagIdList\":[\"tag-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/tag/bind/count")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("tagId", "tag-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tagBindCount").value(1));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/splitter")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeSplitterList[0].splitterId").value("splitter-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"pageNo\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list", hasSize(0)))
+                .andExpect(jsonPath("$.data.docKnowledgeInfo.knowledgeName").value("Dev KB"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.docSegment.segmentMethod").value("0"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/import/tip")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uploadstatus").value(2));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/upload/limit")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uploadLimitList[0].fileType").value("document"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/user")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeUserInfoList[0].userId").value("dev-admin"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/org")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowOrgInfoList[0].orgId").value("default-org"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/user/no/permit")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001")
+                        .param("orgId", "default-org"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userInfoList[0].userId").value("dev-app"));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).selectKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listDocs(anyString(), anyString(), any(Map.class));
     }
 
     @Test
@@ -1130,6 +1275,9 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
+        when(knowledgeService.selectKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeList", Collections.emptyList()));
+
         mockMvc.perform(get("/user/api/v1/prompt/template/list"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -1137,10 +1285,10 @@ public class WanwuFrontendApiControllerTest {
 
         mockMvc.perform(post("/user/api/v1/knowledge/select")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                .content("{}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.list", hasSize(0)));
+                .andExpect(jsonPath("$.data.knowledgeList", hasSize(0)));
     }
 
     @Test
@@ -1180,6 +1328,143 @@ public class WanwuFrontendApiControllerTest {
         Map<String, Object> select = new LinkedHashMap<>();
         select.put("select", Collections.singletonList(item));
         return select;
+    }
+
+    private Map<String, Object> singleton(String key, Object value) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put(key, value);
+        return result;
+    }
+
+    private Map<String, Object> knowledgeList(Map<String, Object> item) {
+        return singleton("knowledgeList", Collections.singletonList(item));
+    }
+
+    private Map<String, Object> knowledgeItem(String knowledgeId, String name, int category) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("knowledgeId", knowledgeId);
+        item.put("name", name);
+        item.put("orgName", "Default Organization");
+        item.put("description", "docs");
+        item.put("docCount", 0);
+        item.put("embeddingModelInfo", singleton("modelId", "2"));
+        item.put("knowledgeTagList", Collections.singletonList(tag("tag-001", "Backend", true)));
+        item.put("createUserId", "dev-admin");
+        item.put("createAt", "2026-06-30 00:00:00");
+        item.put("permissionType", 20);
+        item.put("share", false);
+        item.put("ragName", name);
+        item.put("graphSwitch", 0);
+        item.put("category", category);
+        item.put("llmModelId", "");
+        item.put("updatedAt", "2026-06-30 00:00:00");
+        item.put("external", 0);
+        item.put("avatar", singleton("path", ""));
+        return item;
+    }
+
+    private Map<String, Object> tag(String tagId, String tagName, boolean selected) {
+        Map<String, Object> tag = new LinkedHashMap<>();
+        tag.put("tagId", tagId);
+        tag.put("tagName", tagName);
+        tag.put("selected", selected);
+        return tag;
+    }
+
+    private Map<String, Object> splitter(String splitterId, String splitterName, String splitterValue, String type) {
+        Map<String, Object> splitter = new LinkedHashMap<>();
+        splitter.put("splitterId", splitterId);
+        splitter.put("splitterName", splitterName);
+        splitter.put("splitterValue", splitterValue);
+        splitter.put("type", type);
+        return splitter;
+    }
+
+    private Map<String, Object> docPage(String knowledgeId, String knowledgeName) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.emptyList());
+        page.put("total", 0);
+        page.put("pageNo", 1);
+        page.put("pageSize", 10);
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("knowledgeId", knowledgeId);
+        info.put("knowledgeName", knowledgeName);
+        info.put("graphSwitch", 0);
+        info.put("showGraphReport", false);
+        info.put("description", "docs");
+        info.put("keywords", Collections.emptyList());
+        info.put("embeddingModel", modelInfo("2", "Text Embedding Small", "embedding"));
+        info.put("llmModelId", "");
+        info.put("category", 0);
+        info.put("avatar", singleton("path", ""));
+        page.put("docKnowledgeInfo", info);
+        return page;
+    }
+
+    private Map<String, Object> docConfig() {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("docImportType", 0);
+        Map<String, Object> segment = new LinkedHashMap<>();
+        segment.put("segmentMethod", "0");
+        segment.put("segmentType", "0");
+        config.put("docSegment", segment);
+        config.put("docAnalyzer", Collections.singletonList("text"));
+        config.put("parserModelId", "");
+        config.put("asrModelId", "");
+        config.put("multimodalModelId", "");
+        config.put("docPreprocess", Collections.emptyList());
+        return config;
+    }
+
+    private Map<String, Object> docImportTip(String knowledgeId, String knowledgeName) {
+        Map<String, Object> tip = new LinkedHashMap<>();
+        tip.put("msg", "");
+        tip.put("uploadstatus", 2);
+        tip.put("knowledgeId", knowledgeId);
+        tip.put("knowledgeName", knowledgeName);
+        return tip;
+    }
+
+    private Map<String, Object> uploadLimit(String type, int maxSize, String... ext) {
+        Map<String, Object> limit = new LinkedHashMap<>();
+        limit.put("fileType", type);
+        limit.put("maxSize", maxSize);
+        limit.put("extList", java.util.Arrays.asList(ext));
+        return limit;
+    }
+
+    private Map<String, Object> knowledgeUser(String permissionId, String userId, int permissionType) {
+        Map<String, Object> user = new LinkedHashMap<>();
+        user.put("permissionId", permissionId);
+        user.put("userId", userId);
+        user.put("userName", "admin");
+        user.put("orgId", "default-org");
+        user.put("orgName", "Default Organization");
+        user.put("permissionType", permissionType);
+        user.put("transfer", true);
+        return user;
+    }
+
+    private Map<String, Object> orgInfoBrief(String orgId, String orgName) {
+        Map<String, Object> org = new LinkedHashMap<>();
+        org.put("orgId", orgId);
+        org.put("orgName", orgName);
+        return org;
+    }
+
+    private Map<String, Object> orgUsers(String orgId, String orgName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orgId", orgId);
+        result.put("orgName", orgName);
+        result.put("userInfoList", Collections.singletonList(idNameUser("dev-app", "app")));
+        return result;
+    }
+
+    private Map<String, Object> idNameUser(String userId, String userName) {
+        Map<String, Object> user = new LinkedHashMap<>();
+        user.put("userId", userId);
+        user.put("userName", userName);
+        return user;
     }
 
     private Map<String, Object> idName(String id, String name) {

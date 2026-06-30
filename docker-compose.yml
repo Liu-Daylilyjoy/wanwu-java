@@ -17,8 +17,35 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      knowledge:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  knowledge:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_MODULE: wanwu-service-knowledge
+    image: wanwu-java/knowledge:0.1.0-SNAPSHOT
+    container_name: wanwu-java-knowledge
+    environment:
+      DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      JAVA_OPTS: ${WANWU_KNOWLEDGE_JAVA_OPTS:-}
+    ports:
+      - "8083:8083"
+      - "20883:20883"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/actuator/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12
