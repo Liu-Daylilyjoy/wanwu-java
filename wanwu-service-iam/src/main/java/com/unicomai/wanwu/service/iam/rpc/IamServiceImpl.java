@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.iam.rpc;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
@@ -11,8 +13,12 @@ import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.core.util.Strings;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.iam.persistence.entity.IamRecordEntity;
+import com.unicomai.wanwu.service.iam.persistence.mapper.IamRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import javax.annotation.PostConstruct;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -23,6 +29,16 @@ import java.util.concurrent.atomic.AtomicLong;
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class IamServiceImpl implements IamService {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
+    };
+    private static final String TYPE_USER = "user";
+    private static final String TYPE_ROLE = "role";
+    private static final String TYPE_ORG = "org";
+    private static final String TYPE_OAUTH = "oauth";
+    private static final String TYPE_CUSTOM_TAB = "custom_tab";
+    private static final String TYPE_CUSTOM_LOGIN = "custom_login";
+    private static final String TYPE_CUSTOM_HOME = "custom_home";
     private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.rag", "app.workflow", "app.agent");
     private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
             "permission",
@@ -79,6 +95,8 @@ public class IamServiceImpl implements IamService {
     private final AtomicLong roleSequence = new AtomicLong(0);
     private final AtomicLong orgSequence = new AtomicLong(0);
     private final AtomicLong oauthSequence = new AtomicLong(0);
+    @Autowired(required = false)
+    private IamRecordMapper iamRecordMapper;
 
     public IamServiceImpl() {
         organizations.put(DEFAULT_ORG.getId(), defaultOrganization());
@@ -86,6 +104,26 @@ public class IamServiceImpl implements IamService {
         roles.put("app", builtInRole("app"));
         users.put(ADMIN_ACCOUNT.uid, userInfo(ADMIN_ACCOUNT));
         users.put(APP_ACCOUNT.uid, userInfo(APP_ACCOUNT));
+    }
+
+    IamServiceImpl(IamRecordMapper iamRecordMapper) {
+        this();
+        this.iamRecordMapper = iamRecordMapper;
+        loadPersistedRecords();
+    }
+
+    @PostConstruct
+    public synchronized void loadPersistedRecords() {
+        if (iamRecordMapper == null) {
+            return;
+        }
+        loadRecords(TYPE_ORG, organizations, orgSequence, "org-");
+        loadRecords(TYPE_ROLE, roles, roleSequence, "role-");
+        loadRecords(TYPE_USER, users, userSequence, "user-", "batch-user-");
+        loadRecords(TYPE_OAUTH, oauthApps, oauthSequence, "oauth-client-");
+        customTab = loadSingle(TYPE_CUSTOM_TAB, "default", customTab);
+        customLogin = loadSingle(TYPE_CUSTOM_LOGIN, "default", customLogin);
+        customHome = loadSingle(TYPE_CUSTOM_HOME, "default", customHome);
     }
 
     @Override
@@ -149,6 +187,7 @@ public class IamServiceImpl implements IamService {
         }
         Map<String, Object> user = userRecord(userId, request, operatorUserId, operatorOrgId);
         users.put(userId, user);
+        saveRecord(TYPE_USER, userId, user);
         return copy(user);
     }
 
@@ -161,6 +200,7 @@ public class IamServiceImpl implements IamService {
         request.put("nickname", "Imported User " + seq);
         Map<String, Object> user = userRecord(String.valueOf(request.get("userId")), request, operatorUserId, operatorOrgId);
         users.put(String.valueOf(user.get("userId")), user);
+        saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("total", 1);
@@ -188,6 +228,7 @@ public class IamServiceImpl implements IamService {
         putIfText(current, request, "company");
         current.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
         current.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_USER, userId, current);
     }
 
     @Override
@@ -195,6 +236,7 @@ public class IamServiceImpl implements IamService {
         String userId = idFrom(request, "userId", "uid");
         if (!ADMIN_ACCOUNT.uid.equals(userId) && !APP_ACCOUNT.uid.equals(userId)) {
             users.remove(userId);
+            deleteRecord(TYPE_USER, userId);
         }
     }
 
@@ -204,6 +246,7 @@ public class IamServiceImpl implements IamService {
         if (user != null) {
             user.put("status", booleanValue(request, "status", true));
             user.put("updatedAt", CREATED_AT);
+            saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
         }
     }
 
@@ -258,6 +301,7 @@ public class IamServiceImpl implements IamService {
         }
         Map<String, Object> role = roleRecord(roleId, request, operatorUserId);
         roles.put(roleId, role);
+        saveRecord(TYPE_ROLE, roleId, role);
         return copy(role);
     }
 
@@ -272,6 +316,7 @@ public class IamServiceImpl implements IamService {
         putIfText(role, request, "remark");
         role.put("permissions", permissionItems(extractPermissions(request)));
         role.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_ROLE, roleId, role);
     }
 
     @Override
@@ -279,6 +324,7 @@ public class IamServiceImpl implements IamService {
         String roleId = idFrom(request, "roleId", "id");
         if (!"admin".equals(roleId) && !"app".equals(roleId)) {
             roles.remove(roleId);
+            deleteRecord(TYPE_ROLE, roleId);
         }
     }
 
@@ -288,6 +334,7 @@ public class IamServiceImpl implements IamService {
         if (role != null) {
             role.put("status", booleanValue(request, "status", true));
             role.put("updatedAt", CREATED_AT);
+            saveRecord(TYPE_ROLE, String.valueOf(role.get("roleId")), role);
         }
     }
 
@@ -317,6 +364,7 @@ public class IamServiceImpl implements IamService {
         if (user != null) {
             user.put("orgs", userOrgRoles(targetOrgId, extractRoleIds(request)));
             user.put("updatedAt", CREATED_AT);
+            saveRecord(TYPE_USER, userId, user);
         }
     }
 
@@ -328,6 +376,7 @@ public class IamServiceImpl implements IamService {
         }
         Map<String, Object> org = organizationRecord(orgId, parentOrgId, request, operatorUserId);
         organizations.put(orgId, org);
+        saveRecord(TYPE_ORG, orgId, org);
         return copy(org);
     }
 
@@ -341,6 +390,7 @@ public class IamServiceImpl implements IamService {
         putIfText(org, request, "name");
         putIfText(org, request, "remark");
         org.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_ORG, orgId, org);
     }
 
     @Override
@@ -348,6 +398,7 @@ public class IamServiceImpl implements IamService {
         String orgId = idFrom(request, "orgId", "id");
         if (!DEFAULT_ORG.getId().equals(orgId)) {
             organizations.remove(orgId);
+            deleteRecord(TYPE_ORG, orgId);
         }
     }
 
@@ -357,6 +408,7 @@ public class IamServiceImpl implements IamService {
         if (org != null) {
             org.put("status", booleanValue(request, "status", true));
             org.put("updatedAt", CREATED_AT);
+            saveRecord(TYPE_ORG, String.valueOf(org.get("orgId")), org);
         }
     }
 
@@ -398,6 +450,7 @@ public class IamServiceImpl implements IamService {
         app.put("updatedAt", CREATED_AT);
         app.put("userId", Strings.hasText(userId) ? userId : ADMIN_ACCOUNT.uid);
         oauthApps.put(clientId, app);
+        saveRecord(TYPE_OAUTH, clientId, app);
         return oauthAppView(app);
     }
 
@@ -411,11 +464,14 @@ public class IamServiceImpl implements IamService {
         app.put("desc", defaultText(request, "desc", ""));
         app.put("redirectUri", defaultText(request, "redirectUri", String.valueOf(app.get("redirectUri"))));
         app.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_OAUTH, String.valueOf(app.get("clientId")), app);
     }
 
     @Override
     public synchronized void deleteOauthApp(Map<String, Object> request) {
-        oauthApps.remove(defaultText(request, "clientId", ""));
+        String clientId = defaultText(request, "clientId", "");
+        oauthApps.remove(clientId);
+        deleteRecord(TYPE_OAUTH, clientId);
     }
 
     @Override
@@ -424,6 +480,7 @@ public class IamServiceImpl implements IamService {
         if (app != null) {
             app.put("status", booleanValue(request, "status", false));
             app.put("updatedAt", CREATED_AT);
+            saveRecord(TYPE_OAUTH, String.valueOf(app.get("clientId")), app);
         }
     }
 
@@ -449,6 +506,7 @@ public class IamServiceImpl implements IamService {
         tab.put("logo", avatarValue(request, "tabLogo"));
         tab.put("title", defaultText(request, "tabTitle", "Wanwu Java"));
         customTab = tab;
+        saveRecord(TYPE_CUSTOM_TAB, "default", tab);
     }
 
     @Override
@@ -459,6 +517,7 @@ public class IamServiceImpl implements IamService {
         login.put("welcomeText", defaultText(request, "loginWelcomeText", ""));
         login.put("loginButtonColor", defaultText(request, "loginButtonColor", "#5983FF"));
         customLogin = login;
+        saveRecord(TYPE_CUSTOM_LOGIN, "default", login);
     }
 
     @Override
@@ -468,6 +527,7 @@ public class IamServiceImpl implements IamService {
         home.put("title", defaultText(request, "homeName", "Wanwu Java"));
         home.put("backgroundColor", defaultText(request, "homeBgColor", "#F7F8FA"));
         customHome = home;
+        saveRecord(TYPE_CUSTOM_HOME, "default", home);
     }
 
     @Override
@@ -521,6 +581,78 @@ public class IamServiceImpl implements IamService {
 
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.IAM, "IAM Service", "iam");
+    }
+
+    private void loadRecords(String recordType,
+                             Map<String, Map<String, Object>> target,
+                             AtomicLong sequence,
+                             String... sequencePrefixes) {
+        for (IamRecordEntity record : iamRecordMapper.selectByType(recordType)) {
+            Map<String, Object> payload = readPayload(record);
+            target.put(record.getRecordId(), payload);
+            if (sequencePrefixes != null) {
+                for (String prefix : sequencePrefixes) {
+                    bumpSequence(sequence, record.getRecordId(), prefix);
+                }
+            }
+        }
+    }
+
+    private Map<String, Object> loadSingle(String recordType, String recordId, Map<String, Object> fallback) {
+        for (IamRecordEntity record : iamRecordMapper.selectByType(recordType)) {
+            if (recordId.equals(record.getRecordId())) {
+                return readPayload(record);
+            }
+        }
+        return fallback;
+    }
+
+    private Map<String, Object> readPayload(IamRecordEntity record) {
+        try {
+            return JSON.readValue(record.getPayload(), MAP_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read IAM record " + record.getRecordType()
+                    + "/" + record.getRecordId(), ex);
+        }
+    }
+
+    private void saveRecord(String recordType, String recordId, Map<String, Object> payload) {
+        if (iamRecordMapper == null || !Strings.hasText(recordId)) {
+            return;
+        }
+        try {
+            long now = System.currentTimeMillis();
+            IamRecordEntity entity = new IamRecordEntity();
+            entity.setRecordType(recordType);
+            entity.setRecordId(recordId);
+            entity.setPayload(JSON.writeValueAsString(payload));
+            entity.setCreatedAt(now);
+            entity.setUpdatedAt(now);
+            iamRecordMapper.upsertRecord(entity);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to save IAM record " + recordType + "/" + recordId, ex);
+        }
+    }
+
+    private void deleteRecord(String recordType, String recordId) {
+        if (iamRecordMapper == null || !Strings.hasText(recordId)) {
+            return;
+        }
+        iamRecordMapper.deleteRecord(recordType, recordId);
+    }
+
+    private void bumpSequence(AtomicLong sequence, String recordId, String prefix) {
+        if (!Strings.hasText(recordId) || !recordId.startsWith(prefix)) {
+            return;
+        }
+        try {
+            long value = Long.parseLong(recordId.substring(prefix.length()));
+            if (value > sequence.get()) {
+                sequence.set(value);
+            }
+        } catch (NumberFormatException ignored) {
+            // Development IDs may be human supplied; only numeric suffixes advance sequences.
+        }
     }
 
     private Map<String, Object> orgPermission(DevAccount account) {

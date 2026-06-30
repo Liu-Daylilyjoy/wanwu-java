@@ -17,6 +17,8 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      iam:
+        condition: service_healthy
       knowledge:
         condition: service_healthy
       mcp:
@@ -64,12 +66,17 @@ services:
     container_name: wanwu-java-iam
     environment:
       DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      SPRING_DATASOURCE_URL: ${WANWU_IAM_DATASOURCE_URL:-jdbc:mysql://mysql:3306/iam_service?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=Asia/Shanghai}
+      SPRING_DATASOURCE_USERNAME: ${WANWU_IAM_DATASOURCE_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${WANWU_IAM_DATASOURCE_PASSWORD:-}
       JAVA_OPTS: ${WANWU_IAM_JAVA_OPTS:-}
     ports:
       - "8081:8081"
       - "20881:20881"
     depends_on:
       nacos:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health >/dev/null"]

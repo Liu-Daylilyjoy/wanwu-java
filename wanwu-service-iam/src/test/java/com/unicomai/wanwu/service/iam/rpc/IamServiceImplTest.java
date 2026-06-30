@@ -5,8 +5,13 @@ import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
+import com.unicomai.wanwu.service.iam.persistence.entity.IamRecordEntity;
+import com.unicomai.wanwu.service.iam.persistence.mapper.IamRecordMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -14,10 +19,21 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class IamServiceImplTest {
 
-    private final IamServiceImpl service = new IamServiceImpl();
+    private IamServiceImpl service;
+
+    @BeforeEach
+    public void setUp() {
+        service = new IamServiceImpl();
+    }
 
     @Test
     public void captchaReturnsStaticDevelopmentImage() {
@@ -273,6 +289,46 @@ public class IamServiceImplTest {
         assertEquals(0L, service.listOauthApps("dev-admin", "", 1, 10).get("total"));
     }
 
+    @Test
+    public void iamWritesArePersistedAsJsonRecordsWhenMapperIsAvailable() {
+        IamRecordMapper mapper = mock(IamRecordMapper.class);
+        when(mapper.selectByType(anyString())).thenReturn(Collections.<IamRecordEntity>emptyList());
+        IamServiceImpl persistent = new IamServiceImpl(mapper);
+
+        Map<String, Object> role = persistent.createRole("dev-admin", "default-org",
+                map("name", "Persistent Role", "permissions", java.util.Collections.singletonList("app")));
+        String roleId = (String) role.get("roleId");
+        persistent.updateRoleStatus("dev-admin", "default-org", map("roleId", roleId, "status", false));
+        persistent.deleteRole("dev-admin", "default-org", map("roleId", roleId));
+
+        ArgumentCaptor<IamRecordEntity> recordCaptor = ArgumentCaptor.forClass(IamRecordEntity.class);
+        verify(mapper, org.mockito.Mockito.atLeastOnce()).upsertRecord(recordCaptor.capture());
+        IamRecordEntity savedRole = recordCaptor.getAllValues().get(0);
+        assertEquals("role", savedRole.getRecordType());
+        assertEquals(roleId, savedRole.getRecordId());
+        assertTrue(savedRole.getPayload().contains("Persistent Role"));
+        verify(mapper).deleteRecord("role", roleId);
+    }
+
+    @Test
+    public void persistedRecordsAreLoadedAndSequencesContinueAfterRestart() {
+        IamRecordMapper mapper = mock(IamRecordMapper.class);
+        when(mapper.selectByType(eq("org"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("user"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("oauth"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("custom_tab"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("custom_login"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("custom_home"))).thenReturn(Collections.<IamRecordEntity>emptyList());
+        when(mapper.selectByType(eq("role"))).thenReturn(Collections.singletonList(record("role", "role-9",
+                "{\"roleId\":\"role-9\",\"id\":\"role-9\",\"name\":\"Loaded Role\",\"status\":true,\"isAdmin\":false,\"permissions\":[]}")));
+
+        IamServiceImpl persistent = new IamServiceImpl(mapper);
+
+        assertEquals("Loaded Role", persistent.roleInfo("dev-admin", "default-org", "role-9").get("name"));
+        Map<String, Object> nextRole = persistent.createRole("dev-admin", "default-org", map("name", "Next Role"));
+        assertEquals("role-10", nextRole.get("roleId"));
+    }
+
     private List<String> permissions(Map<String, Object> orgPermission) {
         return ((List<Map<String, Object>>) orgPermission.get("permissions")).stream()
                 .map(item -> (String) item.get("perm"))
@@ -285,5 +341,15 @@ public class IamServiceImplTest {
             result.put(String.valueOf(pairs[i]), pairs[i + 1]);
         }
         return result;
+    }
+
+    private IamRecordEntity record(String type, String id, String payload) {
+        IamRecordEntity record = new IamRecordEntity();
+        record.setRecordType(type);
+        record.setRecordId(id);
+        record.setPayload(payload);
+        record.setCreatedAt(1L);
+        record.setUpdatedAt(1L);
+        return record;
     }
 }

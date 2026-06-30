@@ -62,9 +62,9 @@ Covered routes:
 
 ## Current Contract
 
-This slice provides a Docker development in-memory IAM repository:
+This slice provides a Docker development IAM repository. After the MySQL persistence slice, mutable records are also stored in the `iam_service.iam_records` compatibility table:
 
-- Created users, roles, and organizations are visible through later list/detail calls.
+- Created users, roles, and organizations are visible through later list/detail calls and survive Docker service restarts.
 - Status changes affect later list/detail payloads.
 - Deletion removes non-built-in development records.
 - The built-in `admin` and `app` accounts remain protected seed records.
@@ -73,7 +73,7 @@ This slice provides a Docker development in-memory IAM repository:
 
 ## Remaining Gaps
 
-- MySQL-backed IAM persistence is still missing.
+- Normalized Go-equivalent IAM relational tables are still missing; the current durable boundary is a JSON compatibility table.
 - Real password hashing, reset rules, and login policy are not reproduced.
 - Real Excel parsing and per-row import errors are not reproduced.
 - Hierarchical organization constraints and cross-org permission checks are minimal.
