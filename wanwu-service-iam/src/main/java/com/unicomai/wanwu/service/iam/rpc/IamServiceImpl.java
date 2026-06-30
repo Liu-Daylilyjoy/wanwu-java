@@ -23,47 +23,15 @@ import java.util.Map;
 public class IamServiceImpl implements IamService {
 
     private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.agent");
-    private static final List<String> ALL_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
-            "permission",
-            "permission.user",
-            "permission.org",
-            "permission.role",
-            "setting",
-            "wga",
-            "wga.wanwu_bot",
-            "wga.openclaw",
-            "ontology",
-            "ontology.knowledge_network",
-            "ontology.data_source",
-            "model",
-            "model.model_management",
-            "resource",
-            "resource.knowledge",
-            "resource.mcp",
-            "resource.tool",
-            "resource.prompt",
-            "resource.skill",
-            "resource.safety",
+    private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
             "app",
-            "app.rag",
-            "app.workflow",
             "app.agent",
-            "exploration",
-            "exploration.app",
-            "exploration.mcp",
-            "exploration.template",
-            "exploration.skill",
-            "operation",
-            "operation.statistic_client",
-            "operation.oauth",
-            "app_observability",
-            "app_observability.statistic",
             "api_key",
             "api_key.api_key_management"
     ));
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
             "admin", "dev-admin", "admin", "dev-token",
-            Collections.singletonList("admin"), true, true, ALL_FRONTEND_PERMISSIONS);
+            Collections.singletonList("admin"), true, true, IMPLEMENTED_FRONTEND_PERMISSIONS);
     private static final DevAccount APP_ACCOUNT = new DevAccount(
             "app", "dev-app", "user", "dev-token-app",
             Collections.singletonList("app"), false, false, APP_PERMISSIONS);

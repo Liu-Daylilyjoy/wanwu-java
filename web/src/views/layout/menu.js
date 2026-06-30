@@ -1,6 +1,5 @@
 import { PERMS } from '@/router/permission';
 import { i18n } from '@/lang';
-import { basePath } from '@/utils/config';
 
 /**
  *  index: 为唯一标识，children 下定义的 index 标准为： 父级 index-子级定义的唯一标识
@@ -23,30 +22,6 @@ export const menuList = [
         index: 'generalAgent-aiAssistant',
         path: '/aiAssistant',
         perm: PERMS.WGA_OPENCLAW,
-      },
-    ],
-  },
-  {
-    name: i18n.t('menu.ontologyAgent'),
-    index: 'ontologyAgent',
-    icon: 'ontologyAgent',
-    perm: [PERMS.ONTOLOGY],
-    children: [
-      {
-        name: i18n.t('menu.ontology'),
-        index: 'ontologyAgent-ontology',
-        perm: PERMS.ONTOLOGY_KNOWLEDGE_NETWORK,
-        redirect: () => {
-          location.href = location.origin + basePath + '/vega/ontology';
-        },
-      },
-      {
-        name: i18n.t('menu.dataConnect'),
-        index: 'ontologyAgent-data-connect',
-        perm: PERMS.ONTOLOGY_DATA_SOURCE,
-        redirect: () => {
-          location.href = location.origin + basePath + '/vega/data-connect';
-        },
       },
     ],
   },

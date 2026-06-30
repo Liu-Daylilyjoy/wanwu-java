@@ -28,7 +28,7 @@ public class IamServiceImplTest {
     }
 
     @Test
-    public void loginReturnsAdminSessionWithAllFrontendPermissions() {
+    public void loginReturnsAdminSessionWithImplementedFrontendPermissions() {
         LoginResult result = service.login(new LoginCommand("admin", "encrypted", "dev-captcha", "1234"));
 
         assertEquals("dev-admin", result.getUid());
@@ -37,12 +37,14 @@ public class IamServiceImplTest {
         assertTrue(result.getIsUpdatePassword());
         assertEquals("default-org", ((Map) result.getOrgPermission().get("org")).get("id"));
         List<String> permissions = permissions(result.getOrgPermission());
-        assertTrue(permissions.contains("permission"));
-        assertTrue(permissions.contains("model.model_management"));
-        assertTrue(permissions.contains("resource.knowledge"));
+        assertTrue(permissions.contains("app"));
         assertTrue(permissions.contains("app.agent"));
+        assertTrue(permissions.contains("api_key"));
         assertTrue(permissions.contains("api_key.api_key_management"));
-        assertEquals(36, permissions.size());
+        assertFalse(permissions.contains("ontology"));
+        assertFalse(permissions.contains("ontology.knowledge_network"));
+        assertFalse(permissions.contains("ontology.data_source"));
+        assertEquals(4, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -65,7 +67,9 @@ public class IamServiceImplTest {
         assertEquals("", ((Map) result.getAvatar()).get("path"));
         assertTrue(result.getIsUpdatePassword());
         assertEquals("default-org", ((Map) result.getOrgPermission().get("org")).get("id"));
-        assertTrue(permissions(result.getOrgPermission()).contains("permission.role"));
+        assertEquals(java.util.Arrays.asList(
+                "app", "app.agent", "api_key", "api_key.api_key_management"),
+                permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
         assertEquals(java.util.Arrays.asList("app", "app.agent"), permissions(appResult.getOrgPermission()));

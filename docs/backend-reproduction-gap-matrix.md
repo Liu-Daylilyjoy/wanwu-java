@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: all frontend permissions from `web/src/router/constants.js`.
+- `admin` / token `dev-token`: implemented stable permissions only: `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
 - `app` / token `dev-token-app`: `app` and `app.agent` only.
 
-Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
 
 ## Operating Rule
 
