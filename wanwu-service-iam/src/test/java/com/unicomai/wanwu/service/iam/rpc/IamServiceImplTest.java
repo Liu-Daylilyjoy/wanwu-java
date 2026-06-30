@@ -47,6 +47,7 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("permission.user"));
         assertTrue(permissions.contains("permission.org"));
         assertTrue(permissions.contains("permission.role"));
+        assertTrue(permissions.contains("setting"));
         assertTrue(permissions.contains("model"));
         assertTrue(permissions.contains("model.model_management"));
         assertTrue(permissions.contains("resource"));
@@ -59,7 +60,7 @@ public class IamServiceImplTest {
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(19, permissions.size());
+        assertEquals(20, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -84,6 +85,7 @@ public class IamServiceImplTest {
         assertEquals("default-org", ((Map) result.getOrgPermission().get("org")).get("id"));
         assertEquals(java.util.Arrays.asList(
                 "permission", "permission.user", "permission.org", "permission.role",
+                "setting",
                 "model", "model.model_management",
                 "app", "app.rag", "app.workflow", "app.agent", "api_key", "api_key.api_key_management",
                 "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt",
@@ -138,15 +140,46 @@ public class IamServiceImplTest {
         assertEquals("resource.tool", ((Map) ((List) resourceRoute.get("children")).get(1)).get("perm"));
         assertEquals("resource.skill", ((Map) ((List) resourceRoute.get("children")).get(4)).get("perm"));
         assertEquals("resource.safety", ((Map) ((List) resourceRoute.get("children")).get(5)).get("perm"));
+        Map settingRoute = (Map) ((List) template.get("routes")).get(5);
+        assertEquals("setting", settingRoute.get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));
         assertEquals("default-org", ((Map) ((List) orgs.get("list")).get(0)).get("orgId"));
     }
 
+    @Test
+    public void platformCustomConfigCanBeUpdatedAndReadBack() {
+        service.updateCustomTab(map("tabTitle", "Smoke Tab", "tabLogo", map("path", "/tab.png", "key", "tab.png")));
+        service.updateCustomLogin(map("loginBg", map("path", "/bg.png", "key", "bg.png"),
+                "loginLogo", map("path", "/logo.png", "key", "logo.png"),
+                "loginWelcomeText", "Welcome",
+                "loginButtonColor", "#111111"));
+        service.updateCustomHome(map("homeName", "Smoke Home",
+                "homeLogo", map("path", "/home.png", "key", "home.png"),
+                "homeBgColor", "#ffffff"));
+
+        Map<String, Object> config = service.platformConfig();
+        assertEquals("Smoke Tab", ((Map) config.get("tab")).get("title"));
+        assertEquals("/tab.png", ((Map) ((Map) config.get("tab")).get("logo")).get("path"));
+        assertEquals("Welcome", ((Map) config.get("login")).get("welcomeText"));
+        assertEquals("#111111", ((Map) config.get("login")).get("loginButtonColor"));
+        assertEquals("/logo.png", ((Map) ((Map) config.get("login")).get("logo")).get("path"));
+        assertEquals("Smoke Home", ((Map) config.get("home")).get("title"));
+        assertEquals("#ffffff", ((Map) config.get("home")).get("backgroundColor"));
+    }
+
     private List<String> permissions(Map<String, Object> orgPermission) {
         return ((List<Map<String, Object>>) orgPermission.get("permissions")).stream()
                 .map(item -> (String) item.get("perm"))
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> map(Object... pairs) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put(String.valueOf(pairs[i]), pairs[i + 1]);
+        }
+        return result;
     }
 }

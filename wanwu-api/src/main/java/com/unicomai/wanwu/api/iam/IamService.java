@@ -35,5 +35,11 @@ public interface IamService {
 
     Map<String, Object> organizationInfo(String orgId);
 
+    void updateCustomTab(Map<String, Object> request);
+
+    void updateCustomLogin(Map<String, Object> request);
+
+    void updateCustomHome(Map<String, Object> request);
+
     Map<String, Object> platformConfig();
 }

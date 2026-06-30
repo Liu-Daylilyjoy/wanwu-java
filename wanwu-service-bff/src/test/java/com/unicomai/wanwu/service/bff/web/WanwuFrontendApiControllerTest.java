@@ -127,7 +127,8 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService),
                     new WanwuResourceApiController(mcpService),
                     new WanwuSkillApiController(mcpService),
-                    new WanwuSafetyApiController(safetyService))
+                    new WanwuSafetyApiController(safetyService),
+                    new WanwuSettingApiController(iamService))
             .build();
 
     @Test
@@ -161,21 +162,22 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("permission.user"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[2].perm").value("permission.org"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("permission.role"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("model"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("model.model_management"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("app"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app.rag"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("app.workflow"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("app.agent"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("api_key"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[11].perm").value("api_key.api_key_management"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[12].perm").value("resource"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[13].perm").value("resource.knowledge"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[14].perm").value("resource.tool"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[15].perm").value("resource.mcp"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[16].perm").value("resource.prompt"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[17].perm").value("resource.skill"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[18].perm").value("resource.safety"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("setting"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("model"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("model.model_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("app.rag"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("app.workflow"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[11].perm").value("api_key"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[12].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[13].perm").value("resource"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[14].perm").value("resource.knowledge"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[15].perm").value("resource.tool"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[16].perm").value("resource.mcp"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[17].perm").value("resource.prompt"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[18].perm").value("resource.skill"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[19].perm").value("resource.safety"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -194,6 +196,29 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.list", hasSize(0)));
 
         verify(appService).listAssistants(any(ApplicationListQuery.class));
+    }
+
+    @Test
+    public void settingRoutesUpdatePlatformConfig() throws Exception {
+        mockMvc.perform(post("/user/api/v1/custom/tab")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tabTitle\":\"Smoke Tab\",\"tabLogo\":{\"path\":\"/tab.png\",\"key\":\"tab.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/custom/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginBg\":{\"path\":\"/bg.png\",\"key\":\"bg.png\"},\"loginLogo\":{\"path\":\"/logo.png\",\"key\":\"logo.png\"},\"loginWelcomeText\":\"Welcome\",\"loginButtonColor\":\"#111111\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/custom/home")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"homeName\":\"Smoke Home\",\"homeLogo\":{\"path\":\"/home.png\",\"key\":\"home.png\"},\"homeBgColor\":\"#ffffff\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(iamService).updateCustomTab(any(Map.class));
+        verify(iamService).updateCustomLogin(any(Map.class));
+        verify(iamService).updateCustomHome(any(Map.class));
     }
 
     @Test
@@ -2629,6 +2654,7 @@ public class WanwuFrontendApiControllerTest {
                 permission("permission.user"),
                 permission("permission.org"),
                 permission("permission.role"),
+                permission("setting"),
                 permission("model"),
                 permission("model.model_management"),
                 permission("app"),

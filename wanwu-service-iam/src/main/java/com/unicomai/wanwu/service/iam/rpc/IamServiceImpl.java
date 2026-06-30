@@ -28,6 +28,7 @@ public class IamServiceImpl implements IamService {
             "permission.user",
             "permission.org",
             "permission.role",
+            "setting",
             "model",
             "model.model_management",
             "app",
@@ -55,6 +56,10 @@ public class IamServiceImpl implements IamService {
     private static final Map<String, DevAccount> ACCOUNTS_BY_TOKEN = accountsByToken();
     private static final OrganizationOption DEFAULT_ORG = new OrganizationOption("default-org", "Default Organization");
     private static final String CAPTCHA_B64 = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MCIgaGVpZ2h0PSIzMiI+PHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjMyIiBmaWxsPSIjZjVmN2ZhIi8+PHRleHQgeD0iMTIiIHk9IjIyIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNTk4M0ZGIj4xMjM0PC90ZXh0Pjwvc3ZnPg==";
+
+    private volatile Map<String, Object> customTab = Collections.emptyMap();
+    private volatile Map<String, Object> customLogin = Collections.emptyMap();
+    private volatile Map<String, Object> customHome = Collections.emptyMap();
 
     @Override
     public ServiceDescriptor describe() {
@@ -184,16 +189,45 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
+    public void updateCustomTab(Map<String, Object> request) {
+        Map<String, Object> tab = new LinkedHashMap<>();
+        tab.put("logo", avatarValue(request, "tabLogo"));
+        tab.put("title", defaultText(request, "tabTitle", "Wanwu Java"));
+        customTab = tab;
+    }
+
+    @Override
+    public void updateCustomLogin(Map<String, Object> request) {
+        Map<String, Object> login = new LinkedHashMap<>();
+        login.put("background", avatarValue(request, "loginBg"));
+        login.put("logo", avatarValue(request, "loginLogo"));
+        login.put("welcomeText", defaultText(request, "loginWelcomeText", ""));
+        login.put("loginButtonColor", defaultText(request, "loginButtonColor", "#5983FF"));
+        customLogin = login;
+    }
+
+    @Override
+    public void updateCustomHome(Map<String, Object> request) {
+        Map<String, Object> home = new LinkedHashMap<>();
+        home.put("logo", avatarValue(request, "homeLogo"));
+        home.put("title", defaultText(request, "homeName", "Wanwu Java"));
+        home.put("backgroundColor", defaultText(request, "homeBgColor", "#F7F8FA"));
+        customHome = home;
+    }
+
+    @Override
     public Map<String, Object> platformConfig() {
         Map<String, Object> config = new LinkedHashMap<>();
         Map<String, Object> login = new LinkedHashMap<>();
         login.put("logo", Collections.emptyMap());
         login.put("background", Collections.emptyMap());
         login.put("loginButtonColor", "#5983FF");
+        login.put("welcomeText", "");
         login.put("platformDesc", "Wanwu Java development environment");
 
         Map<String, Object> home = new LinkedHashMap<>();
         home.put("logo", Collections.emptyMap());
+        home.put("title", "Wanwu Java");
         home.put("backgroundColor", "#F7F8FA");
 
         Map<String, Object> tab = new LinkedHashMap<>();
@@ -214,6 +248,10 @@ public class IamServiceImpl implements IamService {
         defaultIcon.put("promptIcon", "");
         defaultIcon.put("skillIcon", "");
         defaultIcon.put("safetyIcon", "");
+
+        login.putAll(customLogin);
+        home.putAll(customHome);
+        tab.putAll(customTab);
 
         config.put("login", login);
         config.put("home", home);
@@ -346,7 +384,8 @@ public class IamServiceImpl implements IamService {
                         route("Prompt", "resource.prompt", Collections.<Map<String, Object>>emptyList()),
                         route("Skill", "resource.skill", Collections.<Map<String, Object>>emptyList()),
                         route("Safety", "resource.safety", Collections.<Map<String, Object>>emptyList())
-                ))
+                )),
+                route("Setting", "setting", Collections.<Map<String, Object>>emptyList())
         );
     }
 
@@ -370,6 +409,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("permission.role".equals(perm)) {
             return "Roles";
+        }
+        if ("setting".equals(perm)) {
+            return "Setting";
         }
         if ("app".equals(perm)) {
             return "Application";
@@ -438,6 +480,25 @@ public class IamServiceImpl implements IamService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(key, value);
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> avatarValue(Map<String, Object> request, String key) {
+        if (request == null || !(request.get(key) instanceof Map)) {
+            return Collections.emptyMap();
+        }
+        return new LinkedHashMap<>((Map<String, Object>) request.get(key));
+    }
+
+    private String defaultText(Map<String, Object> request, String key, String fallback) {
+        if (request == null) {
+            return fallback;
+        }
+        Object value = request.get(key);
+        if (value == null || String.valueOf(value).trim().isEmpty()) {
+            return fallback;
+        }
+        return String.valueOf(value);
     }
 
     private static DevAccount accountByUsername(String username) {
