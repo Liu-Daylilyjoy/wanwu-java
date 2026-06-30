@@ -22,7 +22,7 @@ import java.util.Map;
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class IamServiceImpl implements IamService {
 
-    private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.agent");
+    private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.rag", "app.agent");
     private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
             "permission",
             "permission.user",
@@ -31,6 +31,7 @@ public class IamServiceImpl implements IamService {
             "model",
             "model.model_management",
             "app",
+            "app.rag",
             "app.agent",
             "api_key",
             "api_key.api_key_management",
@@ -143,7 +144,7 @@ public class IamServiceImpl implements IamService {
         Map<String, Object> role = new LinkedHashMap<>();
         role.put("roleId", admin ? "admin" : "app");
         role.put("name", admin ? "System Admin" : "App User");
-        role.put("remark", admin ? "Built-in development administrator" : "Agent-only development role");
+        role.put("remark", admin ? "Built-in development administrator" : "Application-only development role");
         role.put("createdAt", CREATED_AT);
         role.put("creator", idName("system", "System"));
         role.put("status", true);
@@ -316,7 +317,8 @@ public class IamServiceImpl implements IamService {
                 route("Model Service", "model", Collections.singletonList(
                         route("Model Management", "model.model_management", Collections.<Map<String, Object>>emptyList())
                 )),
-                route("Application", "app", Collections.singletonList(
+                route("Application", "app", Arrays.asList(
+                        route("RAG", "app.rag", Collections.<Map<String, Object>>emptyList()),
                         route("Agent", "app.agent", Collections.<Map<String, Object>>emptyList())
                 )),
                 route("API Key", "api_key", Collections.singletonList(
@@ -352,6 +354,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("app.agent".equals(perm)) {
             return "Agent";
+        }
+        if ("app.rag".equals(perm)) {
+            return "RAG";
         }
         if ("model".equals(perm)) {
             return "Model Service";

@@ -141,9 +141,10 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("model"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("model.model_management"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("app"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app.agent"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("api_key"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app.rag"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("api_key"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("api_key.api_key_management"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -2039,6 +2040,7 @@ public class WanwuFrontendApiControllerTest {
                 permission("model"),
                 permission("model.model_management"),
                 permission("app"),
+                permission("app.rag"),
                 permission("app.agent"),
                 permission("api_key"),
                 permission("api_key.api_key_management")
