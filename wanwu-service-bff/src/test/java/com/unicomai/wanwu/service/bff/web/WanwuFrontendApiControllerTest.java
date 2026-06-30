@@ -29,6 +29,17 @@ import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
 import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -117,6 +128,30 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.list", hasSize(0)));
 
         verify(appService).listAssistants(any(ApplicationListQuery.class));
+    }
+
+    @Test
+    public void appspaceAppListReturnsGenericApplicationCards() throws Exception {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("appId", "assistant-001");
+        item.put("appType", "agent");
+        item.put("name", "AgentOne");
+        item.put("publishType", "public");
+        item.put("version", "v1.0.0");
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(item)));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "agent")
+                        .param("name", "Agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.list[0].version").value("v1.0.0"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        verify(appService).listApplications(any(ApplicationListQuery.class));
     }
 
     @Test
@@ -788,6 +823,101 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void apiKeyManagementRoutesMapFrontendPayloads() throws Exception {
+        when(appService.createApiKey(any(ApiKeyCreateCommand.class)))
+                .thenReturn(apiKeyInfo("1", "wanwu_api_001", "Main key", true));
+        when(appService.listApiKeys(any(ApiKeyListQuery.class)))
+                .thenReturn(new ApiKeyPageResult(
+                        Collections.singletonList(apiKeyInfo("1", "wanwu_api_001", "Main key", true)),
+                        1,
+                        1,
+                        20));
+
+        mockMvc.perform(post("/user/api/v1/api/key")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Main key\",\"desc\":\"first\",\"expiredAt\":\"2030-01-01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.keyId").value("1"))
+                .andExpect(jsonPath("$.data.key").value("wanwu_api_001"));
+
+        mockMvc.perform(get("/user/api/v1/api/key/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("pageNo", "1")
+                        .param("pageSize", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].keyId").value("1"))
+                .andExpect(jsonPath("$.data.list[0].status").value(true))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(put("/user/api/v1/api/key")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"keyId\":\"1\",\"name\":\"Updated\",\"desc\":\"updated\",\"expiredAt\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(put("/user/api/v1/api/key/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"keyId\":\"1\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/api/key")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"keyId\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(appService).createApiKey(any(ApiKeyCreateCommand.class));
+        verify(appService).listApiKeys(any(ApiKeyListQuery.class));
+        verify(appService).updateApiKey(any(ApiKeyUpdateCommand.class));
+        verify(appService).updateApiKeyStatus(any(ApiKeyStatusCommand.class));
+        verify(appService).deleteApiKey(any(ApiKeyDeleteCommand.class));
+    }
+
+    @Test
+    public void appKeyRoutesMapFrontendPayloads() throws Exception {
+        when(appService.createAppKey(any(AppKeyCreateCommand.class)))
+                .thenReturn(appKeyInfo("3", "app_key_001", "assistant-001"));
+        when(appService.listAppKeys(any(AppKeyListQuery.class)))
+                .thenReturn(Collections.singletonList(appKeyInfo("3", "app_key_001", "assistant-001")));
+
+        mockMvc.perform(post("/user/api/v1/appspace/app/key")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.apiId").value("3"))
+                .andExpect(jsonPath("$.data.apiKey").value("app_key_001"));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/key/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data[0].apiId").value("3"))
+                .andExpect(jsonPath("$.data[0].apiKey").value("app_key_001"));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/app/key")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiId\":\"3\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(appService).createAppKey(any(AppKeyCreateCommand.class));
+        verify(appService).listAppKeys(any(AppKeyListQuery.class));
+        verify(appService).deleteAppKey(any(AppKeyDeleteCommand.class));
+    }
+
+    @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
         mockMvc.perform(get("/user/api/v1/model/select/llm"))
                 .andExpect(status().isOk())
@@ -887,6 +1017,33 @@ public class WanwuFrontendApiControllerTest {
         info.setUserId("dev-admin");
         info.setOrgId("default-org");
         info.setDescription("open desc");
+        return info;
+    }
+
+    private ApiKeyInfo apiKeyInfo(String keyId, String key, String name, boolean status) {
+        ApiKeyInfo info = new ApiKeyInfo();
+        info.setKeyId(keyId);
+        info.setKey(key);
+        info.setName(name);
+        info.setDesc("first");
+        info.setExpiredAt("2030-01-01");
+        info.setCreatedAt("2026-06-29 10:00:00");
+        info.setCreator("admin");
+        info.setStatus(status);
+        info.setUserId("dev-admin");
+        info.setOrgId("default-org");
+        return info;
+    }
+
+    private AppKeyInfo appKeyInfo(String apiId, String apiKey, String appId) {
+        AppKeyInfo info = new AppKeyInfo();
+        info.setApiId(apiId);
+        info.setApiKey(apiKey);
+        info.setAppId(appId);
+        info.setAppType("agent");
+        info.setCreatedAt("2026-06-29 10:00:00");
+        info.setUserId("dev-admin");
+        info.setOrgId("default-org");
         return info;
     }
 }

@@ -9,6 +9,7 @@ dubbo:
   application:
     name: ${spring.application.name}
     qos-enable: false
+    register-mode: ${DUBBO_REGISTER_MODE:instance}
   protocol:
     name: dubbo
     port: 20889

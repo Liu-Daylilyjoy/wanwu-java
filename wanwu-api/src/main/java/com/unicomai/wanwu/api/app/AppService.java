@@ -17,6 +17,17 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -64,6 +75,8 @@ public interface AppService {
 
     ApplicationListResult listAssistants(ApplicationListQuery query);
 
+    ApplicationListResult listApplications(ApplicationListQuery query);
+
     Map<String, Object> getAssistantDraft(AssistantDetailQuery query);
 
     Map<String, Object> getPublishedAssistant(AssistantPublishedQuery query);
@@ -83,6 +96,24 @@ public interface AppService {
     AssistantConversationPageResult listDraftAssistantConversationDetails(AssistantConversationListQuery query);
 
     AssistantConversationStreamResult streamAssistantConversation(AssistantConversationStreamCommand command);
+
+    ApiKeyInfo createApiKey(ApiKeyCreateCommand command);
+
+    void updateApiKey(ApiKeyUpdateCommand command);
+
+    void deleteApiKey(ApiKeyDeleteCommand command);
+
+    void updateApiKeyStatus(ApiKeyStatusCommand command);
+
+    ApiKeyPageResult listApiKeys(ApiKeyListQuery query);
+
+    ApiKeyInfo getApiKeyByKey(String key);
+
+    AppKeyInfo createAppKey(AppKeyCreateCommand command);
+
+    void deleteAppKey(AppKeyDeleteCommand command);
+
+    List<AppKeyInfo> listAppKeys(AppKeyListQuery query);
 
     void createAppUrl(AppUrlCreateCommand command);
 

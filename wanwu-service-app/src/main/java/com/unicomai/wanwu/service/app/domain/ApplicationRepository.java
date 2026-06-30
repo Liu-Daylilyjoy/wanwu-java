@@ -38,6 +38,34 @@ public interface ApplicationRepository {
 
     boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config);
 
+    ApiKeyRecord saveApiKey(ApiKeyRecord record);
+
+    ApiKeyRecord updateApiKey(ApiKeyRecord record);
+
+    ApiKeyRecord findApiKeyById(Long id);
+
+    ApiKeyRecord findApiKeyByKey(String key);
+
+    ApiKeyRecord findApiKeyByName(String userId, String orgId, String name);
+
+    List<ApiKeyRecord> listApiKeys(String userId, String orgId, int offset, int limit);
+
+    long countApiKeys(String userId, String orgId);
+
+    boolean updateApiKeyStatus(Long id, boolean status, long updatedAt);
+
+    boolean deleteApiKey(Long id);
+
+    AppKeyRecord saveAppKey(AppKeyRecord record);
+
+    List<AppKeyRecord> listAppKeys(String userId, String orgId, String appId, String appType);
+
+    AppKeyRecord findAppKeyById(Long id);
+
+    AppKeyRecord findAppKeyByKey(String apiKey);
+
+    boolean deleteAppKey(Long id);
+
     AppUrlRecord saveAppUrl(AppUrlRecord record);
 
     AppUrlRecord updateAppUrl(AppUrlRecord record);

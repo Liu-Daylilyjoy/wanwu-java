@@ -28,10 +28,10 @@ Measured from this Java repo before the full reproduction pass:
 | `callback/router.go` | 31 | Missing |
 | `openapi/router.go` | 11 | Missing |
 | `openurl/router.go` | 11 | Mostly covered for Agent OpenURL; file upload routes missing |
-| `v1/api_key.go` | 5 | Missing |
+| `v1/api_key.go` | 5 | Covered for create/update/delete/list/status |
 | `v1/assistant.go` | 32 | Partially covered; tool/workflow/mcp/skill/multi-agent/template/select missing |
 | `v1/callback.go` | 5 | Missing |
-| `v1/common.go` | 48 | Partially covered; user/file/doc/model/app-key/app-list/selects missing |
+| `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; user/file/doc/model/selects missing |
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
 | `v1/guest.go` | 13 | Missing |
 | `v1/knowledge.go` | 79 | Missing |
@@ -53,7 +53,7 @@ Measured from this Java repo before the full reproduction pass:
 
 | Proto service | RPC count | Java status |
 | --- | ---: | --- |
-| `AppService` | 41 | Partially covered for publish/version/OpenURL; app keys/API keys/explore/statistics missing |
+| `AppService` | 41 | Partially covered for publish/version/OpenURL/app keys/API keys; explore/statistics missing |
 | `AssistantService` | 67 | Partially covered through Java `AppService`; assistant-side tool/skill/workflow/multi-agent/WGA missing |
 | `IAMService` | 49 | Placeholder-level |
 | `KnowledgeBaseDocService` | 26 | Missing |

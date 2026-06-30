@@ -4,17 +4,23 @@ import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
+import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
@@ -33,6 +39,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantDraftMapper assistantDraftMapper;
     private final AssistantDraftConfigMapper assistantDraftConfigMapper;
     private final AssistantSnapshotMapper assistantSnapshotMapper;
+    private final ApiKeyMapper apiKeyMapper;
+    private final AppKeyMapper appKeyMapper;
     private final AppUrlMapper appUrlMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
@@ -41,6 +49,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantDraftMapper assistantDraftMapper,
                                         AssistantDraftConfigMapper assistantDraftConfigMapper,
                                         AssistantSnapshotMapper assistantSnapshotMapper,
+                                        ApiKeyMapper apiKeyMapper,
+                                        AppKeyMapper appKeyMapper,
                                         AppUrlMapper appUrlMapper,
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper) {
@@ -48,6 +58,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
         this.assistantSnapshotMapper = assistantSnapshotMapper;
+        this.apiKeyMapper = apiKeyMapper;
+        this.appKeyMapper = appKeyMapper;
         this.appUrlMapper = appUrlMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
@@ -204,6 +216,83 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         }
         assistantDraftConfigMapper.upsert(toEntity(config));
         return true;
+    }
+
+    @Override
+    public ApiKeyRecord saveApiKey(ApiKeyRecord record) {
+        ApiKeyEntity entity = toEntity(record);
+        apiKeyMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public ApiKeyRecord updateApiKey(ApiKeyRecord record) {
+        int updated = apiKeyMapper.updateConfig(toEntity(record));
+        return updated > 0 ? record : null;
+    }
+
+    @Override
+    public ApiKeyRecord findApiKeyById(Long id) {
+        return toRecord(apiKeyMapper.selectByIdValue(id));
+    }
+
+    @Override
+    public ApiKeyRecord findApiKeyByKey(String key) {
+        return toRecord(apiKeyMapper.selectByKey(key));
+    }
+
+    @Override
+    public ApiKeyRecord findApiKeyByName(String userId, String orgId, String name) {
+        return toRecord(apiKeyMapper.selectByScopedName(userId, orgId, name));
+    }
+
+    @Override
+    public List<ApiKeyRecord> listApiKeys(String userId, String orgId, int offset, int limit) {
+        return toApiKeyRecords(apiKeyMapper.selectPage(userId, orgId, offset, limit));
+    }
+
+    @Override
+    public long countApiKeys(String userId, String orgId) {
+        return apiKeyMapper.countByUser(userId, orgId);
+    }
+
+    @Override
+    public boolean updateApiKeyStatus(Long id, boolean status, long updatedAt) {
+        return apiKeyMapper.updateStatus(id, status, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean deleteApiKey(Long id) {
+        return apiKeyMapper.deleteByIdValue(id) > 0;
+    }
+
+    @Override
+    public AppKeyRecord saveAppKey(AppKeyRecord record) {
+        AppKeyEntity entity = toEntity(record);
+        appKeyMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<AppKeyRecord> listAppKeys(String userId, String orgId, String appId, String appType) {
+        return toAppKeyRecords(appKeyMapper.selectByApp(userId, orgId, appId, appType));
+    }
+
+    @Override
+    public AppKeyRecord findAppKeyById(Long id) {
+        return toRecord(appKeyMapper.selectByIdValue(id));
+    }
+
+    @Override
+    public AppKeyRecord findAppKeyByKey(String apiKey) {
+        return toRecord(appKeyMapper.selectByApiKey(apiKey));
+    }
+
+    @Override
+    public boolean deleteAppKey(Long id) {
+        return appKeyMapper.deleteByIdValue(id) > 0;
     }
 
     @Override
@@ -426,6 +515,84 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setAssistantInfoJson(entity.getAssistantInfoJson());
         record.setAssistantConfigJson(entity.getAssistantConfigJson());
+        return record;
+    }
+
+    private ApiKeyEntity toEntity(ApiKeyRecord record) {
+        ApiKeyEntity entity = new ApiKeyEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setKey(record.getKey());
+        entity.setDescription(record.getDescription());
+        entity.setName(record.getName());
+        entity.setStatus(record.getStatus());
+        entity.setExpiredAt(record.getExpiredAt());
+        return entity;
+    }
+
+    private List<ApiKeyRecord> toApiKeyRecords(List<ApiKeyEntity> entities) {
+        List<ApiKeyRecord> records = new java.util.ArrayList<>();
+        for (ApiKeyEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private ApiKeyRecord toRecord(ApiKeyEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        ApiKeyRecord record = new ApiKeyRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setKey(entity.getKey());
+        record.setDescription(entity.getDescription());
+        record.setName(entity.getName());
+        record.setStatus(entity.getStatus());
+        record.setExpiredAt(entity.getExpiredAt());
+        return record;
+    }
+
+    private AppKeyEntity toEntity(AppKeyRecord record) {
+        AppKeyEntity entity = new AppKeyEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setAppId(record.getAppId());
+        entity.setAppType(record.getAppType());
+        entity.setApiKey(record.getApiKey());
+        return entity;
+    }
+
+    private List<AppKeyRecord> toAppKeyRecords(List<AppKeyEntity> entities) {
+        List<AppKeyRecord> records = new java.util.ArrayList<>();
+        for (AppKeyEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppKeyRecord toRecord(AppKeyEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AppKeyRecord record = new AppKeyRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setAppId(entity.getAppId());
+        record.setAppType(entity.getAppType());
+        record.setApiKey(entity.getApiKey());
         return record;
     }
 

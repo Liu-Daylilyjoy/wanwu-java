@@ -18,6 +18,17 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -121,6 +132,143 @@ public class WanwuFrontendApiController {
         String effectiveAppType = isBlank(appType) ? AGENT_APP_TYPE : appType;
         return FrontendResponse.ok(appService.listAssistants(
                 new ApplicationListQuery(effectiveAppType, name, userContext.getUserId(), userContext.getOrgId())));
+    }
+
+    @GetMapping("/appspace/app/list")
+    public FrontendResponse<ApplicationListResult> appspaceAppList(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "appType", required = false) String appType,
+            @RequestParam(value = "name", required = false) String name) {
+        try {
+            UserContext userContext = userContext(authorization);
+            String effectiveAppType = isBlank(appType) ? AGENT_APP_TYPE : appType;
+            return FrontendResponse.ok(appService.listApplications(
+                    new ApplicationListQuery(effectiveAppType, name, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/api/key")
+    public FrontendResponse<ApiKeyInfo> createApiKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ApiKeyCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ApiKeyCreateCommand command = request == null ? new ApiKeyCreateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.createApiKey(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/api/key")
+    public FrontendResponse<Map<String, Object>> updateApiKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ApiKeyUpdateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ApiKeyUpdateCommand command = request == null ? new ApiKeyUpdateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateApiKey(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/api/key")
+    public FrontendResponse<Map<String, Object>> deleteApiKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ApiKeyIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ApiKeyDeleteCommand command = request == null ? new ApiKeyDeleteCommand() : request.toDeleteCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.deleteApiKey(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/key/list")
+    public FrontendResponse<ApiKeyPageResult> listApiKeys(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "20") int pageSize) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ApiKeyListQuery query = new ApiKeyListQuery(pageNo, pageSize, userContext.getUserId(), userContext.getOrgId());
+            return FrontendResponse.ok(appService.listApiKeys(query));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/api/key/status")
+    public FrontendResponse<Map<String, Object>> updateApiKeyStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ApiKeyStatusRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ApiKeyStatusCommand command = request == null ? new ApiKeyStatusCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateApiKeyStatus(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/app/key")
+    public FrontendResponse<AppKeyInfo> createAppKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppKeyCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppKeyCreateCommand command = request == null ? new AppKeyCreateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.createAppKey(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/app/key/list")
+    public FrontendResponse<List<AppKeyInfo>> listAppKeys(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("appId") String appId,
+            @RequestParam("appType") String appType) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppKeyListQuery query = new AppKeyListQuery(appId, appType, userContext.getUserId(), userContext.getOrgId());
+            return FrontendResponse.ok(appService.listAppKeys(query));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/appspace/app/key")
+    public FrontendResponse<Map<String, Object>> deleteAppKey(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppKeyIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppKeyDeleteCommand command = request == null ? new AppKeyDeleteCommand() : request.toDeleteCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.deleteAppKey(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/assistant")
@@ -833,6 +981,175 @@ public class WanwuFrontendApiController {
         command.setOrgId(userContext.getOrgId());
         appService.deleteAssistant(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    public static class ApiKeyCreateRequest {
+        private String name;
+        private String desc;
+        private String expiredAt;
+
+        public ApiKeyCreateCommand toCommand() {
+            ApiKeyCreateCommand command = new ApiKeyCreateCommand();
+            command.setName(name);
+            command.setDesc(desc);
+            command.setExpiredAt(expiredAt);
+            return command;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public String getExpiredAt() {
+            return expiredAt;
+        }
+
+        public void setExpiredAt(String expiredAt) {
+            this.expiredAt = expiredAt;
+        }
+    }
+
+    public static class ApiKeyUpdateRequest {
+        private String keyId;
+        private String name;
+        private String desc;
+        private String expiredAt;
+
+        public ApiKeyUpdateCommand toCommand() {
+            ApiKeyUpdateCommand command = new ApiKeyUpdateCommand();
+            command.setKeyId(keyId);
+            command.setName(name);
+            command.setDesc(desc);
+            command.setExpiredAt(expiredAt);
+            return command;
+        }
+
+        public String getKeyId() {
+            return keyId;
+        }
+
+        public void setKeyId(String keyId) {
+            this.keyId = keyId;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public String getExpiredAt() {
+            return expiredAt;
+        }
+
+        public void setExpiredAt(String expiredAt) {
+            this.expiredAt = expiredAt;
+        }
+    }
+
+    public static class ApiKeyIdRequest {
+        private String keyId;
+
+        public ApiKeyDeleteCommand toDeleteCommand() {
+            ApiKeyDeleteCommand command = new ApiKeyDeleteCommand();
+            command.setKeyId(keyId);
+            return command;
+        }
+
+        public String getKeyId() {
+            return keyId;
+        }
+
+        public void setKeyId(String keyId) {
+            this.keyId = keyId;
+        }
+    }
+
+    public static class ApiKeyStatusRequest extends ApiKeyIdRequest {
+        private Boolean status;
+
+        public ApiKeyStatusCommand toCommand() {
+            ApiKeyStatusCommand command = new ApiKeyStatusCommand();
+            command.setKeyId(getKeyId());
+            command.setStatus(status);
+            return command;
+        }
+
+        public Boolean getStatus() {
+            return status;
+        }
+
+        public void setStatus(Boolean status) {
+            this.status = status;
+        }
+    }
+
+    public static class AppKeyCreateRequest {
+        private String appId;
+        private String appType;
+
+        public AppKeyCreateCommand toCommand() {
+            AppKeyCreateCommand command = new AppKeyCreateCommand();
+            command.setAppId(appId);
+            command.setAppType(appType);
+            return command;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+    }
+
+    public static class AppKeyIdRequest {
+        private String apiId;
+
+        public AppKeyDeleteCommand toDeleteCommand() {
+            AppKeyDeleteCommand command = new AppKeyDeleteCommand();
+            command.setApiId(apiId);
+            return command;
+        }
+
+        public String getApiId() {
+            return apiId;
+        }
+
+        public void setApiId(String apiId) {
+            this.apiId = apiId;
+        }
     }
 
     public static class AssistantCreateRequest {

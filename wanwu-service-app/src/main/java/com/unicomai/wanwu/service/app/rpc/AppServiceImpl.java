@@ -21,6 +21,17 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -42,7 +53,9 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -50,6 +63,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -87,6 +101,8 @@ public class AppServiceImpl implements AppService {
             .withZone(ZoneId.of("Asia/Shanghai"));
     private static final DateTimeFormatter DATE_TIME_INPUT_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_ONLY_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd");
     private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ApplicationRepository applicationRepository;
@@ -412,6 +428,203 @@ public class AppServiceImpl implements AppService {
             items.add(toFrontendCard(record));
         }
         return new ApplicationListResult(items, items.size());
+    }
+
+    @Override
+    public ApplicationListResult listApplications(ApplicationListQuery query) {
+        String appType = query == null ? APP_TYPE_AGENT : normalizeAgentAppType(query.getAppType());
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            return new ApplicationListResult(Collections.<Map<String, Object>>emptyList(), 0);
+        }
+        return listAssistants(query);
+    }
+
+    @Override
+    public ApiKeyInfo createApiKey(ApiKeyCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("api key create command is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("api key name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String name = command.getName().trim();
+        if (applicationRepository.findApiKeyByName(userId, orgId, name) != null) {
+            throw new IllegalArgumentException("api key name already exists");
+        }
+
+        long now = clock.millis();
+        ApiKeyRecord record = new ApiKeyRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setKey(newApiKey());
+        record.setName(name);
+        record.setDescription(defaultIfBlank(command.getDesc(), ""));
+        record.setExpiredAt(parseDateOnly(command.getExpiredAt()));
+        record.setStatus(true);
+        return toApiKeyInfo(applicationRepository.saveApiKey(record));
+    }
+
+    @Override
+    public void updateApiKey(ApiKeyUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("api key update command is required");
+        }
+        if (isBlank(command.getKeyId())) {
+            throw new IllegalArgumentException("api key id is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("api key name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseLongId(command.getKeyId(), "api key id is invalid");
+        ApiKeyRecord existing = applicationRepository.findApiKeyById(id);
+        if (!ownedBy(existing, userId, orgId)) {
+            throw new IllegalArgumentException("api key not found");
+        }
+        String name = command.getName().trim();
+        ApiKeyRecord sameName = applicationRepository.findApiKeyByName(userId, orgId, name);
+        if (sameName != null && !id.equals(sameName.getId())) {
+            throw new IllegalArgumentException("api key name already exists");
+        }
+
+        ApiKeyRecord record = new ApiKeyRecord();
+        record.setId(id);
+        record.setCreatedAt(existing.getCreatedAt());
+        record.setUpdatedAt(clock.millis());
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setKey(existing.getKey());
+        record.setName(name);
+        record.setDescription(defaultIfBlank(command.getDesc(), ""));
+        record.setExpiredAt(parseDateOnly(command.getExpiredAt()));
+        record.setStatus(existing.getStatus());
+        if (applicationRepository.updateApiKey(record) == null) {
+            throw new IllegalArgumentException("api key not found");
+        }
+    }
+
+    @Override
+    public void deleteApiKey(ApiKeyDeleteCommand command) {
+        if (command == null || isBlank(command.getKeyId())) {
+            throw new IllegalArgumentException("api key id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseLongId(command.getKeyId(), "api key id is invalid");
+        if (!ownedBy(applicationRepository.findApiKeyById(id), userId, orgId)) {
+            throw new IllegalArgumentException("api key not found");
+        }
+        if (!applicationRepository.deleteApiKey(id)) {
+            throw new IllegalArgumentException("api key not found");
+        }
+    }
+
+    @Override
+    public void updateApiKeyStatus(ApiKeyStatusCommand command) {
+        if (command == null || isBlank(command.getKeyId())) {
+            throw new IllegalArgumentException("api key id is required");
+        }
+        if (command.getStatus() == null) {
+            throw new IllegalArgumentException("api key status is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseLongId(command.getKeyId(), "api key id is invalid");
+        if (!ownedBy(applicationRepository.findApiKeyById(id), userId, orgId)) {
+            throw new IllegalArgumentException("api key not found");
+        }
+        if (!applicationRepository.updateApiKeyStatus(id, command.getStatus(), clock.millis())) {
+            throw new IllegalArgumentException("api key not found");
+        }
+    }
+
+    @Override
+    public ApiKeyPageResult listApiKeys(ApiKeyListQuery query) {
+        String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        int pageNo = normalizePageNo(query == null ? 1 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 20 : query.getPageSize());
+        List<ApiKeyRecord> records = applicationRepository.listApiKeys(userId, orgId, offset(pageNo, pageSize), pageSize);
+        List<ApiKeyInfo> items = new ArrayList<>(records.size());
+        for (ApiKeyRecord record : records) {
+            items.add(toApiKeyInfo(record));
+        }
+        return new ApiKeyPageResult(items, applicationRepository.countApiKeys(userId, orgId), pageNo, pageSize);
+    }
+
+    @Override
+    public ApiKeyInfo getApiKeyByKey(String key) {
+        if (isBlank(key)) {
+            throw new IllegalArgumentException("api key is required");
+        }
+        ApiKeyRecord record = applicationRepository.findApiKeyByKey(key);
+        if (record == null) {
+            throw new IllegalArgumentException("api key not found");
+        }
+        return toApiKeyInfo(record);
+    }
+
+    @Override
+    public AppKeyInfo createAppKey(AppKeyCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app key create command is required");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String appType = normalizeAgentAppType(command.getAppType());
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        long now = clock.millis();
+        AppKeyRecord record = new AppKeyRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(command.getAppId());
+        record.setAppType(appType);
+        record.setApiKey(newApiKey());
+        return toAppKeyInfo(applicationRepository.saveAppKey(record));
+    }
+
+    @Override
+    public void deleteAppKey(AppKeyDeleteCommand command) {
+        if (command == null || isBlank(command.getApiId())) {
+            throw new IllegalArgumentException("app key id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseLongId(command.getApiId(), "app key id is invalid");
+        if (!ownedBy(applicationRepository.findAppKeyById(id), userId, orgId)) {
+            throw new IllegalArgumentException("app key not found");
+        }
+        if (!applicationRepository.deleteAppKey(id)) {
+            throw new IllegalArgumentException("app key not found");
+        }
+    }
+
+    @Override
+    public List<AppKeyInfo> listAppKeys(AppKeyListQuery query) {
+        if (query == null) {
+            throw new IllegalArgumentException("app key list query is required");
+        }
+        if (isBlank(query.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        String appType = normalizeAgentAppType(query.getAppType());
+        List<AppKeyRecord> records = applicationRepository.listAppKeys(userId, orgId, query.getAppId(), appType);
+        List<AppKeyInfo> result = new ArrayList<>(records.size());
+        for (AppKeyRecord record : records) {
+            result.add(toAppKeyInfo(record));
+        }
+        return result;
     }
 
     @Override
@@ -936,6 +1149,74 @@ public class AppServiceImpl implements AppService {
         return item;
     }
 
+    private ApiKeyInfo toApiKeyInfo(ApiKeyRecord record) {
+        ApiKeyInfo info = new ApiKeyInfo();
+        info.setKeyId(record.getId() == null ? "" : String.valueOf(record.getId()));
+        info.setKey(record.getKey());
+        info.setUserId(defaultIfBlank(record.getUserId(), ""));
+        info.setOrgId(defaultIfBlank(record.getOrgId(), ""));
+        info.setCreator(defaultIfBlank(record.getUserId(), ""));
+        info.setName(defaultIfBlank(record.getName(), ""));
+        info.setDesc(defaultIfBlank(record.getDescription(), ""));
+        info.setExpiredAt(formatDateOnly(record.getExpiredAt()));
+        info.setCreatedAt(formatMillis(record.getCreatedAt()));
+        info.setStatus(booleanValue(record.getStatus()));
+        return info;
+    }
+
+    private AppKeyInfo toAppKeyInfo(AppKeyRecord record) {
+        AppKeyInfo info = new AppKeyInfo();
+        info.setApiId(record.getId() == null ? "" : String.valueOf(record.getId()));
+        info.setApiKey(defaultIfBlank(record.getApiKey(), ""));
+        info.setUserId(defaultIfBlank(record.getUserId(), ""));
+        info.setOrgId(defaultIfBlank(record.getOrgId(), ""));
+        info.setAppId(defaultIfBlank(record.getAppId(), ""));
+        info.setAppType(defaultIfBlank(record.getAppType(), ""));
+        info.setCreatedAt(formatMillis(record.getCreatedAt()));
+        return info;
+    }
+
+    private long parseDateOnly(String value) {
+        if (isBlank(value)) {
+            return 0L;
+        }
+        try {
+            return LocalDate.parse(value.trim(), DATE_ONLY_FORMATTER)
+                    .atStartOfDay(APP_ZONE)
+                    .toInstant()
+                    .toEpochMilli();
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("api key expiredAt format is invalid", ex);
+        }
+    }
+
+    private String formatDateOnly(Long millis) {
+        if (millis == null || millis <= 0) {
+            return "";
+        }
+        return DATE_ONLY_FORMATTER.format(Instant.ofEpochMilli(millis).atZone(APP_ZONE));
+    }
+
+    private Long parseLongId(String value, String message) {
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(message, ex);
+        }
+    }
+
+    private boolean ownedBy(ApiKeyRecord record, String userId, String orgId) {
+        return record != null
+                && userId.equals(record.getUserId())
+                && orgId.equals(record.getOrgId());
+    }
+
+    private boolean ownedBy(AppKeyRecord record, String userId, String orgId) {
+        return record != null
+                && userId.equals(record.getUserId())
+                && orgId.equals(record.getOrgId());
+    }
+
     private AppUrlInfo toAppUrlInfo(AppUrlRecord record) {
         AppUrlInfo info = new AppUrlInfo();
         info.setUrlId(record.getId() == null ? "" : String.valueOf(record.getId()));
@@ -1347,6 +1628,17 @@ public class AppServiceImpl implements AppService {
 
     private String newDetailId() {
         return "detail-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newApiKey() {
+        for (int i = 0; i < 8; i++) {
+            String key = UUID.randomUUID().toString().replace("-", "");
+            if (applicationRepository.findApiKeyByKey(key) == null
+                    && applicationRepository.findAppKeyByKey(key) == null) {
+                return key;
+            }
+        }
+        throw new IllegalStateException("api key generation failed");
     }
 
     private String newAppUrlSuffix() {

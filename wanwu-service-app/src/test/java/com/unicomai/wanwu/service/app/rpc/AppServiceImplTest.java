@@ -29,13 +29,26 @@ import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
 import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.junit.jupiter.api.Test;
@@ -52,7 +65,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,6 +101,108 @@ public class AppServiceImplTest {
         assertEquals(1, item.get("category"));
         assertTrue(repository.containsApp(first.getAssistantId()));
         assertTrue(repository.containsApp(second.getAssistantId()));
+    }
+
+    @Test
+    public void listApplicationsReturnsAgentCardsForAppspaceList() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult first = service.createAssistant(command("AlphaAgent", "alpha"));
+        AssistantCreateResult second = service.createAssistant(command("BetaAgent", "beta"));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(second.getAssistantId());
+        publish.setAppType("agent");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        ApplicationListResult result = service.listApplications(
+                new ApplicationListQuery("agent", "Beta", "dev-admin", "default-org"));
+
+        assertEquals(1, result.getTotal());
+        assertEquals(second.getAssistantId(), result.getList().get(0).get("appId"));
+        assertEquals("BetaAgent", result.getList().get(0).get("name"));
+        assertEquals("public", result.getList().get(0).get("publishType"));
+        assertEquals("v1.0.0", result.getList().get(0).get("version"));
+        assertNotEquals(first.getAssistantId(), result.getList().get(0).get("appId"));
+    }
+
+    @Test
+    public void apiKeyLifecycleMatchesGoUserOpenApiKeyBehavior() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        ApiKeyInfo created = service.createApiKey(apiKeyCreate("Main key", "first", "2030-01-01"));
+
+        assertNotNull(created.getKeyId());
+        assertTrue(created.getKey().length() >= 24);
+        assertEquals("Main key", created.getName());
+        assertEquals("first", created.getDesc());
+        assertEquals("2030-01-01", created.getExpiredAt());
+        assertTrue(created.getStatus());
+
+        ApiKeyPageResult page = service.listApiKeys(new ApiKeyListQuery(1, 10, "dev-admin", "default-org"));
+        assertEquals(1, page.getTotal());
+        assertEquals(created.getKeyId(), page.getList().get(0).getKeyId());
+
+        ApiKeyUpdateCommand update = new ApiKeyUpdateCommand();
+        update.setKeyId(created.getKeyId());
+        update.setName("Main key updated");
+        update.setDesc("updated");
+        update.setExpiredAt("");
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        service.updateApiKey(update);
+
+        ApiKeyInfo updated = service.listApiKeys(new ApiKeyListQuery(1, 10, "dev-admin", "default-org"))
+                .getList().get(0);
+        assertEquals("Main key updated", updated.getName());
+        assertEquals("", updated.getExpiredAt());
+
+        ApiKeyStatusCommand status = new ApiKeyStatusCommand();
+        status.setKeyId(created.getKeyId());
+        status.setStatus(false);
+        service.updateApiKeyStatus(status);
+        assertFalse(service.getApiKeyByKey(created.getKey()).getStatus());
+
+        ApiKeyDeleteCommand delete = new ApiKeyDeleteCommand();
+        delete.setKeyId(created.getKeyId());
+        service.deleteApiKey(delete);
+        assertEquals(0, service.listApiKeys(new ApiKeyListQuery(1, 10, "dev-admin", "default-org")).getTotal());
+    }
+
+    @Test
+    public void appKeyLifecycleMatchesGoApplicationKeyBehavior() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("KeyAgent", "key desc"));
+
+        AppKeyCreateCommand command = new AppKeyCreateCommand();
+        command.setAppId(created.getAssistantId());
+        command.setAppType("agent");
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+
+        AppKeyInfo appKey = service.createAppKey(command);
+
+        assertNotNull(appKey.getApiId());
+        assertEquals(created.getAssistantId(), appKey.getAppId());
+        assertEquals("agent", appKey.getAppType());
+        assertTrue(appKey.getApiKey().length() >= 24);
+
+        List<AppKeyInfo> list = service.listAppKeys(
+                new AppKeyListQuery(created.getAssistantId(), "agent", "dev-admin", "default-org"));
+        assertEquals(1, list.size());
+        assertEquals(appKey.getApiKey(), list.get(0).getApiKey());
+
+        AppKeyDeleteCommand delete = new AppKeyDeleteCommand();
+        delete.setApiId(appKey.getApiId());
+        service.deleteAppKey(delete);
+        assertTrue(service.listAppKeys(
+                new AppKeyListQuery(created.getAssistantId(), "agent", "dev-admin", "default-org")).isEmpty());
     }
 
     @Test
@@ -695,6 +812,16 @@ public class AppServiceImplTest {
         return new AppVersionQuery(assistantId, "agent", "dev-admin", "default-org");
     }
 
+    private ApiKeyCreateCommand apiKeyCreate(String name, String desc, String expiredAt) {
+        ApiKeyCreateCommand command = new ApiKeyCreateCommand();
+        command.setName(name);
+        command.setDesc(desc);
+        command.setExpiredAt(expiredAt);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
     private AppUrlCreateCommand appUrlCreateCommand(String assistantId, String name, String expiredAt) {
         AppUrlCreateCommand command = new AppUrlCreateCommand();
         command.setAppId(assistantId);
@@ -806,6 +933,8 @@ public class AppServiceImplTest {
         private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
         private final List<AppUrlRecord> appUrls = new ArrayList<>();
+        private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
+        private final List<AppKeyRecord> appKeys = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
 
@@ -1048,6 +1177,150 @@ public class AppServiceImplTest {
             existing.setAvatarPath(record.getAvatarPath());
             existing.setCategory(record.getCategory());
             saveAssistantConfig(config);
+            return true;
+        }
+
+        @Override
+        public ApiKeyRecord saveApiKey(ApiKeyRecord record) {
+            record.setId(ids.incrementAndGet());
+            apiKeys.add(record);
+            return record;
+        }
+
+        @Override
+        public ApiKeyRecord updateApiKey(ApiKeyRecord record) {
+            ApiKeyRecord existing = findApiKeyById(record.getId());
+            if (existing == null) {
+                return null;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDescription(record.getDescription());
+            existing.setExpiredAt(record.getExpiredAt());
+            existing.setStatus(record.getStatus());
+            return existing;
+        }
+
+        @Override
+        public ApiKeyRecord findApiKeyById(Long id) {
+            for (ApiKeyRecord record : apiKeys) {
+                if (id.equals(record.getId())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public ApiKeyRecord findApiKeyByKey(String key) {
+            for (ApiKeyRecord record : apiKeys) {
+                if (key.equals(record.getKey())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public ApiKeyRecord findApiKeyByName(String userId, String orgId, String name) {
+            for (ApiKeyRecord record : apiKeys) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && name.equals(record.getName())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<ApiKeyRecord> listApiKeys(String userId, String orgId, int offset, int limit) {
+            List<ApiKeyRecord> matches = new ArrayList<>();
+            for (ApiKeyRecord record : apiKeys) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())) {
+                    matches.add(record);
+                }
+            }
+            matches.sort(Comparator.comparing(ApiKeyRecord::getId).reversed());
+            return slice(matches, offset, limit);
+        }
+
+        @Override
+        public long countApiKeys(String userId, String orgId) {
+            return listApiKeys(userId, orgId, 0, Integer.MAX_VALUE).size();
+        }
+
+        @Override
+        public boolean updateApiKeyStatus(Long id, boolean status, long updatedAt) {
+            ApiKeyRecord existing = findApiKeyById(id);
+            if (existing == null) {
+                return false;
+            }
+            existing.setStatus(status);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean deleteApiKey(Long id) {
+            ApiKeyRecord existing = findApiKeyById(id);
+            if (existing == null) {
+                return false;
+            }
+            apiKeys.remove(existing);
+            return true;
+        }
+
+        @Override
+        public AppKeyRecord saveAppKey(AppKeyRecord record) {
+            record.setId(ids.incrementAndGet());
+            appKeys.add(record);
+            return record;
+        }
+
+        @Override
+        public List<AppKeyRecord> listAppKeys(String userId, String orgId, String appId, String appType) {
+            List<AppKeyRecord> matches = new ArrayList<>();
+            for (AppKeyRecord record : appKeys) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && appId.equals(record.getAppId())
+                        && appType.equals(record.getAppType())) {
+                    matches.add(record);
+                }
+            }
+            matches.sort(Comparator.comparing(AppKeyRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public AppKeyRecord findAppKeyById(Long id) {
+            for (AppKeyRecord record : appKeys) {
+                if (id.equals(record.getId())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AppKeyRecord findAppKeyByKey(String apiKey) {
+            for (AppKeyRecord record : appKeys) {
+                if (apiKey.equals(record.getApiKey())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean deleteAppKey(Long id) {
+            AppKeyRecord existing = findAppKeyById(id);
+            if (existing == null) {
+                return false;
+            }
+            appKeys.remove(existing);
             return true;
         }
 
