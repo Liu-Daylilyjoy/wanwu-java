@@ -1,11 +1,18 @@
 package com.unicomai.wanwu.service.knowledge.rpc;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
+import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -32,6 +39,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int EXTERNAL_ALL = -1;
     private static final int EXTERNAL_INTERNAL = 0;
     private static final int DOC_STATUS_FINISHED = 1;
+    private static final String TYPE_SNAPSHOT = "snapshot";
+    private static final String SNAPSHOT_ID = "state";
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    static {
+        JSON.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
+    }
 
     private final Map<String, KnowledgeState> knowledgeBases = new LinkedHashMap<String, KnowledgeState>();
     private final Map<String, TagState> tags = new LinkedHashMap<String, TagState>();
@@ -53,8 +67,35 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
 
+    @Autowired(required = false)
+    private KnowledgeRecordMapper knowledgeRecordMapper;
+
     public KnowledgeServiceImpl() {
         seedSplitters();
+    }
+
+    KnowledgeServiceImpl(KnowledgeRecordMapper knowledgeRecordMapper) {
+        this.knowledgeRecordMapper = knowledgeRecordMapper;
+        seedSplitters();
+        loadPersistedSnapshot();
+    }
+
+    @PostConstruct
+    synchronized void loadPersistedSnapshot() {
+        if (knowledgeRecordMapper == null) {
+            return;
+        }
+        List<KnowledgeRecordEntity> records = knowledgeRecordMapper.selectByType(TYPE_SNAPSHOT);
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        KnowledgeRecordEntity record = records.get(records.size() - 1);
+        try {
+            KnowledgeSnapshot snapshot = JSON.readValue(record.getPayload(), KnowledgeSnapshot.class);
+            applySnapshot(snapshot);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to load persisted knowledge snapshot", ex);
+        }
     }
 
     @Override
@@ -124,6 +165,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
         permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
         addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
+        saveSnapshot();
         Map<String, Object> response = new LinkedHashMap<String, Object>();
         response.put("knowledgeId", knowledgeId);
         return response;
@@ -141,6 +183,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         knowledge.description = string(safe.get("description"));
         knowledge.avatar = avatar(safe.get("avatar"));
         knowledge.updatedAt = CREATED_AT;
+        saveSnapshot();
     }
 
     @Override
@@ -159,6 +202,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         qaPairsByKnowledgeId.remove(knowledgeId);
         metasByKnowledgeId.remove(knowledgeId);
         permissionsByKnowledgeId.remove(knowledgeId);
+        saveSnapshot();
     }
 
     @Override
@@ -200,6 +244,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         tag.userId = defaultIfBlank(userId, DEFAULT_USER_ID);
         tag.orgId = defaultIfBlank(orgId, DEFAULT_ORG_ID);
         tags.put(tagId, tag);
+        saveSnapshot();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("tagId", tagId);
         result.put("knowledgeId", tagId);
@@ -215,6 +260,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             throw new IllegalArgumentException("tagName cannot be empty");
         }
         tag.tagName = tagName;
+        saveSnapshot();
     }
 
     @Override
@@ -225,6 +271,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         for (List<String> ids : tagIdsByKnowledgeId.values()) {
             ids.remove(tagId);
         }
+        saveSnapshot();
     }
 
     @Override
@@ -251,6 +298,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 target.add(tagId);
             }
         }
+        saveSnapshot();
     }
 
     @Override
@@ -282,6 +330,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         splitter.splitterValue = defaultIfBlank(splitterValue, splitterName);
         splitter.type = "custom";
         splitters.put(splitterId, splitter);
+        saveSnapshot();
         return singleton("splitterId", splitterId);
     }
 
@@ -294,6 +343,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         splitter.splitterName = defaultIfBlank(string(safe.get("splitterName")), splitter.splitterName);
         splitter.splitterValue = defaultIfBlank(string(safe.get("splitterValue")), splitter.splitterValue);
+        saveSnapshot();
     }
 
     @Override
@@ -301,6 +351,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         SplitterState splitter = existingSplitter(string(safe(request).get("splitterId")));
         if (!"preset".equals(splitter.type)) {
             splitters.remove(splitter.splitterId);
+            saveSnapshot();
         }
     }
 
@@ -439,6 +490,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             docs(knowledgeId).add(doc);
             createDefaultSegment(doc);
         }
+        saveSnapshot();
     }
 
     @Override
@@ -460,6 +512,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 docs.remove(i);
             }
         }
+        saveSnapshot();
     }
 
     @Override
@@ -480,6 +533,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 removeMeta(metas, string(meta.get("metaId")));
             }
         }
+        saveSnapshot();
     }
 
     @Override
@@ -497,11 +551,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             for (SegmentState segment : segments(docId)) {
                 segment.available = available;
             }
+            saveSnapshot();
             return;
         }
         SegmentState segment = findSegment(docId, string(safe.get("contentId")));
         if (segment != null) {
             segment.available = available;
+            saveSnapshot();
         }
     }
 
@@ -511,6 +567,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         SegmentState segment = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
         if (segment != null) {
             segment.labels = stringList(safe.get("labels"));
+            saveSnapshot();
         }
     }
 
@@ -531,6 +588,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         segment.parent = false;
         segment.childNum = 0;
         segments(docId).add(segment);
+        saveSnapshot();
     }
 
     @Override
@@ -548,6 +606,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
         }
         renumberSegments(segments);
+        saveSnapshot();
     }
 
     @Override
@@ -556,6 +615,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         SegmentState segment = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
         if (segment != null) {
             segment.content = string(safe.get("content"));
+            saveSnapshot();
         }
     }
 
@@ -669,6 +729,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             permission.transfer = false;
             permissions(knowledgeId).add(permission);
         }
+        saveSnapshot();
     }
 
     @Override
@@ -677,6 +738,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         PermissionState permission = findPermission(string(knowledgeUser.get("permissionId")));
         if (permission != null) {
             permission.permissionType = intValue(knowledgeUser.get("permissionType"), permission.permissionType);
+            saveSnapshot();
         }
     }
 
@@ -690,6 +752,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 permissions.remove(i);
             }
         }
+        saveSnapshot();
     }
 
     @Override
@@ -710,6 +773,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         permission.permissionType = PERMISSION_ADMIN;
         permission.transfer = true;
         permissions(knowledgeId).add(permission);
+        saveSnapshot();
     }
 
     @Override
@@ -798,6 +862,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         pair.errorMsg = "";
         qaPairs(knowledgeId).add(pair);
         qaPairsById.put(qaPairId, pair);
+        saveSnapshot();
         return singleton("qaPairId", qaPairId);
     }
 
@@ -807,6 +872,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         QaPairState pair = existingQaPair(string(safe.get("qaPairId")));
         pair.question = string(safe.get("question")).trim();
         pair.answer = string(safe.get("answer")).trim();
+        saveSnapshot();
     }
 
     @Override
@@ -814,6 +880,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, Object> safe = safe(request);
         QaPairState pair = existingQaPair(string(safe.get("qaPairId")));
         pair.enabled = booleanValue(safe.get("switch"), pair.enabled);
+        saveSnapshot();
     }
 
     @Override
@@ -833,6 +900,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 qaPairsById.remove(pair.qaPairId);
             }
         }
+        saveSnapshot();
     }
 
     @Override
@@ -1524,6 +1592,176 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private void saveSnapshot() {
+        if (knowledgeRecordMapper == null) {
+            return;
+        }
+        KnowledgeRecordEntity entity = new KnowledgeRecordEntity();
+        entity.setRecordType(TYPE_SNAPSHOT);
+        entity.setRecordId(SNAPSHOT_ID);
+        long now = System.currentTimeMillis();
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
+        try {
+            entity.setPayload(JSON.writeValueAsString(snapshot()));
+            knowledgeRecordMapper.upsertRecord(entity);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to persist knowledge snapshot", ex);
+        }
+    }
+
+    private KnowledgeSnapshot snapshot() {
+        KnowledgeSnapshot snapshot = new KnowledgeSnapshot();
+        snapshot.knowledgeBases.putAll(knowledgeBases);
+        snapshot.tags.putAll(tags);
+        snapshot.splitters.putAll(splitters);
+        snapshot.tagIdsByKnowledgeId.putAll(tagIdsByKnowledgeId);
+        snapshot.docsByKnowledgeId.putAll(docsByKnowledgeId);
+        snapshot.segmentsByDocId.putAll(segmentsByDocId);
+        snapshot.qaPairsByKnowledgeId.putAll(qaPairsByKnowledgeId);
+        snapshot.qaPairsById.putAll(qaPairsById);
+        snapshot.metasByKnowledgeId.putAll(metasByKnowledgeId);
+        snapshot.permissionsByKnowledgeId.putAll(permissionsByKnowledgeId);
+        snapshot.nextKnowledgeId = nextKnowledgeId.get();
+        snapshot.nextTagId = nextTagId.get();
+        snapshot.nextSplitterId = nextSplitterId.get();
+        snapshot.nextDocId = nextDocId.get();
+        snapshot.nextSegmentId = nextSegmentId.get();
+        snapshot.nextQaPairId = nextQaPairId.get();
+        snapshot.nextMetaId = nextMetaId.get();
+        snapshot.nextPermissionId = nextPermissionId.get();
+        return snapshot;
+    }
+
+    private void applySnapshot(KnowledgeSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        knowledgeBases.clear();
+        knowledgeBases.putAll(safeMap(snapshot.knowledgeBases));
+        tags.clear();
+        tags.putAll(safeMap(snapshot.tags));
+        splitters.clear();
+        splitters.putAll(safeMap(snapshot.splitters));
+        if (splitters.isEmpty()) {
+            seedSplitters();
+        }
+        tagIdsByKnowledgeId.clear();
+        tagIdsByKnowledgeId.putAll(safeMap(snapshot.tagIdsByKnowledgeId));
+        docsByKnowledgeId.clear();
+        docsByKnowledgeId.putAll(safeMap(snapshot.docsByKnowledgeId));
+        segmentsByDocId.clear();
+        segmentsByDocId.putAll(safeMap(snapshot.segmentsByDocId));
+        qaPairsByKnowledgeId.clear();
+        qaPairsByKnowledgeId.putAll(safeMap(snapshot.qaPairsByKnowledgeId));
+        qaPairsById.clear();
+        qaPairsById.putAll(safeMap(snapshot.qaPairsById));
+        rebuildQaPairIndex();
+        metasByKnowledgeId.clear();
+        metasByKnowledgeId.putAll(safeMap(snapshot.metasByKnowledgeId));
+        permissionsByKnowledgeId.clear();
+        permissionsByKnowledgeId.putAll(safeMap(snapshot.permissionsByKnowledgeId));
+
+        restoreSequence(nextKnowledgeId, snapshot.nextKnowledgeId);
+        restoreSequence(nextTagId, snapshot.nextTagId);
+        restoreSequence(nextSplitterId, snapshot.nextSplitterId);
+        restoreSequence(nextDocId, snapshot.nextDocId);
+        restoreSequence(nextSegmentId, snapshot.nextSegmentId);
+        restoreSequence(nextQaPairId, snapshot.nextQaPairId);
+        restoreSequence(nextMetaId, snapshot.nextMetaId);
+        restoreSequence(nextPermissionId, snapshot.nextPermissionId);
+        for (KnowledgeState knowledge : knowledgeBases.values()) {
+            bumpSequence(nextKnowledgeId, knowledge.knowledgeId, "knowledge-");
+        }
+        for (TagState tag : tags.values()) {
+            bumpSequence(nextTagId, tag.tagId, "tag-");
+        }
+        for (SplitterState splitter : splitters.values()) {
+            bumpSequence(nextSplitterId, splitter.splitterId, "splitter-");
+        }
+        for (List<DocState> docs : docsByKnowledgeId.values()) {
+            for (DocState doc : safeList(docs)) {
+                bumpSequence(nextDocId, doc.docId, "doc-");
+            }
+        }
+        for (List<SegmentState> segments : segmentsByDocId.values()) {
+            for (SegmentState segment : safeList(segments)) {
+                bumpSequence(nextSegmentId, segment.contentId, "segment-");
+            }
+        }
+        for (QaPairState pair : qaPairsById.values()) {
+            bumpSequence(nextQaPairId, pair.qaPairId, "qa-");
+        }
+        for (List<Map<String, Object>> metas : metasByKnowledgeId.values()) {
+            for (Map<String, Object> meta : safeList(metas)) {
+                bumpSequence(nextMetaId, string(meta.get("metaId")), "meta-");
+            }
+        }
+        for (List<PermissionState> permissions : permissionsByKnowledgeId.values()) {
+            for (PermissionState permission : safeList(permissions)) {
+                bumpSequence(nextPermissionId, permission.permissionId, "perm-");
+            }
+        }
+    }
+
+    private void rebuildQaPairIndex() {
+        for (List<QaPairState> pairs : qaPairsByKnowledgeId.values()) {
+            for (QaPairState pair : safeList(pairs)) {
+                if (pair != null && !isBlank(pair.qaPairId)) {
+                    qaPairsById.put(pair.qaPairId, pair);
+                }
+            }
+        }
+    }
+
+    private void restoreSequence(AtomicLong sequence, long value) {
+        sequence.set(Math.max(1000L, value));
+    }
+
+    private void bumpSequence(AtomicLong sequence, String id, String prefix) {
+        if (isBlank(id) || !id.startsWith(prefix)) {
+            return;
+        }
+        try {
+            long value = Long.parseLong(id.substring(prefix.length()));
+            if (value > sequence.get()) {
+                sequence.set(value);
+            }
+        } catch (NumberFormatException ignored) {
+        }
+    }
+
+    private <K, V> Map<K, V> safeMap(Map<K, V> source) {
+        return source == null ? Collections.<K, V>emptyMap() : source;
+    }
+
+    private <T> List<T> safeList(List<T> source) {
+        return source == null ? Collections.<T>emptyList() : source;
+    }
+
+    private static final class KnowledgeSnapshot {
+        private Map<String, KnowledgeState> knowledgeBases = new LinkedHashMap<String, KnowledgeState>();
+        private Map<String, TagState> tags = new LinkedHashMap<String, TagState>();
+        private Map<String, SplitterState> splitters = new LinkedHashMap<String, SplitterState>();
+        private Map<String, List<String>> tagIdsByKnowledgeId = new LinkedHashMap<String, List<String>>();
+        private Map<String, List<DocState>> docsByKnowledgeId = new LinkedHashMap<String, List<DocState>>();
+        private Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
+        private Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
+        private Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
+        private Map<String, List<Map<String, Object>>> metasByKnowledgeId =
+                new LinkedHashMap<String, List<Map<String, Object>>>();
+        private Map<String, List<PermissionState>> permissionsByKnowledgeId =
+                new LinkedHashMap<String, List<PermissionState>>();
+        private long nextKnowledgeId;
+        private long nextTagId;
+        private long nextSplitterId;
+        private long nextDocId;
+        private long nextSegmentId;
+        private long nextQaPairId;
+        private long nextMetaId;
+        private long nextPermissionId;
     }
 
     private static final class KnowledgeState {

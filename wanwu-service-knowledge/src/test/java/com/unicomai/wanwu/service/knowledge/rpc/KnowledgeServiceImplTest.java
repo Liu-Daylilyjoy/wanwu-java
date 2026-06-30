@@ -1,6 +1,10 @@
 package com.unicomai.wanwu.service.knowledge.rpc;
 
+import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
+import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -11,10 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class KnowledgeServiceImplTest {
 
-    private final KnowledgeServiceImpl service = new KnowledgeServiceImpl();
+    private KnowledgeServiceImpl service;
+
+    @BeforeEach
+    public void setUp() {
+        service = new KnowledgeServiceImpl();
+    }
 
     @Test
     public void knowledgeLifecycleFollowsFrontendAndGoContract() {
@@ -154,6 +169,67 @@ public class KnowledgeServiceImplTest {
         assertEquals(0, service.listDocs("dev-admin", "default-org", docList(knowledgeId)).get("total"));
         assertEquals(0, service.listDocSegments("dev-admin", "default-org",
                 segmentList("doc-guide", "")).get("segmentTotalNum"));
+    }
+
+    @Test
+    public void mutableKnowledgeStateIsPersistedAsSnapshotRecord() {
+        KnowledgeRecordMapper mapper = mock(KnowledgeRecordMapper.class);
+        KnowledgeServiceImpl persistent = new KnowledgeServiceImpl(mapper);
+
+        Map<String, Object> created = persistent.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Persist KB", 0));
+        String knowledgeId = (String) created.get("knowledgeId");
+        Map<String, Object> tag = persistent.createTag("dev-admin", "default-org", singleton("tagName", "Persist"));
+        persistent.bindTags("dev-admin", "default-org", bindTags(knowledgeId, (String) tag.get("tagId")));
+        persistent.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-persist", "Persist.txt"));
+        persistent.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "Persist?", "Yes."));
+
+        ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
+        verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
+        KnowledgeRecordEntity last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("snapshot", last.getRecordType());
+        assertEquals("state", last.getRecordId());
+        assertTrue(last.getPayload().contains("Persist KB"));
+        assertTrue(last.getPayload().contains("doc-persist"));
+        assertTrue(last.getPayload().contains("Persist?"));
+    }
+
+    @Test
+    public void persistedSnapshotIsLoadedAndSequencesContinueAfterRestart() {
+        KnowledgeRecordMapper sourceMapper = mock(KnowledgeRecordMapper.class);
+        KnowledgeServiceImpl source = new KnowledgeServiceImpl(sourceMapper);
+        Map<String, Object> created = source.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Restart KB", 0));
+        String knowledgeId = (String) created.get("knowledgeId");
+        Map<String, Object> tag = source.createTag("dev-admin", "default-org", singleton("tagName", "Restart"));
+        source.bindTags("dev-admin", "default-org", bindTags(knowledgeId, (String) tag.get("tagId")));
+        source.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-restart", "Restart.txt"));
+        source.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "Restart?", "Loaded."));
+
+        ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
+        verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
+        String payload = captor.getAllValues().get(captor.getAllValues().size() - 1).getPayload();
+
+        KnowledgeRecordMapper restartMapper = mock(KnowledgeRecordMapper.class);
+        when(restartMapper.selectByType(eq("snapshot")))
+                .thenReturn(Collections.singletonList(record("snapshot", "state", payload)));
+        KnowledgeServiceImpl restarted = new KnowledgeServiceImpl(restartMapper);
+
+        List<Map<String, Object>> knowledgeList = listOfMaps(restarted.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("Restart", 0, -1)).get("knowledgeList"));
+        assertEquals(1, knowledgeList.size());
+        assertEquals(knowledgeId, knowledgeList.get(0).get("knowledgeId"));
+        assertTrue((Boolean) listOfMaps(knowledgeList.get(0).get("knowledgeTagList")).get(0).get("selected"));
+        assertEquals(1, restarted.listDocs("dev-admin", "default-org", docList(knowledgeId)).get("total"));
+        assertEquals(1, restarted.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "Restart", Collections.singletonList(-1))).get("total"));
+
+        Map<String, Object> next = restarted.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Restart Next", 0));
+        assertEquals("knowledge-1002", next.get("knowledgeId"));
+        verify(restartMapper, atLeastOnce()).upsertRecord(any(KnowledgeRecordEntity.class));
     }
 
     private Map<String, Object> createKnowledge(String name, int category) {
@@ -345,5 +421,15 @@ public class KnowledgeServiceImplTest {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
         return (List<Map<String, Object>>) value;
+    }
+
+    private KnowledgeRecordEntity record(String type, String id, String payload) {
+        KnowledgeRecordEntity record = new KnowledgeRecordEntity();
+        record.setRecordType(type);
+        record.setRecordId(id);
+        record.setPayload(payload);
+        record.setCreatedAt(1L);
+        record.setUpdatedAt(1L);
+        return record;
     }
 }

@@ -43,12 +43,17 @@ services:
     container_name: wanwu-java-knowledge
     environment:
       DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      SPRING_DATASOURCE_URL: ${WANWU_KNOWLEDGE_DATASOURCE_URL:-jdbc:mysql://mysql:3306/knowledge_service?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=Asia/Shanghai}
+      SPRING_DATASOURCE_USERNAME: ${WANWU_KNOWLEDGE_DATASOURCE_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${WANWU_KNOWLEDGE_DATASOURCE_PASSWORD:-}
       JAVA_OPTS: ${WANWU_KNOWLEDGE_JAVA_OPTS:-}
     ports:
       - "8083:8083"
       - "20883:20883"
     depends_on:
       nacos:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8083/actuator/health >/dev/null"]
