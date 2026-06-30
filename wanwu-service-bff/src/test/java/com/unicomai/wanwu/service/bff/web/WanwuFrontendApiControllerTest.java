@@ -132,7 +132,8 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuSettingApiController(iamService),
                     new WanwuOperationApiController(iamService),
                     new WanwuExplorationApiController(appService),
-                    new WanwuStatisticApiController(appService, modelService))
+                    new WanwuStatisticApiController(appService, modelService),
+                    new WanwuTemplateApiController(appService))
             .build();
 
     @Test
@@ -387,6 +388,75 @@ public class WanwuFrontendApiControllerTest {
         verify(appService, times(2)).listApplications(any(ApplicationListQuery.class));
         verify(modelService, times(1)).listModels(any(ModelListQuery.class));
         verify(appService, times(3)).listApiKeys(any(ApiKeyListQuery.class));
+    }
+
+    @Test
+    public void templateRoutesReturnFrontendContractsAndCopyApps() throws Exception {
+        when(appService.createAssistant(any(AssistantCreateCommand.class)))
+                .thenReturn(new AssistantCreateResult("assistant-template-copy-001"));
+        when(appService.createWorkflow(any(WorkflowCreateCommand.class)))
+                .thenReturn(new WorkflowCreateResult("workflow-template-copy-001"));
+
+        mockMvc.perform(get("/user/api/v1/assistant/template/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("category", "industry"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.list[0].assistantTemplateId").value("assistant-template-policy"))
+                .andExpect(jsonPath("$.data.list[0].appType").value("agentTemplate"))
+                .andExpect(jsonPath("$.data.list[0].name").value("Policy Analyst"));
+
+        mockMvc.perform(get("/user/api/v1/assistant/template")
+                        .param("assistantTemplateId", "assistant-template-policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantTemplateId").value("assistant-template-policy"))
+                .andExpect(jsonPath("$.data.prologue").value("I can help read policy documents."))
+                .andExpect(jsonPath("$.data.recommendQuestion[0]").value("What is the goal?"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/template")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantTemplateId\":\"assistant-template-policy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-template-copy-001"));
+
+        mockMvc.perform(get("/user/api/v1/workflow/template/list")
+                        .param("category", "office"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.downloadLink.url").value(""))
+                .andExpect(jsonPath("$.data.list[0].templateId").value("workflow-template-doc-review"))
+                .andExpect(jsonPath("$.data.list[0].name").value("Document Review"));
+
+        mockMvc.perform(get("/user/api/v1/workflow/template/detail")
+                        .param("templateId", "workflow-template-doc-review"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.templateId").value("workflow-template-doc-review"))
+                .andExpect(jsonPath("$.data.summary").value("Review uploaded documents and return a structured checklist."));
+
+        mockMvc.perform(get("/user/api/v1/workflow/template/recommend")
+                        .param("templateId", "workflow-template-doc-review"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.list[0].templateId").value("workflow-template-faq"));
+
+        mockMvc.perform(get("/user/api/v1/workflow/template/download")
+                        .param("templateId", "workflow-template-doc-review"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("workflow-template-doc-review")));
+
+        mockMvc.perform(post("/user/api/v1/workflow/template")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"templateId\":\"workflow-template-doc-review\",\"name\":\"Doc Copy\",\"desc\":\"copy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-template-copy-001"))
+                .andExpect(jsonPath("$.data.workflowId").value("workflow-template-copy-001"));
+
+        verify(appService).createAssistant(any(AssistantCreateCommand.class));
+        verify(appService).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
+        verify(appService).createWorkflow(any(WorkflowCreateCommand.class));
     }
 
     @Test
