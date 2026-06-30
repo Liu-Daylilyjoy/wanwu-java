@@ -108,8 +108,10 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.token").value("dev-token"))
                 .andExpect(jsonPath("$.data.isUpdatePassword").value(true))
                 .andExpect(jsonPath("$.data.orgPermission.org.id").value("default-org"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("app"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("permission"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[12].perm").value("model.model_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[23].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[35].perm").value("api_key.api_key_management"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -978,7 +980,44 @@ public class WanwuFrontendApiControllerTest {
     private Map<String, Object> orgPermission() {
         Map<String, Object> orgPermission = new LinkedHashMap<>();
         orgPermission.put("org", org("default-org", "Default Organization"));
-        orgPermission.put("permissions", java.util.Arrays.asList(permission("app"), permission("app.agent")));
+        orgPermission.put("permissions", java.util.Arrays.asList(
+                permission("permission"),
+                permission("permission.user"),
+                permission("permission.org"),
+                permission("permission.role"),
+                permission("setting"),
+                permission("wga"),
+                permission("wga.wanwu_bot"),
+                permission("wga.openclaw"),
+                permission("ontology"),
+                permission("ontology.knowledge_network"),
+                permission("ontology.data_source"),
+                permission("model"),
+                permission("model.model_management"),
+                permission("resource"),
+                permission("resource.knowledge"),
+                permission("resource.mcp"),
+                permission("resource.tool"),
+                permission("resource.prompt"),
+                permission("resource.skill"),
+                permission("resource.safety"),
+                permission("app"),
+                permission("app.rag"),
+                permission("app.workflow"),
+                permission("app.agent"),
+                permission("exploration"),
+                permission("exploration.app"),
+                permission("exploration.mcp"),
+                permission("exploration.template"),
+                permission("exploration.skill"),
+                permission("operation"),
+                permission("operation.statistic_client"),
+                permission("operation.oauth"),
+                permission("app_observability"),
+                permission("app_observability.statistic"),
+                permission("api_key"),
+                permission("api_key.api_key_management")
+        ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);
         orgPermission.put("isSystem", true);

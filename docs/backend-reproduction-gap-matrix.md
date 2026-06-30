@@ -55,7 +55,7 @@ Measured from this Java repo before the full reproduction pass:
 | --- | ---: | --- |
 | `AppService` | 41 | Partially covered for publish/version/OpenURL/app keys/API keys; explore/statistics missing |
 | `AssistantService` | 67 | Partially covered through Java `AppService`; assistant-side tool/skill/workflow/multi-agent/WGA missing |
-| `IAMService` | 49 | Placeholder-level |
+| `IAMService` | 49 | Development login and frontend permission split covered; persisted user/org/role/OAuth still missing |
 | `KnowledgeBaseDocService` | 26 | Missing |
 | `KnowledgeBaseKeywordsService` | 5 | Missing |
 | `KnowledgeBasePermissionService` | 6 | Missing |
@@ -82,6 +82,15 @@ Measured from this Java repo before the full reproduction pass:
 7. Assistant full surface: workflows, MCP tools, custom tools, skills, multi-agent, templates, select endpoints.
 8. Explore/guest/statistics/callback/openapi: marketplace, public API, API usage metrics, callback compatibility.
 9. WGA/general agent and sandbox integrations.
+
+## Development IAM Accounts
+
+The Java IAM service currently exposes two Docker development accounts:
+
+- `admin` / token `dev-token`: all frontend permissions from `web/src/router/constants.js`.
+- `app` / token `dev-token-app`: `app` and `app.agent` only.
+
+Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
 
 ## Operating Rule
 
