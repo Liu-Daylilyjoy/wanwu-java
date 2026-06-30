@@ -62,6 +62,56 @@ public class McpServiceImplTest {
                 .contains("优化后的提示词"));
     }
 
+    @Test
+    public void resourceLifecycleCoversSkillResourceAndConversation() {
+        Map<String, Object> check = service.checkCustomSkill(USER_ID, ORG_ID,
+                map("zipUrl", "file-upload/skill.zip", "name", "Imported Skill", "desc", "imported"));
+        assertEquals("Imported Skill", text(check, "name"));
+
+        String customSkillId = text(service.createCustomSkill(USER_ID, ORG_ID,
+                map("name", "Imported Skill", "author", "Wanwu", "desc", "imported",
+                        "zipUrl", "file-upload/skill.zip")), "skillId");
+        assertFalse(customSkillId.isEmpty());
+        String customVariableId = text(service.createCustomSkillConfig(USER_ID, ORG_ID,
+                map("skillId", customSkillId, "variable",
+                        map("name", "API Key", "variableKey", "apiKey", "variableValue", "dev"))), "id");
+        assertFalse(customVariableId.isEmpty());
+        assertEquals(1, list(service.getCustomSkill(USER_ID, ORG_ID, customSkillId).get("variables")).size());
+        assertEquals("custom", text(first(service.listSkillSelect(USER_ID, ORG_ID, "Imported", "custom")),
+                "skillType"));
+
+        assertTrue(list(service.listBuiltinSkills(USER_ID, ORG_ID, "").get("list")).size() >= 1);
+        Map<String, Object> builtin = service.getBuiltinSkill(USER_ID, ORG_ID, "builtin-summary");
+        assertTrue(text(builtin, "skillMarkdown").contains("Summary Skill"));
+        String builtinVariableId = text(service.createBuiltinSkillConfig(USER_ID, ORG_ID,
+                map("skillId", "builtin-summary", "variable",
+                        map("name", "Language", "variableKey", "language", "variableValue", "zh"))), "id");
+        assertFalse(builtinVariableId.isEmpty());
+        assertEquals(1, list(service.getBuiltinSkill(USER_ID, ORG_ID, "builtin-summary").get("variables")).size());
+        assertTrue(new String(service.downloadBuiltinSkill(USER_ID, ORG_ID, "builtin-summary")).contains("builtin"));
+
+        assertEquals("builtin-summary", text(first(service.listSquareSkills(USER_ID, ORG_ID, "Summary")),
+                "skillId"));
+        service.shareSquareSkill(USER_ID, ORG_ID, map("skillId", "builtin-summary"));
+        Map<String, Object> acquired = first(service.listAcquiredSkills(USER_ID, ORG_ID, "Summary"));
+        String acquiredSkillId = text(acquired, "skillId");
+        assertFalse(acquiredSkillId.isEmpty());
+        service.createAcquiredSkillConfig(USER_ID, ORG_ID,
+                map("skillId", acquiredSkillId, "variable",
+                        map("name", "Token", "variableKey", "token", "variableValue", "local")));
+        assertEquals(1, list(service.getAcquiredSkill(USER_ID, ORG_ID, acquiredSkillId).get("variables")).size());
+
+        String conversationId = text(service.createSkillConversation(USER_ID, ORG_ID,
+                map("title", "Build skill")), "conversationId");
+        Map<String, Object> chat = service.chatSkillConversation(USER_ID, ORG_ID,
+                map("conversationId", conversationId, "query", "build one"));
+        assertEquals(1, chat.get("finish"));
+        assertEquals(2, list(service.getSkillConversationDetail(USER_ID, ORG_ID, conversationId).get("list")).size());
+        assertFalse(text(service.saveSkillConversation(USER_ID, ORG_ID,
+                map("conversationId", conversationId, "skillSaveId", "save-001", "name", "Generated Skill")),
+                "skillId").isEmpty());
+    }
+
     private Map<String, Object> auth() {
         return map("authType", "none");
     }

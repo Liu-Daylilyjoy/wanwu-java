@@ -96,4 +96,70 @@ public interface McpService {
     Map<String, Object> reasonPrompt(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> evaluatePrompt(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createCustomSkill(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> getCustomSkill(String userId, String orgId, String skillId);
+
+    void deleteCustomSkill(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listCustomSkills(String userId, String orgId, String name);
+
+    Map<String, Object> checkCustomSkill(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createCustomSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void updateCustomSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void deleteCustomSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listBuiltinSkills(String userId, String orgId, String name);
+
+    Map<String, Object> getBuiltinSkill(String userId, String orgId, String skillId);
+
+    byte[] downloadBuiltinSkill(String userId, String orgId, String skillId);
+
+    Map<String, Object> createBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void updateBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void deleteBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listSkillSelect(String userId, String orgId, String name, String skillType);
+
+    Map<String, Object> listAcquiredSkills(String userId, String orgId, String name);
+
+    Map<String, Object> getAcquiredSkill(String userId, String orgId, String skillId);
+
+    void deleteAcquiredSkill(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void updateAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    void deleteAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listSquareSkills(String userId, String orgId, String name);
+
+    Map<String, Object> listSquareBuiltinSkills(String userId, String orgId, String name);
+
+    void shareSquareSkill(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> getSquareSkill(String userId, String orgId, String skillId);
+
+    byte[] downloadSquareSkill(String userId, String orgId, String skillId);
+
+    Map<String, Object> createSkillConversation(String userId, String orgId, Map<String, Object> request);
+
+    void deleteSkillConversation(String userId, String orgId, Map<String, Object> request);
+
+    void clearSkillConversation(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listSkillConversations(String userId, String orgId, int pageNo, int pageSize);
+
+    Map<String, Object> getSkillConversationDetail(String userId, String orgId, String conversationId);
+
+    Map<String, Object> chatSkillConversation(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> saveSkillConversation(String userId, String orgId, Map<String, Object> request);
 }

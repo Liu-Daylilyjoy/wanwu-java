@@ -96,6 +96,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -122,7 +123,8 @@ public class WanwuFrontendApiControllerTest {
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(
                     new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService),
-                    new WanwuResourceApiController(mcpService))
+                    new WanwuResourceApiController(mcpService),
+                    new WanwuSkillApiController(mcpService))
             .build();
 
     @Test
@@ -169,6 +171,7 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[14].perm").value("resource.tool"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[15].perm").value("resource.mcp"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[16].perm").value("resource.prompt"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[17].perm").value("resource.skill"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -426,6 +429,157 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("\"response\":\"optimized prompt\"")))
                 .andExpect(content().string(containsString("\"finish\":1")));
+    }
+
+    @Test
+    public void resourceSkillRoutesReturnFrontendContracts() throws Exception {
+        when(mcpService.checkCustomSkill(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("name", "Imported Skill", "desc", "imported desc"));
+        when(mcpService.createCustomSkill(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("skillId", "skill-custom-001"));
+        Map<String, Object> skill = skill("skill-custom-001", "Imported Skill", "custom");
+        when(mcpService.listCustomSkills(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(skill));
+        when(mcpService.getCustomSkill(anyString(), anyString(), anyString()))
+                .thenReturn(skill);
+        when(mcpService.createCustomSkillConfig(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("id", "var-001"));
+        when(mcpService.listSkillSelect(anyString(), anyString(), nullable(String.class), nullable(String.class)))
+                .thenReturn(listResult(skillSelect("skill-custom-001", "Imported Skill", "custom")));
+
+        Map<String, Object> builtin = skill("builtin-summary", "Summary Skill", "builtin");
+        builtin.put("skillMarkdown", "# Summary Skill");
+        when(mcpService.listBuiltinSkills(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(builtin));
+        when(mcpService.getBuiltinSkill(anyString(), anyString(), anyString()))
+                .thenReturn(builtin);
+        when(mcpService.downloadBuiltinSkill(anyString(), anyString(), anyString()))
+                .thenReturn("builtin-zip".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Object> acquired = skill("acquired-001", "Summary Skill", "acquired");
+        acquired.put("squareSkillId", "builtin-summary");
+        when(mcpService.listAcquiredSkills(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(acquired));
+        when(mcpService.getAcquiredSkill(anyString(), anyString(), anyString()))
+                .thenReturn(acquired);
+        when(mcpService.createAcquiredSkillConfig(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("id", "var-002"));
+
+        Map<String, Object> square = skill("builtin-summary", "Summary Skill", "square");
+        square.put("isShared", false);
+        square.put("skillMarkdown", "# Summary Skill");
+        when(mcpService.listSquareSkills(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(square));
+        when(mcpService.listSquareBuiltinSkills(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(square));
+        when(mcpService.getSquareSkill(anyString(), anyString(), anyString()))
+                .thenReturn(square);
+        when(mcpService.downloadSquareSkill(anyString(), anyString(), anyString()))
+                .thenReturn("square-zip".getBytes(StandardCharsets.UTF_8));
+
+        when(mcpService.createSkillConversation(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("conversationId", "skill-conv-001"));
+        when(mcpService.listSkillConversations(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(listResult(map("conversationId", "skill-conv-001", "title", "Build skill")));
+        when(mcpService.getSkillConversationDetail(anyString(), anyString(), anyString()))
+                .thenReturn(listResult(map("role", "assistant", "content", "Ready")));
+        when(mcpService.chatSkillConversation(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("response", "generated skill", "finish", 1,
+                        "responseFiles", Collections.singletonList(map("skillSaveId", "save-001"))));
+        when(mcpService.saveSkillConversation(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("skillId", "skill-custom-002"));
+
+        mockMvc.perform(post("/user/api/v1/agent/skill/custom/check")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"zipUrl\":\"file-upload/skill.zip\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("Imported Skill"));
+        mockMvc.perform(post("/user/api/v1/agent/skill/custom")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"zipUrl\":\"file-upload/skill.zip\",\"author\":\"Wanwu\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillId").value("skill-custom-001"));
+        mockMvc.perform(get("/user/api/v1/agent/skill/custom/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].skillId").value("skill-custom-001"));
+        mockMvc.perform(get("/user/api/v1/agent/skill/custom/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("skillId", "skill-custom-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("Imported Skill"));
+        mockMvc.perform(post("/user/api/v1/agent/skill/custom/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillId\":\"skill-custom-001\",\"variable\":{\"name\":\"API Key\",\"variableKey\":\"apiKey\",\"variableValue\":\"dev\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("var-001"));
+        mockMvc.perform(get("/user/api/v1/agent/skill/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].skillType").value("custom"));
+
+        mockMvc.perform(get("/user/api/v1/agent/skill/builtin/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].skillId").value("builtin-summary"));
+        mockMvc.perform(get("/user/api/v1/agent/skill/builtin/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("skillId", "builtin-summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillMarkdown").value("# Summary Skill"));
+        mockMvc.perform(get("/user/api/v1/builtin/skill/download")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("skillId", "builtin-summary"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("builtin-zip"));
+
+        mockMvc.perform(get("/user/api/v1/square/skill/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].skillId").value("builtin-summary"));
+        mockMvc.perform(post("/user/api/v1/square/skill/share")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillId\":\"builtin-summary\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/agent/acquired/skill/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].skillId").value("acquired-001"));
+        mockMvc.perform(post("/user/api/v1/agent/acquired/skill/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillId\":\"acquired-001\",\"variable\":{\"name\":\"Token\",\"variableKey\":\"token\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("var-002"));
+
+        mockMvc.perform(post("/user/api/v1/agent/skill/conversation")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Build skill\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversationId").value("skill-conv-001"));
+        mockMvc.perform(get("/user/api/v1/agent/skill/conversation/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].conversationId").value("skill-conv-001"));
+        mockMvc.perform(post("/user/api/v1/agent/skill/conversation/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"skill-conv-001\",\"query\":\"build one\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"response\":\"generated skill\"")))
+                .andExpect(content().string(containsString("\"finish\":1")));
+        mockMvc.perform(post("/user/api/v1/agent/skill/conversation/save")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"skill-conv-001\",\"skillSaveId\":\"save-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillId").value("skill-custom-002"));
     }
 
     @Test
@@ -2408,7 +2562,8 @@ public class WanwuFrontendApiControllerTest {
                 permission("resource.knowledge"),
                 permission("resource.tool"),
                 permission("resource.mcp"),
-                permission("resource.prompt")
+                permission("resource.prompt"),
+                permission("resource.skill")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);
@@ -2494,6 +2649,33 @@ public class WanwuFrontendApiControllerTest {
         result.put("list", Collections.emptyList());
         result.put("total", 0);
         return result;
+    }
+
+    private Map<String, Object> map(Object... pairs) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put(String.valueOf(pairs[i]), pairs[i + 1]);
+        }
+        return result;
+    }
+
+    private Map<String, Object> skill(String skillId, String name, String type) {
+        Map<String, Object> skill = new LinkedHashMap<>();
+        skill.put("skillId", skillId);
+        skill.put("name", name);
+        skill.put("skillName", name);
+        skill.put("skillType", type);
+        skill.put("avatar", Collections.singletonMap("path", ""));
+        skill.put("author", "Wanwu");
+        skill.put("desc", "Development skill");
+        skill.put("variables", Collections.emptyList());
+        return skill;
+    }
+
+    private Map<String, Object> skillSelect(String skillId, String name, String type) {
+        Map<String, Object> skill = skill(skillId, name, type);
+        skill.remove("name");
+        return skill;
     }
 
     private Map<String, Object> toolSelect(String toolId, String name, String type) {

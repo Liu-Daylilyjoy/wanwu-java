@@ -1370,10 +1370,7 @@ public class WanwuFrontendApiController {
         }
     }
 
-    @GetMapping({
-            "/safe/sensitive/table/select",
-            "/agent/skill/select",
-    })
+    @GetMapping("/safe/sensitive/table/select")
     public FrontendResponse<Map<String, Object>> emptySelectResult() {
         return FrontendResponse.ok(emptyListResult());
     }

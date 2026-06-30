@@ -40,7 +40,8 @@ public class IamServiceImpl implements IamService {
             "resource.knowledge",
             "resource.tool",
             "resource.mcp",
-            "resource.prompt"
+            "resource.prompt",
+            "resource.skill"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -210,6 +211,7 @@ public class IamServiceImpl implements IamService {
         defaultIcon.put("toolIcon", "");
         defaultIcon.put("mcpIcon", "");
         defaultIcon.put("promptIcon", "");
+        defaultIcon.put("skillIcon", "");
 
         config.put("login", login);
         config.put("home", home);
@@ -339,7 +341,8 @@ public class IamServiceImpl implements IamService {
                         route("Knowledge", "resource.knowledge", Collections.<Map<String, Object>>emptyList()),
                         route("Tool", "resource.tool", Collections.<Map<String, Object>>emptyList()),
                         route("MCP", "resource.mcp", Collections.<Map<String, Object>>emptyList()),
-                        route("Prompt", "resource.prompt", Collections.<Map<String, Object>>emptyList())
+                        route("Prompt", "resource.prompt", Collections.<Map<String, Object>>emptyList()),
+                        route("Skill", "resource.skill", Collections.<Map<String, Object>>emptyList())
                 ))
         );
     }
@@ -403,6 +406,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("resource.prompt".equals(perm)) {
             return "Prompt";
+        }
+        if ("resource.skill".equals(perm)) {
+            return "Skill";
         }
         return perm;
     }

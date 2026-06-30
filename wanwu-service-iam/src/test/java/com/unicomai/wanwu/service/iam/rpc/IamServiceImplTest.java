@@ -54,10 +54,11 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("resource.tool"));
         assertTrue(permissions.contains("resource.mcp"));
         assertTrue(permissions.contains("resource.prompt"));
+        assertTrue(permissions.contains("resource.skill"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(17, permissions.size());
+        assertEquals(18, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -84,7 +85,8 @@ public class IamServiceImplTest {
                 "permission", "permission.user", "permission.org", "permission.role",
                 "model", "model.model_management",
                 "app", "app.rag", "app.workflow", "app.agent", "api_key", "api_key.api_key_management",
-                "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt"),
+                "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt",
+                "resource.skill"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
@@ -130,9 +132,10 @@ public class IamServiceImplTest {
         assertEquals("app.workflow", ((Map) ((List) appRoute.get("children")).get(1)).get("perm"));
         Map resourceRoute = (Map) ((List) template.get("routes")).get(4);
         assertEquals("resource", resourceRoute.get("perm"));
-        assertEquals(4, ((List) resourceRoute.get("children")).size());
+        assertEquals(5, ((List) resourceRoute.get("children")).size());
         assertEquals("resource.knowledge", ((Map) ((List) resourceRoute.get("children")).get(0)).get("perm"));
         assertEquals("resource.tool", ((Map) ((List) resourceRoute.get("children")).get(1)).get("perm"));
+        assertEquals("resource.skill", ((Map) ((List) resourceRoute.get("children")).get(4)).get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));

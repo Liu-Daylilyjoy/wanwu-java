@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class McpServiceImpl implements McpService {
@@ -31,7 +32,12 @@ public class McpServiceImpl implements McpService {
     private final ConcurrentMap<String, Map<String, Object>> customMcps = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, Object>> mcpServers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, Object>> customPrompts = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Object>> customSkills = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Object>> acquiredSkills = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Object>> builtinSkillVariableStores = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Object>> skillConversations = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> builtinToolApiKeys = new ConcurrentHashMap<>();
+    private final AtomicInteger variableSequence = new AtomicInteger(1);
 
     @Override
     public ServiceDescriptor describe() {
@@ -488,6 +494,305 @@ public class McpServiceImpl implements McpService {
         return promptStreamPayload("评估结果：本地响应可用。answer=" + answer + " expected=" + expected);
     }
 
+    @Override
+    public Map<String, Object> createCustomSkill(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> item = customSkillBase(request);
+        String id = id("skill");
+        item.put("skillId", id);
+        item.put("ownerUserId", userId);
+        item.put("ownerOrgId", org(orgId));
+        item.put("variables", new ArrayList<Map<String, Object>>());
+        customSkills.put(scoped(orgId, id), item);
+        return singleton("skillId", id);
+    }
+
+    @Override
+    public Map<String, Object> getCustomSkill(String userId, String orgId, String skillId) {
+        return customSkillDetail(require(customSkills, orgId, skillId, "custom skill"));
+    }
+
+    @Override
+    public void deleteCustomSkill(String userId, String orgId, Map<String, Object> request) {
+        customSkills.remove(scoped(orgId, text(request, "skillId")));
+    }
+
+    @Override
+    public Map<String, Object> listCustomSkills(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : customSkills.values()) {
+            if (sameOrg(item, orgId) && matches(item, "name", name)) {
+                list.add(customSkillInfo(item));
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> checkCustomSkill(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("name", defaultText(request, "name", "Imported Skill"));
+        result.put("desc", defaultText(request, "desc", "Validated local skill package: " + text(request, "zipUrl")));
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> createCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        return createSkillVariable(require(customSkills, orgId, text(request, "skillId"), "custom skill"), request);
+    }
+
+    @Override
+    public void updateCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        updateSkillVariable(orgId, text(request, "id"), request);
+    }
+
+    @Override
+    public void deleteCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        deleteSkillVariable(orgId, text(request, "id"));
+    }
+
+    @Override
+    public Map<String, Object> listBuiltinSkills(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : builtinSkills()) {
+            if (matches(item, "name", name)) {
+                list.add(skillDetail(item, skillVariables(builtinSkillVariableItem(orgId, text(item, "skillId"))),
+                        false));
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> getBuiltinSkill(String userId, String orgId, String skillId) {
+        Map<String, Object> item = builtinSkill(skillId);
+        return skillDetail(item, skillVariables(builtinSkillVariableItem(orgId, skillId)), true);
+    }
+
+    @Override
+    public byte[] downloadBuiltinSkill(String userId, String orgId, String skillId) {
+        builtinSkill(skillId);
+        return skillArchive(skillId, "builtin");
+    }
+
+    @Override
+    public Map<String, Object> createBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        String skillId = text(request, "skillId");
+        builtinSkill(skillId);
+        return createSkillVariable(builtinSkillVariableItem(orgId, skillId), request);
+    }
+
+    @Override
+    public void updateBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        updateSkillVariable(orgId, text(request, "id"), request);
+    }
+
+    @Override
+    public void deleteBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        deleteSkillVariable(orgId, text(request, "id"));
+    }
+
+    @Override
+    public Map<String, Object> listSkillSelect(String userId, String orgId, String name, String skillType) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (blank(skillType) || "builtin".equals(skillType)) {
+            for (Map<String, Object> item : builtinSkills()) {
+                if (matches(item, "name", name)) {
+                    list.add(skillSelect(item, "builtin"));
+                }
+            }
+        }
+        if (blank(skillType) || "custom".equals(skillType)) {
+            for (Map<String, Object> item : customSkills.values()) {
+                if (sameOrg(item, orgId) && matches(item, "name", name)
+                        && !blank(text(item, "name")) && !blank(text(item, "desc"))) {
+                    list.add(skillSelect(item, "custom"));
+                }
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> listAcquiredSkills(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : acquiredSkills.values()) {
+            if (sameOrg(item, orgId) && matches(item, "name", name)) {
+                list.add(acquiredSkillDetail(item, false));
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> getAcquiredSkill(String userId, String orgId, String skillId) {
+        return acquiredSkillDetail(require(acquiredSkills, orgId, skillId, "acquired skill"), true);
+    }
+
+    @Override
+    public void deleteAcquiredSkill(String userId, String orgId, Map<String, Object> request) {
+        acquiredSkills.remove(scoped(orgId, text(request, "skillId")));
+    }
+
+    @Override
+    public Map<String, Object> createAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        return createSkillVariable(require(acquiredSkills, orgId, text(request, "skillId"), "acquired skill"),
+                request);
+    }
+
+    @Override
+    public void updateAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        updateSkillVariable(orgId, text(request, "id"), request);
+    }
+
+    @Override
+    public void deleteAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
+        deleteSkillVariable(orgId, text(request, "id"));
+    }
+
+    @Override
+    public Map<String, Object> listSquareSkills(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : builtinSkills()) {
+            if (matches(item, "name", name)) {
+                Map<String, Object> row = squareSkillInfo(item, isAcquired(orgId, text(item, "skillId")));
+                list.add(row);
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> listSquareBuiltinSkills(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : builtinSkills()) {
+            if (matches(item, "name", name)) {
+                list.add(squareBuiltinSkillInfo(item));
+            }
+        }
+        return listResult(list);
+    }
+
+    @Override
+    public void shareSquareSkill(String userId, String orgId, Map<String, Object> request) {
+        String squareSkillId = text(request, "skillId");
+        Map<String, Object> source = builtinSkill(squareSkillId);
+        for (Map<String, Object> acquired : acquiredSkills.values()) {
+            if (sameOrg(acquired, orgId) && squareSkillId.equals(text(acquired, "squareSkillId"))) {
+                return;
+            }
+        }
+        Map<String, Object> item = acquiredSkillFromSquare(source);
+        String id = id("acquired");
+        item.put("skillId", id);
+        item.put("ownerUserId", userId);
+        item.put("ownerOrgId", org(orgId));
+        item.put("variables", new ArrayList<Map<String, Object>>());
+        acquiredSkills.put(scoped(orgId, id), item);
+    }
+
+    @Override
+    public Map<String, Object> getSquareSkill(String userId, String orgId, String skillId) {
+        Map<String, Object> source = builtinSkill(skillId);
+        Map<String, Object> result = squareSkillInfo(source, isAcquired(orgId, skillId));
+        result.put("skillMarkdown", source.get("skillMarkdown"));
+        result.put("downloadUrl", "/user/api/v1/square/skill/download?skillId=" + skillId);
+        return result;
+    }
+
+    @Override
+    public byte[] downloadSquareSkill(String userId, String orgId, String skillId) {
+        builtinSkill(skillId);
+        return skillArchive(skillId, "square");
+    }
+
+    @Override
+    public Map<String, Object> createSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        String id = id("skillconv");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("conversationId", id);
+        item.put("title", defaultText(request, "title", "Skill Conversation"));
+        item.put("createdAt", now());
+        item.put("ownerUserId", userId);
+        item.put("ownerOrgId", org(orgId));
+        item.put("messages", new ArrayList<Map<String, Object>>());
+        skillConversations.put(scoped(orgId, id), item);
+        return singleton("conversationId", id);
+    }
+
+    @Override
+    public void deleteSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        skillConversations.remove(scoped(orgId, text(request, "conversationId")));
+    }
+
+    @Override
+    public void clearSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> item = require(skillConversations, orgId, text(request, "conversationId"),
+                "skill conversation");
+        item.put("messages", new ArrayList<Map<String, Object>>());
+    }
+
+    @Override
+    public Map<String, Object> listSkillConversations(String userId, String orgId, int pageNo, int pageSize) {
+        List<Map<String, Object>> all = new ArrayList<>();
+        for (Map<String, Object> item : skillConversations.values()) {
+            if (sameOrg(item, orgId)) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("conversationId", item.get("conversationId"));
+                row.put("title", item.get("title"));
+                row.put("createdAt", item.get("createdAt"));
+                all.add(row);
+            }
+        }
+        int safePageNo = pageNo <= 0 ? 1 : pageNo;
+        int safePageSize = pageSize <= 0 ? 10 : pageSize;
+        int from = Math.min((safePageNo - 1) * safePageSize, all.size());
+        int to = Math.min(from + safePageSize, all.size());
+        Map<String, Object> result = listResult(new ArrayList<>(all.subList(from, to)));
+        result.put("pageNo", safePageNo);
+        result.put("pageSize", safePageSize);
+        result.put("total", all.size());
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> getSkillConversationDetail(String userId, String orgId, String conversationId) {
+        Map<String, Object> item = require(skillConversations, orgId, conversationId, "skill conversation");
+        return listResult(copyList(listValue(item.get("messages"))));
+    }
+
+    @Override
+    public Map<String, Object> chatSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> item = require(skillConversations, orgId, text(request, "conversationId"),
+                "skill conversation");
+        String query = defaultText(request, "query", "");
+        String response = "Generated local skill draft for: " + query;
+        Map<String, Object> userMessage = conversationMessage("user", query, Collections.<Map<String, Object>>emptyList());
+        Map<String, Object> assistantMessage = conversationMessage("assistant", response,
+                Collections.singletonList(skillResponseFile(query)));
+        listValue(item.get("messages")).add(userMessage);
+        listValue(item.get("messages")).add(assistantMessage);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("code", null);
+        payload.put("message", "success");
+        payload.put("response", response);
+        payload.put("finish", 1);
+        payload.put("responseFiles", assistantMessage.get("responseFiles"));
+        payload.put("usage", null);
+        return payload;
+    }
+
+    @Override
+    public Map<String, Object> saveSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> create = new LinkedHashMap<>();
+        create.put("name", defaultText(request, "name", "Generated Skill"));
+        create.put("desc", defaultText(request, "desc", "Saved from local skill conversation"));
+        create.put("author", defaultText(request, "author", "Wanwu"));
+        create.put("zipUrl", defaultText(request, "skillSaveId", ""));
+        create.put("sourceType", "skill_conversation");
+        return createCustomSkill(userId, orgId, create);
+    }
+
     private Map<String, Object> customToolBase(Map<String, Object> request) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("avatar", avatar(request));
@@ -525,6 +830,234 @@ public class McpServiceImpl implements McpService {
         item.put("prompt", defaultText(request, "prompt", ""));
         item.put("updateAt", now());
         return item;
+    }
+
+    private Map<String, Object> customSkillBase(Map<String, Object> request) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("avatar", avatar(request));
+        item.put("name", defaultText(request, "name", "Imported Skill"));
+        item.put("author", defaultText(request, "author", "Wanwu"));
+        item.put("desc", defaultText(request, "desc", "Imported local skill package."));
+        item.put("zipUrl", defaultText(request, "zipUrl", ""));
+        item.put("objectPath", defaultText(request, "zipUrl", ""));
+        item.put("sourceType", defaultText(request, "sourceType", "skill_import"));
+        item.put("threadId", defaultText(request, "threadId", ""));
+        item.put("previewId", defaultText(request, "previewId", ""));
+        return item;
+    }
+
+    private Map<String, Object> customSkillInfo(Map<String, Object> item) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("name", item.get("name"));
+        row.put("avatar", item.get("avatar"));
+        row.put("author", item.get("author"));
+        row.put("desc", item.get("desc"));
+        row.put("threadId", item.get("threadId"));
+        row.put("previewId", item.get("previewId"));
+        return row;
+    }
+
+    private Map<String, Object> customSkillDetail(Map<String, Object> item) {
+        Map<String, Object> row = customSkillInfo(item);
+        row.put("variables", skillVariables(item));
+        return row;
+    }
+
+    private Map<String, Object> skillDetail(Map<String, Object> item, List<Map<String, Object>> variables,
+                                            boolean includeMarkdown) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("name", item.get("name"));
+        row.put("avatar", item.get("avatar"));
+        row.put("author", item.get("author"));
+        row.put("desc", item.get("desc"));
+        if (includeMarkdown) {
+            row.put("skillMarkdown", item.get("skillMarkdown"));
+        }
+        row.put("variables", copyList(variables));
+        return row;
+    }
+
+    private Map<String, Object> skillSelect(Map<String, Object> item, String type) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("skillName", item.get("name"));
+        row.put("skillType", type);
+        row.put("desc", item.get("desc"));
+        row.put("author", item.get("author"));
+        row.put("avatar", item.get("avatar"));
+        return row;
+    }
+
+    private Map<String, Object> acquiredSkillFromSquare(Map<String, Object> source) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("squareSkillId", source.get("skillId"));
+        item.put("name", source.get("name"));
+        item.put("avatar", source.get("avatar"));
+        item.put("author", source.get("author"));
+        item.put("desc", source.get("desc"));
+        item.put("skillMarkdown", source.get("skillMarkdown"));
+        item.put("objectPath", "builtin://" + source.get("skillId"));
+        item.put("downloadUrl", "/user/api/v1/square/skill/download?skillId=" + source.get("skillId"));
+        return item;
+    }
+
+    private Map<String, Object> acquiredSkillDetail(Map<String, Object> item, boolean includeVariables) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("squareSkillId", item.get("squareSkillId"));
+        row.put("name", item.get("name"));
+        row.put("avatar", item.get("avatar"));
+        row.put("author", item.get("author"));
+        row.put("desc", item.get("desc"));
+        row.put("skillMarkdown", item.get("skillMarkdown"));
+        row.put("downloadUrl", item.get("downloadUrl"));
+        if (includeVariables) {
+            row.put("variables", skillVariables(item));
+        }
+        return row;
+    }
+
+    private Map<String, Object> squareSkillInfo(Map<String, Object> item, boolean shared) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("name", item.get("name"));
+        row.put("avatar", item.get("avatar"));
+        row.put("author", item.get("author"));
+        row.put("desc", item.get("desc"));
+        row.put("isShared", shared);
+        return row;
+    }
+
+    private Map<String, Object> squareBuiltinSkillInfo(Map<String, Object> item) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", item.get("skillId"));
+        row.put("name", item.get("name"));
+        row.put("avatar", item.get("avatar"));
+        row.put("author", item.get("author"));
+        row.put("desc", item.get("desc"));
+        return row;
+    }
+
+    private Map<String, Object> createSkillVariable(Map<String, Object> item, Map<String, Object> request) {
+        Map<String, Object> variable = request != null && request.get("variable") instanceof Map
+                ? castMap(request.get("variable"))
+                : Collections.<String, Object>emptyMap();
+        Map<String, Object> row = skillVariable(variable);
+        listValue(item.get("variables")).add(row);
+        return singleton("id", row.get("id"));
+    }
+
+    private void updateSkillVariable(String orgId, String variableId, Map<String, Object> request) {
+        Map<String, Object> variable = request != null && request.get("variable") instanceof Map
+                ? castMap(request.get("variable"))
+                : Collections.<String, Object>emptyMap();
+        for (Map<String, Object> owner : skillVariableOwners(orgId)) {
+            for (Map<String, Object> row : listValue(owner.get("variables"))) {
+                if (variableId.equals(text(row, "id"))) {
+                    row.putAll(skillVariableFields(variable));
+                    return;
+                }
+            }
+        }
+    }
+
+    private void deleteSkillVariable(String orgId, String variableId) {
+        for (Map<String, Object> owner : skillVariableOwners(orgId)) {
+            listValue(owner.get("variables")).removeIf(row -> variableId.equals(text(row, "id")));
+        }
+    }
+
+    private List<Map<String, Object>> skillVariableOwners(String orgId) {
+        List<Map<String, Object>> owners = new ArrayList<>();
+        for (Map<String, Object> item : customSkills.values()) {
+            if (sameOrg(item, orgId)) {
+                owners.add(item);
+            }
+        }
+        for (Map<String, Object> item : acquiredSkills.values()) {
+            if (sameOrg(item, orgId)) {
+                owners.add(item);
+            }
+        }
+        for (Map<String, Object> item : builtinSkillVariableStores.values()) {
+            if (sameOrg(item, orgId)) {
+                owners.add(item);
+            }
+        }
+        return owners;
+    }
+
+    private Map<String, Object> skillVariable(Map<String, Object> variable) {
+        Map<String, Object> row = skillVariableFields(variable);
+        row.put("id", "var-" + variableSequence.getAndIncrement());
+        return row;
+    }
+
+    private Map<String, Object> skillVariableFields(Map<String, Object> variable) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("name", defaultText(variable, "name", "Variable"));
+        row.put("desc", defaultText(variable, "desc", ""));
+        row.put("variableKey", defaultText(variable, "variableKey", ""));
+        row.put("variableValue", defaultText(variable, "variableValue", ""));
+        return row;
+    }
+
+    private List<Map<String, Object>> skillVariables(Map<String, Object> item) {
+        return copyList(listValue(item.get("variables")));
+    }
+
+    private Map<String, Object> builtinSkillVariableItem(String orgId, String skillId) {
+        String key = scoped(orgId, skillId);
+        Map<String, Object> existing = builtinSkillVariableStores.get(key);
+        if (existing != null) {
+            return existing;
+        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("skillId", skillId);
+        item.put("ownerOrgId", org(orgId));
+        item.put("variables", new ArrayList<Map<String, Object>>());
+        Map<String, Object> raced = builtinSkillVariableStores.putIfAbsent(key, item);
+        return raced == null ? item : raced;
+    }
+
+    private boolean isAcquired(String orgId, String squareSkillId) {
+        for (Map<String, Object> item : acquiredSkills.values()) {
+            if (sameOrg(item, orgId) && squareSkillId.equals(text(item, "squareSkillId"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private byte[] skillArchive(String skillId, String source) {
+        String body = "SKILL.md\nname: " + skillId + "\nsource: " + source + "\n";
+        return body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private Map<String, Object> conversationMessage(String role, String content,
+                                                    List<Map<String, Object>> responseFiles) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("role", role);
+        row.put("content", content);
+        row.put("createdAt", now());
+        row.put("responseFiles", responseFiles);
+        return row;
+    }
+
+    private Map<String, Object> skillResponseFile(String query) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("skillId", "generated-" + compact(query));
+        row.put("skillSaveId", "save-" + compact(query));
+        row.put("name", "Generated Skill");
+        row.put("desc", "Local deterministic skill draft.");
+        row.put("author", "Wanwu");
+        row.put("avatar", avatar("/imgs/skill.svg"));
+        row.put("downloadUrl", "/user/api/v1/builtin/skill/download?skillId=builtin-summary");
+        row.put("inResource", false);
+        row.put("expiredAt", "2030-01-01 00:00:00");
+        return row;
     }
 
     private List<Map<String, Object>> apiList(Object schema) {
@@ -746,6 +1279,31 @@ public class McpServiceImpl implements McpService {
         return list;
     }
 
+    private List<Map<String, Object>> builtinSkills() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        list.add(builtinSkillSeed("builtin-summary", "Summary Skill", "Wanwu",
+                "Summarize documents into structured notes.",
+                "# Summary Skill\n\nUse this skill to summarize long material into facts, conclusions, and action items."));
+        list.add(builtinSkillSeed("builtin-review", "Review Skill", "Wanwu",
+                "Review content and return risks, evidence, and next actions.",
+                "# Review Skill\n\nUse this skill to inspect content, find risks, and produce concrete fixes."));
+        return list;
+    }
+
+    private Map<String, Object> builtinSkillSeed(String skillId, String name, String author, String desc,
+                                                 String markdown) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("skillId", skillId);
+        item.put("avatar", avatar("/imgs/skill.svg"));
+        item.put("name", name);
+        item.put("author", author);
+        item.put("desc", desc);
+        item.put("skillMarkdown", markdown);
+        item.put("downloadUrl", "/user/api/v1/builtin/skill/download?skillId=" + skillId);
+        item.put("variables", new ArrayList<Map<String, Object>>());
+        return item;
+    }
+
     private List<Map<String, Object>> promptTemplates() {
         List<Map<String, Object>> list = new ArrayList<>();
         list.add(promptTemplate("prompt-template-summary", "总结助手", "把材料整理成结构化摘要",
@@ -795,6 +1353,15 @@ public class McpServiceImpl implements McpService {
             }
         }
         throw new IllegalArgumentException("builtin tool not found: " + id);
+    }
+
+    private Map<String, Object> builtinSkill(String id) {
+        for (Map<String, Object> item : builtinSkills()) {
+            if (text(item, "skillId").equals(id)) {
+                return item;
+            }
+        }
+        throw new IllegalArgumentException("builtin skill not found: " + id);
     }
 
     private Map<String, Object> mcpSquare(String id) {

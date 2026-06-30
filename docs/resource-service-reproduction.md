@@ -4,13 +4,13 @@ Date: 2026-06-30
 
 ## Original Go Mapping
 
-- Frontend callers: `web/src/api/mcp.js`, `web/src/api/templateSquare.js`, `web/src/api/promptTemplate.js`, `web/src/views/tool`, `web/src/views/mcpManagementPublic`, and `web/src/components/createApp/createPrompt.vue`.
-- Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\tool.go`, `mcp_square.go`, and the prompt routes in `explore.go`.
-- Go request/response contracts: `internal\bff-service\model\request\tool.go`, `mcp.go`, `mcp_server.go`, `prompt.go`; responses in the matching `response` files.
+- Frontend callers: `web/src/api/mcp.js`, `web/src/api/templateSquare.js`, `web/src/api/promptTemplate.js`, `web/src/api/skill.js`, `web/src/api/skillSquare.js`, `web/src/views/tool`, `web/src/views/mcpManagementPublic`, and `web/src/components/createApp/createPrompt.vue`.
+- Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\tool.go`, `mcp_square.go`, `skill.go`, `skill_square.go`, and the prompt routes in `explore.go`.
+- Go request/response contracts: `internal\bff-service\model\request\tool.go`, `mcp.go`, `mcp_server.go`, `prompt.go`, `skill.go`, `skill_square.go`; responses in the matching `response` files.
 
 ## Covered Java Behavior
 
-- `wanwu-api` now exposes a Java `McpService` contract for resource-center Tool, MCP, MCP Server, MCP square, Prompt, and assistant select/action queries.
+- `wanwu-api` now exposes a Java `McpService` contract for resource-center Tool, MCP, MCP Server, MCP square, Prompt, Skill, Skill square, and assistant select/action queries.
 - `wanwu-service-mcp` implements a Docker development in-memory repository for:
   - Custom Tool create/list/detail/update/delete.
   - OpenAPI schema parsing into frontend action rows and MCP-compatible `name/description/inputSchema` tools.
@@ -21,7 +21,13 @@ Date: 2026-06-30
   - Custom Prompt create/list/detail/update/delete/copy.
   - Prompt template list/detail/copy-to-custom.
   - Prompt optimize/reason/evaluate SSE compatibility with deterministic local responses.
-- `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, and `/user/api/v1/prompt`.
+  - Custom Skill import/check/list/detail/delete.
+  - Custom/Built-in/Acquired Skill variable config create/update/delete.
+  - Built-in Skill list/detail/download seed data.
+  - Skill select endpoint for Agent configuration.
+  - Skill square list/detail/share/download seed data and acquired Skill list/detail/delete.
+  - Skill conversation create/list/detail/delete/clear/chat/save with deterministic local SSE responses.
+- `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, `/user/api/v1/prompt`, `/user/api/v1/agent/skill`, `/user/api/v1/agent/acquired/skill`, and `/user/api/v1/square/skill`.
 - Docker Compose `full` profile includes `mcp` on ports `8087` and `20887`, and BFF waits for it.
 
 ## Verification
@@ -29,26 +35,31 @@ Date: 2026-06-30
 Executed in Docker with Java 8:
 
 - `mvn -q -pl wanwu-service-iam,wanwu-service-bff,wanwu-service-mcp -am -DfailIfNoTests=false test`
-- `docker compose --profile full build mcp`
-- `docker compose --profile full build iam bff`
-- `docker compose --profile full up -d --no-build knowledge iam mcp bff web`
+- `docker compose --profile full build mcp bff iam`
+- `docker compose --profile full up -d --no-build mcp bff iam web`
 
 Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
-- Login as `admin` returned token `dev-token` and 17 implemented permissions, including `resource.tool`, `resource.mcp`, and `resource.prompt`.
+- Login as `admin` returned token `dev-token` and 18 implemented permissions, including `resource.tool`, `resource.mcp`, `resource.prompt`, and `resource.skill`.
+- Login as `app` returned token `dev-token-app` and only `app`, `app.rag`, `app.workflow`, `app.agent`.
 - Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, and `/tool/action/list?toolType=custom`.
 - Created an MCP Server and verified `/mcp/server/list`.
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
+- Checked and created a custom Skill, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
+- Verified built-in Skill list/detail/download for `builtin-summary`.
+- Verified Skill square list, share-to-resource, acquired Skill list, and acquired Skill config.
+- Verified Skill conversation create/chat SSE/save through `/agent/skill/conversation/*`.
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages from receiving backend 404s and lets Agent configuration select real locally-created Tool/MCP resources.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages from receiving backend 404s and lets Agent configuration select real locally-created Tool/MCP/Skill resources.
 
 It does not yet implement:
 
 - MySQL persistence for resource records.
 - Real remote MCP protocol runtime, SSE/streamable proxying, or OpenAPI invocation.
-- Built-in/acquired/custom Skill resource flows.
+- Real Skill package parsing, validation, execution, and package storage.
+- Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.
 - Callback/OpenAPI runtime endpoints for MCP Server clients.
