@@ -2333,20 +2333,44 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.listReports(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PostMapping({"/knowledge/report/generate", "/knowledge/report/update", "/knowledge/report/add", "/knowledge/report/batch/add"})
-    public FrontendResponse<Map<String, Object>> mutateKnowledgeReports(
+    @PostMapping("/knowledge/report/generate")
+    public FrontendResponse<Map<String, Object>> generateKnowledgeReport(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
-        });
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.generateReport(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/report/update")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeReport(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateReport(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/report/add")
+    public FrontendResponse<Map<String, Object>> addKnowledgeReport(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.addReport(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/report/batch/add")
+    public FrontendResponse<Map<String, Object>> batchAddKnowledgeReport(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.batchAddReports(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @DeleteMapping("/knowledge/report/delete")
     public FrontendResponse<Map<String, Object>> deleteKnowledgeReport(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
-        });
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteReport(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/export/record/list")

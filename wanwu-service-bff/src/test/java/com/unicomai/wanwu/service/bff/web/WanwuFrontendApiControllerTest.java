@@ -1725,6 +1725,67 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void knowledgeReportRoutesDispatchToServiceAndReturnFrontendContract() throws Exception {
+        when(knowledgeService.listReports(anyString(), anyString(), any(Map.class)))
+                .thenReturn(reportPage(report("report-001", "Manual", "Manual content")));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/report/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001")
+                        .param("pageNo", "1")
+                        .param("pageSize", "8"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.status").value(2))
+                .andExpect(jsonPath("$.data.canGenerate").value(true))
+                .andExpect(jsonPath("$.data.canAddReport").value(true))
+                .andExpect(jsonPath("$.data.list[0].contentId").value("report-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/report/generate")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/report/add")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"title\":\"Manual\",\"content\":\"Manual content\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/report/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"contentId\":\"report-001\",\"title\":\"Updated\",\"content\":\"Updated content\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/report/batch/add")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"fileUploadId\":\"file-report-csv\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/report/delete")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"contentId\":\"report-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).listReports(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).generateReport(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).addReport(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateReport(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).batchAddReports(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteReport(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
     public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
         when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("qaPairId", "qa-001"));
@@ -3029,6 +3090,29 @@ public class WanwuFrontendApiControllerTest {
         tip.put("knowledgeId", knowledgeId);
         tip.put("knowledgeName", knowledgeName);
         return tip;
+    }
+
+    private Map<String, Object> reportPage(Map<String, Object> report) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(report));
+        page.put("total", 1);
+        page.put("pageNo", 1);
+        page.put("pageSize", 8);
+        page.put("createdAt", "1782857150000");
+        page.put("status", 2);
+        page.put("canGenerate", true);
+        page.put("canAddReport", true);
+        page.put("generateLabel", "Regenerate");
+        page.put("lastImportStatus", -1);
+        return page;
+    }
+
+    private Map<String, Object> report(String contentId, String title, String content) {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("contentId", contentId);
+        report.put("title", title);
+        report.put("content", content);
+        return report;
     }
 
     private Map<String, Object> qaPairPage(String knowledgeId, String knowledgeName, Map<String, Object> pair) {

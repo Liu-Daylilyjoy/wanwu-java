@@ -36,6 +36,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int PERMISSION_ADMIN = 20;
     private static final int CATEGORY_KNOWLEDGE = 0;
     private static final int QA_STATUS_FINISHED = 2;
+    private static final int REPORT_STATUS_PENDING = 0;
+    private static final int REPORT_STATUS_GENERATED = 2;
+    private static final int REPORT_IMPORT_NONE = -1;
+    private static final int REPORT_IMPORT_SUCCESS = 2;
     private static final int EXTERNAL_ALL = -1;
     private static final int EXTERNAL_INTERNAL = 0;
     private static final int DOC_STATUS_FINISHED = 1;
@@ -55,6 +59,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
     private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
     private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
+    private final Map<String, List<ReportState>> reportsByKnowledgeId = new LinkedHashMap<String, List<ReportState>>();
     private final Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
     private final Map<String, List<Map<String, Object>>> metasByKnowledgeId = new LinkedHashMap<String, List<Map<String, Object>>>();
     private final Map<String, List<PermissionState>> permissionsByKnowledgeId = new LinkedHashMap<String, List<PermissionState>>();
@@ -65,6 +70,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextDocId = new AtomicLong(1000);
     private final AtomicLong nextSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
+    private final AtomicLong nextReportId = new AtomicLong(1000);
     private final AtomicLong nextKeywordId = new AtomicLong(1000);
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
@@ -164,6 +170,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         tagIdsByKnowledgeId.put(knowledgeId, new ArrayList<String>());
         docsByKnowledgeId.put(knowledgeId, new ArrayList<DocState>());
         qaPairsByKnowledgeId.put(knowledgeId, new ArrayList<QaPairState>());
+        reportsByKnowledgeId.put(knowledgeId, new ArrayList<ReportState>());
         metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
         permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
         addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
@@ -202,6 +209,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             qaPairsById.remove(pair.qaPairId);
         }
         qaPairsByKnowledgeId.remove(knowledgeId);
+        reportsByKnowledgeId.remove(knowledgeId);
         for (KeywordState keyword : keywords.values()) {
             keyword.knowledgeBaseIds.remove(knowledgeId);
         }
@@ -871,33 +879,115 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public Map<String, Object> listReports(String userId, String orgId, Map<String, Object> request) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("list", Collections.emptyList());
-        result.put("total", 0);
-        result.put("pageNo", intValue(safe(request).get("pageNo"), 1));
-        result.put("pageSize", intValue(safe(request).get("pageSize"), 10));
+    public synchronized Map<String, Object> listReports(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        List<ReportState> reports = reports(knowledgeId);
+        List<Map<String, Object>> all = new ArrayList<Map<String, Object>>();
+        int lastImportStatus = REPORT_IMPORT_NONE;
+        for (ReportState report : reports) {
+            all.add(toReportInfo(report));
+            if (report.imported) {
+                lastImportStatus = REPORT_IMPORT_SUCCESS;
+            }
+        }
+        Map<String, Object> result = page(all,
+                intValue(safe.get("pageNo"), 1),
+                intValue(safe.get("pageSize"), 10));
+        result.put("createdAt", latestReportCreatedAt(reports));
+        result.put("status", reports.isEmpty() ? REPORT_STATUS_PENDING : REPORT_STATUS_GENERATED);
+        result.put("canGenerate", Boolean.TRUE);
+        result.put("canAddReport", Boolean.TRUE);
+        result.put("generateLabel", reports.isEmpty() ? "" : "Regenerate");
+        result.put("lastImportStatus", lastImportStatus);
         return result;
     }
 
     @Override
-    public void generateReport(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void generateReport(String userId, String orgId, Map<String, Object> request) {
+        String knowledgeId = string(safe(request).get("knowledgeId"));
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        ReportState generated = null;
+        for (ReportState report : reports(knowledgeId)) {
+            if (report.generated) {
+                generated = report;
+                break;
+            }
+        }
+        if (generated == null) {
+            generated = newReport(knowledgeId, "Generated Community Report",
+                    generatedReportContent(knowledge), false, true);
+            reports(knowledgeId).add(0, generated);
+        } else {
+            generated.title = "Generated Community Report";
+            generated.content = generatedReportContent(knowledge);
+            generated.createdAt = nowMillis();
+        }
+        saveSnapshot();
     }
 
     @Override
-    public void deleteReport(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void deleteReport(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        String contentId = string(safe.get("contentId"));
+        List<ReportState> reports = reports(knowledgeId);
+        for (int i = reports.size() - 1; i >= 0; i--) {
+            if (contentId.equals(reports.get(i).contentId)) {
+                reports.remove(i);
+            }
+        }
+        saveSnapshot();
     }
 
     @Override
-    public void updateReport(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateReport(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        ReportState report = existingReport(knowledgeId, string(safe.get("contentId")));
+        String title = string(safe.get("title")).trim();
+        String content = string(safe.get("content")).trim();
+        if (isBlank(title) || isBlank(content)) {
+            throw new IllegalArgumentException("report title and content cannot be empty");
+        }
+        report.title = title;
+        report.content = content;
+        report.createdAt = nowMillis();
+        saveSnapshot();
     }
 
     @Override
-    public void addReport(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void addReport(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        String title = string(safe.get("title")).trim();
+        String content = string(safe.get("content")).trim();
+        if (isBlank(title) || isBlank(content)) {
+            throw new IllegalArgumentException("report title and content cannot be empty");
+        }
+        reports(knowledgeId).add(0, newReport(knowledgeId, title, content, false, false));
+        saveSnapshot();
     }
 
     @Override
-    public void batchAddReports(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void batchAddReports(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        String fileUploadId = string(safe.get("fileUploadId"));
+        if (isBlank(fileUploadId)) {
+            throw new IllegalArgumentException("fileUploadId cannot be empty");
+        }
+        reports(knowledgeId).add(0, newReport(knowledgeId,
+                "Imported Community Report",
+                "Imported from fileUploadId: " + fileUploadId,
+                true,
+                false));
+        saveSnapshot();
     }
 
     @Override
@@ -1445,6 +1535,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return pair;
     }
 
+    private ReportState existingReport(String knowledgeId, String contentId) {
+        for (ReportState report : reports(knowledgeId)) {
+            if (contentId.equals(report.contentId)) {
+                return report;
+            }
+        }
+        throw new IllegalArgumentException("report not found: " + contentId);
+    }
+
     private PermissionState findPermission(String permissionId) {
         if (isBlank(permissionId)) {
             return null;
@@ -1512,6 +1611,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             qaPairsByKnowledgeId.put(knowledgeId, pairs);
         }
         return pairs;
+    }
+
+    private List<ReportState> reports(String knowledgeId) {
+        List<ReportState> reports = reportsByKnowledgeId.get(knowledgeId);
+        if (reports == null) {
+            reports = new ArrayList<ReportState>();
+            reportsByKnowledgeId.put(knowledgeId, reports);
+        }
+        return reports;
     }
 
     private List<Map<String, Object>> metas(String knowledgeId) {
@@ -1582,6 +1690,44 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
         }
         return false;
+    }
+
+    private ReportState newReport(String knowledgeId, String title, String content, boolean imported, boolean generated) {
+        ReportState report = new ReportState();
+        report.contentId = "report-" + nextReportId.incrementAndGet();
+        report.knowledgeId = knowledgeId;
+        report.title = title;
+        report.content = content;
+        report.createdAt = nowMillis();
+        report.imported = imported;
+        report.generated = generated;
+        return report;
+    }
+
+    private Map<String, Object> toReportInfo(ReportState report) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("contentId", report.contentId);
+        result.put("title", report.title);
+        result.put("content", report.content);
+        return result;
+    }
+
+    private String latestReportCreatedAt(List<ReportState> reports) {
+        String latest = "";
+        for (ReportState report : reports) {
+            if (!isBlank(report.createdAt) && (isBlank(latest) || report.createdAt.compareTo(latest) > 0)) {
+                latest = report.createdAt;
+            }
+        }
+        return latest;
+    }
+
+    private String generatedReportContent(KnowledgeState knowledge) {
+        int docCount = docs(knowledge.knowledgeId).size();
+        int qaCount = qaPairs(knowledge.knowledgeId).size();
+        return "Development community report for " + knowledge.name
+                + ". Documents: " + docCount
+                + ", QA pairs: " + qaCount + ".";
     }
 
     private String embeddingModelId(Object raw) {
@@ -1756,6 +1902,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return value == null || value.trim().isEmpty();
     }
 
+    private String nowMillis() {
+        return String.valueOf(System.currentTimeMillis());
+    }
+
     private void saveSnapshot() {
         if (knowledgeRecordMapper == null) {
             return;
@@ -1784,6 +1934,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.segmentsByDocId.putAll(segmentsByDocId);
         snapshot.qaPairsByKnowledgeId.putAll(qaPairsByKnowledgeId);
         snapshot.qaPairsById.putAll(qaPairsById);
+        snapshot.reportsByKnowledgeId.putAll(reportsByKnowledgeId);
         snapshot.keywords.putAll(keywords);
         snapshot.metasByKnowledgeId.putAll(metasByKnowledgeId);
         snapshot.permissionsByKnowledgeId.putAll(permissionsByKnowledgeId);
@@ -1793,6 +1944,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.nextDocId = nextDocId.get();
         snapshot.nextSegmentId = nextSegmentId.get();
         snapshot.nextQaPairId = nextQaPairId.get();
+        snapshot.nextReportId = nextReportId.get();
         snapshot.nextKeywordId = nextKeywordId.get();
         snapshot.nextMetaId = nextMetaId.get();
         snapshot.nextPermissionId = nextPermissionId.get();
@@ -1823,6 +1975,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         qaPairsById.clear();
         qaPairsById.putAll(safeMap(snapshot.qaPairsById));
         rebuildQaPairIndex();
+        reportsByKnowledgeId.clear();
+        reportsByKnowledgeId.putAll(safeMap(snapshot.reportsByKnowledgeId));
         keywords.clear();
         keywords.putAll(safeMap(snapshot.keywords));
         metasByKnowledgeId.clear();
@@ -1836,6 +1990,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         restoreSequence(nextDocId, snapshot.nextDocId);
         restoreSequence(nextSegmentId, snapshot.nextSegmentId);
         restoreSequence(nextQaPairId, snapshot.nextQaPairId);
+        restoreSequence(nextReportId, snapshot.nextReportId);
         restoreSequence(nextKeywordId, snapshot.nextKeywordId);
         restoreSequence(nextMetaId, snapshot.nextMetaId);
         restoreSequence(nextPermissionId, snapshot.nextPermissionId);
@@ -1860,6 +2015,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         for (QaPairState pair : qaPairsById.values()) {
             bumpSequence(nextQaPairId, pair.qaPairId, "qa-");
+        }
+        for (List<ReportState> reports : reportsByKnowledgeId.values()) {
+            for (ReportState report : safeList(reports)) {
+                bumpSequence(nextReportId, report.contentId, "report-");
+            }
         }
         for (KeywordState keyword : keywords.values()) {
             if (keyword.id > nextKeywordId.get()) {
@@ -1922,6 +2082,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
         private Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
         private Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
+        private Map<String, List<ReportState>> reportsByKnowledgeId =
+                new LinkedHashMap<String, List<ReportState>>();
         private Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
         private Map<String, List<Map<String, Object>>> metasByKnowledgeId =
                 new LinkedHashMap<String, List<Map<String, Object>>>();
@@ -1933,6 +2095,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private long nextDocId;
         private long nextSegmentId;
         private long nextQaPairId;
+        private long nextReportId;
         private long nextKeywordId;
         private long nextMetaId;
         private long nextPermissionId;
@@ -2015,6 +2178,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private boolean enabled;
         private String errorMsg;
         private final List<Map<String, Object>> metaDataList = new ArrayList<Map<String, Object>>();
+    }
+
+    private static final class ReportState {
+        private String contentId;
+        private String knowledgeId;
+        private String title;
+        private String content;
+        private String createdAt;
+        private boolean imported;
+        private boolean generated;
     }
 
     private static final class PermissionState {

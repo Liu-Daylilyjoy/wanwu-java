@@ -157,6 +157,49 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void reportLifecycleFollowsFrontendAndGoContract() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Report KB", 0)).get("knowledgeId");
+
+        Map<String, Object> empty = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(0, empty.get("total"));
+        assertEquals(0, empty.get("status"));
+        assertEquals(true, empty.get("canGenerate"));
+        assertEquals(true, empty.get("canAddReport"));
+        assertEquals(-1, empty.get("lastImportStatus"));
+
+        service.generateReport("dev-admin", "default-org", singleton("knowledgeId", knowledgeId));
+        Map<String, Object> generated = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(1, generated.get("total"));
+        assertEquals(2, generated.get("status"));
+        Map<String, Object> generatedReport = listOfMaps(generated.get("list")).get(0);
+        assertEquals("Generated Community Report", generatedReport.get("title"));
+        assertTrue(((String) generatedReport.get("content")).contains("Report KB"));
+
+        service.addReport("dev-admin", "default-org", reportCreate(knowledgeId, "Manual", "Manual content"));
+        Map<String, Object> withManual = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 1));
+        assertEquals(2, withManual.get("total"));
+        Map<String, Object> manual = listOfMaps(withManual.get("list")).get(0);
+        assertEquals("Manual", manual.get("title"));
+
+        String contentId = (String) manual.get("contentId");
+        service.updateReport("dev-admin", "default-org",
+                reportUpdate(knowledgeId, contentId, "Manual Updated", "Updated content"));
+        Map<String, Object> updatedPage = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals("Manual Updated", listOfMaps(updatedPage.get("list")).get(0).get("title"));
+
+        service.batchAddReports("dev-admin", "default-org", reportBatch(knowledgeId, "file-report-csv"));
+        Map<String, Object> imported = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(3, imported.get("total"));
+        assertEquals(2, imported.get("lastImportStatus"));
+        assertEquals("Imported Community Report", listOfMaps(imported.get("list")).get(0).get("title"));
+
+        service.deleteReport("dev-admin", "default-org", reportDelete(knowledgeId, contentId));
+        Map<String, Object> afterDelete = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(2, afterDelete.get("total"));
+    }
+
+    @Test
     public void documentImportAndSegmentsFollowFrontendAndGoContract() {
         Map<String, Object> created = service.createKnowledge("dev-admin", "default-org", createKnowledge("Dev Docs", 0));
         String knowledgeId = (String) created.get("knowledgeId");
@@ -221,6 +264,8 @@ public class KnowledgeServiceImplTest {
                 qaPairCreate(knowledgeId, "Persist?", "Yes."));
         persistent.createKeyword("dev-admin", "default-org",
                 keywordCreate("Persist keyword", "Persist alias", knowledgeId));
+        persistent.addReport("dev-admin", "default-org",
+                reportCreate(knowledgeId, "Persist report", "Persist report body"));
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -231,6 +276,7 @@ public class KnowledgeServiceImplTest {
         assertTrue(last.getPayload().contains("doc-persist"));
         assertTrue(last.getPayload().contains("Persist?"));
         assertTrue(last.getPayload().contains("Persist keyword"));
+        assertTrue(last.getPayload().contains("Persist report"));
     }
 
     @Test
@@ -247,6 +293,8 @@ public class KnowledgeServiceImplTest {
                 qaPairCreate(knowledgeId, "Restart?", "Loaded."));
         source.createKeyword("dev-admin", "default-org",
                 keywordCreate("Restart keyword", "Restart alias", knowledgeId));
+        source.addReport("dev-admin", "default-org",
+                reportCreate(knowledgeId, "Restart report", "Restart report body"));
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -266,6 +314,7 @@ public class KnowledgeServiceImplTest {
         assertEquals(1, restarted.listQaPairs("dev-admin", "default-org",
                 qaPairList(knowledgeId, "Restart", Collections.singletonList(-1))).get("total"));
         assertEquals(1, restarted.listKeywords("dev-admin", "default-org", keywordList("Restart")).get("total"));
+        assertEquals(1, restarted.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10)).get("total"));
 
         Map<String, Object> next = restarted.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Restart Next", 0));
@@ -273,6 +322,10 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> nextKeyword = restarted.createKeyword("dev-admin", "default-org",
                 keywordCreate("Restart next keyword", "Restart next alias", (String) next.get("knowledgeId")));
         assertEquals(1002L, nextKeyword.get("id"));
+        restarted.addReport("dev-admin", "default-org",
+                reportCreate((String) next.get("knowledgeId"), "Restart next report", "Restart next report body"));
+        assertEquals("report-1002", listOfMaps(restarted.listReports("dev-admin", "default-org",
+                reportList((String) next.get("knowledgeId"), 1, 10)).get("list")).get(0).get("contentId"));
         verify(restartMapper, atLeastOnce()).upsertRecord(any(KnowledgeRecordEntity.class));
     }
 
@@ -470,6 +523,42 @@ public class KnowledgeServiceImplTest {
         request.put("question", question);
         request.put("knowledgeList", Collections.singletonList(singleton("knowledgeId", knowledgeId)));
         request.put("knowledgeMatchParams", singleton("topK", 5));
+        return request;
+    }
+
+    private Map<String, Object> reportList(String knowledgeId, int pageNo, int pageSize) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("pageNo", pageNo);
+        request.put("pageSize", pageSize);
+        return request;
+    }
+
+    private Map<String, Object> reportCreate(String knowledgeId, String title, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("title", title);
+        request.put("content", content);
+        return request;
+    }
+
+    private Map<String, Object> reportUpdate(String knowledgeId, String contentId, String title, String content) {
+        Map<String, Object> request = reportCreate(knowledgeId, title, content);
+        request.put("contentId", contentId);
+        return request;
+    }
+
+    private Map<String, Object> reportDelete(String knowledgeId, String contentId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("contentId", contentId);
+        return request;
+    }
+
+    private Map<String, Object> reportBatch(String knowledgeId, String fileUploadId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("fileUploadId", fileUploadId);
         return request;
     }
 
