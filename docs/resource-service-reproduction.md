@@ -11,7 +11,7 @@ Date: 2026-06-30
 ## Covered Java Behavior
 
 - `wanwu-api` now exposes a Java `McpService` contract for resource-center Tool, MCP, MCP Server, MCP square, Prompt, Skill, Skill square, and assistant select/action queries.
-- `wanwu-service-mcp` implements a Docker development in-memory repository for:
+- `wanwu-service-mcp` implements a Docker MySQL-backed compatibility repository for:
   - Custom Tool create/list/detail/update/delete.
   - OpenAPI schema parsing into frontend action rows and MCP-compatible `name/description/inputSchema` tools.
   - Built-in Tool square list/detail and API-key shell.
@@ -53,11 +53,11 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages from receiving backend 404s and lets Agent configuration select real locally-created Tool/MCP/Skill resources.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages from receiving backend 404s and lets Agent configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`.
 
 It does not yet implement:
 
-- MySQL persistence for resource records.
+- Normalized Go-equivalent MySQL tables for resource records.
 - Real remote MCP protocol runtime, SSE/streamable proxying, or OpenAPI invocation.
 - Real Skill package parsing, validation, execution, and package storage.
 - Real Skill conversation generation through a model provider.

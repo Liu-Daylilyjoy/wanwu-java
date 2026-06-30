@@ -1,7 +1,12 @@
 package com.unicomai.wanwu.service.mcp.rpc;
 
+import com.unicomai.wanwu.service.mcp.persistence.entity.McpRecordEntity;
+import com.unicomai.wanwu.service.mcp.persistence.mapper.McpRecordMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,13 +15,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class McpServiceImplTest {
 
     private static final String USER_ID = "dev-admin";
     private static final String ORG_ID = "default-org";
 
-    private final McpServiceImpl service = new McpServiceImpl();
+    private McpServiceImpl service;
+
+    @BeforeEach
+    public void setUp() {
+        service = new McpServiceImpl();
+    }
 
     @Test
     public void resourceLifecycleCoversToolMcpServerMcpAndPrompt() {
@@ -112,6 +128,59 @@ public class McpServiceImplTest {
                 "skillId").isEmpty());
     }
 
+    @Test
+    public void mutableResourceStateIsPersistedAsSnapshotRecord() {
+        McpRecordMapper mapper = mock(McpRecordMapper.class);
+        McpServiceImpl persistent = new McpServiceImpl(mapper);
+
+        persistent.createCustomTool(USER_ID, ORG_ID, map("name", "PersistTool", "description", "persist",
+                "schema", "{\"openapi\":\"3.0.1\",\"paths\":{}}", "apiAuth", auth()));
+        persistent.createCustomPrompt(USER_ID, ORG_ID, map("name", "PersistPrompt", "desc", "persist",
+                "prompt", "persist this"));
+
+        ArgumentCaptor<McpRecordEntity> captor = ArgumentCaptor.forClass(McpRecordEntity.class);
+        verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
+        McpRecordEntity last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("snapshot", last.getRecordType());
+        assertEquals("state", last.getRecordId());
+        assertTrue(last.getPayload().contains("PersistTool"));
+        assertTrue(last.getPayload().contains("PersistPrompt"));
+    }
+
+    @Test
+    public void persistedSnapshotIsLoadedAndVariableSequenceContinuesAfterRestart() {
+        McpRecordMapper sourceMapper = mock(McpRecordMapper.class);
+        McpServiceImpl source = new McpServiceImpl(sourceMapper);
+        source.createCustomTool(USER_ID, ORG_ID, map("name", "RestartTool", "description", "persist",
+                "schema", "{\"openapi\":\"3.0.1\",\"paths\":{}}", "apiAuth", auth()));
+        source.createCustomPrompt(USER_ID, ORG_ID, map("name", "RestartPrompt", "desc", "persist",
+                "prompt", "restart"));
+        String skillId = text(source.createCustomSkill(USER_ID, ORG_ID, map("name", "RestartSkill",
+                "author", "Wanwu", "desc", "persist", "zipUrl", "file-upload/skill.zip")), "skillId");
+        String firstVariableId = text(source.createCustomSkillConfig(USER_ID, ORG_ID,
+                map("skillId", skillId, "variable",
+                        map("name", "Token", "variableKey", "token", "variableValue", "one"))), "id");
+        assertEquals("var-1", firstVariableId);
+
+        ArgumentCaptor<McpRecordEntity> captor = ArgumentCaptor.forClass(McpRecordEntity.class);
+        verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
+        String payload = captor.getAllValues().get(captor.getAllValues().size() - 1).getPayload();
+
+        McpRecordMapper restartMapper = mock(McpRecordMapper.class);
+        when(restartMapper.selectByType(eq("snapshot")))
+                .thenReturn(Collections.singletonList(record("snapshot", "state", payload)));
+        McpServiceImpl restarted = new McpServiceImpl(restartMapper);
+
+        assertEquals("RestartTool", text(first(restarted.listCustomTools(USER_ID, ORG_ID, "RestartTool")), "name"));
+        assertEquals("RestartPrompt", text(first(restarted.listCustomPrompts(USER_ID, ORG_ID, "Restart")), "name"));
+        assertEquals(1, list(restarted.getCustomSkill(USER_ID, ORG_ID, skillId).get("variables")).size());
+        String nextVariableId = text(restarted.createCustomSkillConfig(USER_ID, ORG_ID,
+                map("skillId", skillId, "variable",
+                        map("name", "Token2", "variableKey", "token2", "variableValue", "two"))), "id");
+        assertEquals("var-2", nextVariableId);
+        verify(restartMapper, atLeastOnce()).upsertRecord(any(McpRecordEntity.class));
+    }
+
     private Map<String, Object> auth() {
         return map("authType", "none");
     }
@@ -140,5 +209,15 @@ public class McpServiceImplTest {
     private String text(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private McpRecordEntity record(String type, String id, String payload) {
+        McpRecordEntity record = new McpRecordEntity();
+        record.setRecordType(type);
+        record.setRecordId(id);
+        record.setPayload(payload);
+        record.setCreatedAt(1L);
+        record.setUpdatedAt(1L);
+        return record;
     }
 }

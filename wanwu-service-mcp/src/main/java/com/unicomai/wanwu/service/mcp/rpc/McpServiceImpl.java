@@ -6,8 +6,12 @@ import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.mcp.persistence.entity.McpRecordEntity;
+import com.unicomai.wanwu.service.mcp.persistence.mapper.McpRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import javax.annotation.PostConstruct;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,6 +31,8 @@ public class McpServiceImpl implements McpService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String DEFAULT_ORG = "default-org";
+    private static final String TYPE_SNAPSHOT = "snapshot";
+    private static final String SNAPSHOT_ID = "state";
 
     private final ConcurrentMap<String, Map<String, Object>> customTools = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, Object>> customMcps = new ConcurrentHashMap<>();
@@ -38,6 +44,35 @@ public class McpServiceImpl implements McpService {
     private final ConcurrentMap<String, Map<String, Object>> skillConversations = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> builtinToolApiKeys = new ConcurrentHashMap<>();
     private final AtomicInteger variableSequence = new AtomicInteger(1);
+
+    @Autowired(required = false)
+    private McpRecordMapper mcpRecordMapper;
+
+    public McpServiceImpl() {
+    }
+
+    McpServiceImpl(McpRecordMapper mcpRecordMapper) {
+        this.mcpRecordMapper = mcpRecordMapper;
+        loadPersistedSnapshot();
+    }
+
+    @PostConstruct
+    synchronized void loadPersistedSnapshot() {
+        if (mcpRecordMapper == null) {
+            return;
+        }
+        List<McpRecordEntity> records = mcpRecordMapper.selectByType(TYPE_SNAPSHOT);
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        McpRecordEntity record = records.get(records.size() - 1);
+        try {
+            McpSnapshot snapshot = JSON.readValue(record.getPayload(), McpSnapshot.class);
+            applySnapshot(snapshot);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to load persisted MCP snapshot", ex);
+        }
+    }
 
     @Override
     public ServiceDescriptor describe() {
@@ -57,6 +92,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("apiList", apiList(item.get("schema")));
         customTools.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("customToolId", id);
     }
 
@@ -78,11 +114,13 @@ public class McpServiceImpl implements McpService {
         updated.put("ownerOrgId", current.get("ownerOrgId"));
         updated.put("apiList", apiList(updated.get("schema")));
         customTools.put(scoped(orgId, id), updated);
+        saveSnapshot();
     }
 
     @Override
     public void deleteCustomTool(String userId, String orgId, Map<String, Object> request) {
         customTools.remove(scoped(orgId, text(request, "customToolId")));
+        saveSnapshot();
     }
 
     @Override
@@ -136,6 +174,7 @@ public class McpServiceImpl implements McpService {
         String id = text(request, "toolSquareId");
         builtinTool(id);
         builtinToolApiKeys.put(scoped(orgId, id), text(request, "apiKey"));
+        saveSnapshot();
     }
 
     @Override
@@ -181,6 +220,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("tools", sampleMcpTools(text(item, "name")));
         customMcps.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("mcpId", id);
     }
 
@@ -199,11 +239,13 @@ public class McpServiceImpl implements McpService {
         updated.put("ownerOrgId", current.get("ownerOrgId"));
         updated.put("tools", current.get("tools"));
         customMcps.put(scoped(orgId, id), updated);
+        saveSnapshot();
     }
 
     @Override
     public void deleteMcp(String userId, String orgId, Map<String, Object> request) {
         customMcps.remove(scoped(orgId, text(request, "mcpId")));
+        saveSnapshot();
     }
 
     @Override
@@ -238,6 +280,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("tools", new ArrayList<Map<String, Object>>());
         mcpServers.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("mcpServerId", id);
     }
 
@@ -264,11 +307,13 @@ public class McpServiceImpl implements McpService {
         current.put("avatar", avatar(request));
         current.put("name", defaultText(request, "name", text(current, "name")));
         current.put("desc", defaultText(request, "desc", text(current, "desc")));
+        saveSnapshot();
     }
 
     @Override
     public void deleteMcpServer(String userId, String orgId, Map<String, Object> request) {
         mcpServers.remove(scoped(orgId, firstText(request, "mcpServerId", "MCPServerId")));
+        saveSnapshot();
     }
 
     @Override
@@ -293,6 +338,7 @@ public class McpServiceImpl implements McpService {
         Map<String, Object> server = require(mcpServers, orgId, text(request, "mcpServerId"), "mcp server");
         Map<String, Object> tool = serverTool(orgId, request);
         listValue(server.get("tools")).add(tool);
+        saveSnapshot();
         return singleton("mcpServerToolId", tool.get("mcpServerToolId"));
     }
 
@@ -304,6 +350,7 @@ public class McpServiceImpl implements McpService {
                 if (id.equals(text(tool, "mcpServerToolId"))) {
                     tool.put("methodName", defaultText(request, "methodName", text(tool, "methodName")));
                     tool.put("desc", defaultText(request, "desc", text(tool, "desc")));
+                    saveSnapshot();
                     return;
                 }
             }
@@ -317,6 +364,7 @@ public class McpServiceImpl implements McpService {
         for (Map<String, Object> server : mcpServers.values()) {
             listValue(server.get("tools")).removeIf(tool -> id.equals(text(tool, "mcpServerToolId")));
         }
+        saveSnapshot();
     }
 
     @Override
@@ -336,6 +384,7 @@ public class McpServiceImpl implements McpService {
             listValue(server.get("tools")).add(tool);
             created.add(tool);
         }
+        saveSnapshot();
         return listResult(created);
     }
 
@@ -403,6 +452,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerUserId", userId);
         item.put("ownerOrgId", org(orgId));
         customPrompts.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("customPromptId", id);
     }
 
@@ -420,11 +470,13 @@ public class McpServiceImpl implements McpService {
         updated.put("ownerUserId", current.get("ownerUserId"));
         updated.put("ownerOrgId", current.get("ownerOrgId"));
         customPrompts.put(scoped(orgId, id), updated);
+        saveSnapshot();
     }
 
     @Override
     public void deleteCustomPrompt(String userId, String orgId, Map<String, Object> request) {
         customPrompts.remove(scoped(orgId, text(request, "customPromptId")));
+        saveSnapshot();
     }
 
     @Override
@@ -447,6 +499,7 @@ public class McpServiceImpl implements McpService {
         copy.put("name", text(source, "name") + " Copy");
         copy.put("updateAt", now());
         customPrompts.put(scoped(orgId, id), copy);
+        saveSnapshot();
         return singleton("customPromptId", id);
     }
 
@@ -503,6 +556,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("variables", new ArrayList<Map<String, Object>>());
         customSkills.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("skillId", id);
     }
 
@@ -514,6 +568,7 @@ public class McpServiceImpl implements McpService {
     @Override
     public void deleteCustomSkill(String userId, String orgId, Map<String, Object> request) {
         customSkills.remove(scoped(orgId, text(request, "skillId")));
+        saveSnapshot();
     }
 
     @Override
@@ -537,17 +592,22 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public Map<String, Object> createCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
-        return createSkillVariable(require(customSkills, orgId, text(request, "skillId"), "custom skill"), request);
+        Map<String, Object> result = createSkillVariable(require(customSkills, orgId, text(request, "skillId"),
+                "custom skill"), request);
+        saveSnapshot();
+        return result;
     }
 
     @Override
     public void updateCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
         updateSkillVariable(orgId, text(request, "id"), request);
+        saveSnapshot();
     }
 
     @Override
     public void deleteCustomSkillConfig(String userId, String orgId, Map<String, Object> request) {
         deleteSkillVariable(orgId, text(request, "id"));
+        saveSnapshot();
     }
 
     @Override
@@ -578,17 +638,21 @@ public class McpServiceImpl implements McpService {
     public Map<String, Object> createBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
         String skillId = text(request, "skillId");
         builtinSkill(skillId);
-        return createSkillVariable(builtinSkillVariableItem(orgId, skillId), request);
+        Map<String, Object> result = createSkillVariable(builtinSkillVariableItem(orgId, skillId), request);
+        saveSnapshot();
+        return result;
     }
 
     @Override
     public void updateBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
         updateSkillVariable(orgId, text(request, "id"), request);
+        saveSnapshot();
     }
 
     @Override
     public void deleteBuiltinSkillConfig(String userId, String orgId, Map<String, Object> request) {
         deleteSkillVariable(orgId, text(request, "id"));
+        saveSnapshot();
     }
 
     @Override
@@ -631,22 +695,27 @@ public class McpServiceImpl implements McpService {
     @Override
     public void deleteAcquiredSkill(String userId, String orgId, Map<String, Object> request) {
         acquiredSkills.remove(scoped(orgId, text(request, "skillId")));
+        saveSnapshot();
     }
 
     @Override
     public Map<String, Object> createAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
-        return createSkillVariable(require(acquiredSkills, orgId, text(request, "skillId"), "acquired skill"),
-                request);
+        Map<String, Object> result = createSkillVariable(require(acquiredSkills, orgId, text(request, "skillId"),
+                "acquired skill"), request);
+        saveSnapshot();
+        return result;
     }
 
     @Override
     public void updateAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
         updateSkillVariable(orgId, text(request, "id"), request);
+        saveSnapshot();
     }
 
     @Override
     public void deleteAcquiredSkillConfig(String userId, String orgId, Map<String, Object> request) {
         deleteSkillVariable(orgId, text(request, "id"));
+        saveSnapshot();
     }
 
     @Override
@@ -688,6 +757,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("variables", new ArrayList<Map<String, Object>>());
         acquiredSkills.put(scoped(orgId, id), item);
+        saveSnapshot();
     }
 
     @Override
@@ -716,12 +786,14 @@ public class McpServiceImpl implements McpService {
         item.put("ownerOrgId", org(orgId));
         item.put("messages", new ArrayList<Map<String, Object>>());
         skillConversations.put(scoped(orgId, id), item);
+        saveSnapshot();
         return singleton("conversationId", id);
     }
 
     @Override
     public void deleteSkillConversation(String userId, String orgId, Map<String, Object> request) {
         skillConversations.remove(scoped(orgId, text(request, "conversationId")));
+        saveSnapshot();
     }
 
     @Override
@@ -729,6 +801,7 @@ public class McpServiceImpl implements McpService {
         Map<String, Object> item = require(skillConversations, orgId, text(request, "conversationId"),
                 "skill conversation");
         item.put("messages", new ArrayList<Map<String, Object>>());
+        saveSnapshot();
     }
 
     @Override
@@ -771,6 +844,7 @@ public class McpServiceImpl implements McpService {
                 Collections.singletonList(skillResponseFile(query)));
         listValue(item.get("messages")).add(userMessage);
         listValue(item.get("messages")).add(assistantMessage);
+        saveSnapshot();
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("code", null);
@@ -1428,6 +1502,107 @@ public class McpServiceImpl implements McpService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(key, value);
         return result;
+    }
+
+    private synchronized void saveSnapshot() {
+        if (mcpRecordMapper == null) {
+            return;
+        }
+        McpRecordEntity entity = new McpRecordEntity();
+        entity.setRecordType(TYPE_SNAPSHOT);
+        entity.setRecordId(SNAPSHOT_ID);
+        long now = System.currentTimeMillis();
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
+        try {
+            entity.setPayload(JSON.writeValueAsString(snapshot()));
+            mcpRecordMapper.upsertRecord(entity);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to persist MCP snapshot", ex);
+        }
+    }
+
+    private McpSnapshot snapshot() {
+        McpSnapshot snapshot = new McpSnapshot();
+        snapshot.customTools.putAll(customTools);
+        snapshot.customMcps.putAll(customMcps);
+        snapshot.mcpServers.putAll(mcpServers);
+        snapshot.customPrompts.putAll(customPrompts);
+        snapshot.customSkills.putAll(customSkills);
+        snapshot.acquiredSkills.putAll(acquiredSkills);
+        snapshot.builtinSkillVariableStores.putAll(builtinSkillVariableStores);
+        snapshot.skillConversations.putAll(skillConversations);
+        snapshot.builtinToolApiKeys.putAll(builtinToolApiKeys);
+        snapshot.variableSequence = variableSequence.get();
+        return snapshot;
+    }
+
+    private void applySnapshot(McpSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        restore(customTools, snapshot.customTools);
+        restore(customMcps, snapshot.customMcps);
+        restore(mcpServers, snapshot.mcpServers);
+        restore(customPrompts, snapshot.customPrompts);
+        restore(customSkills, snapshot.customSkills);
+        restore(acquiredSkills, snapshot.acquiredSkills);
+        restore(builtinSkillVariableStores, snapshot.builtinSkillVariableStores);
+        restore(skillConversations, snapshot.skillConversations);
+        builtinToolApiKeys.clear();
+        if (snapshot.builtinToolApiKeys != null) {
+            builtinToolApiKeys.putAll(snapshot.builtinToolApiKeys);
+        }
+        variableSequence.set(Math.max(1, snapshot.variableSequence));
+        bumpVariableSequence(customSkills);
+        bumpVariableSequence(acquiredSkills);
+        bumpVariableSequence(builtinSkillVariableStores);
+    }
+
+    private void restore(ConcurrentMap<String, Map<String, Object>> target,
+                         Map<String, Map<String, Object>> source) {
+        target.clear();
+        if (source != null) {
+            target.putAll(source);
+        }
+    }
+
+    private void bumpVariableSequence(Map<String, Map<String, Object>> store) {
+        for (Map<String, Object> item : store.values()) {
+            for (Map<String, Object> variable : listValue(item.get("variables"))) {
+                String id = text(variable, "id");
+                if (id.startsWith("var-")) {
+                    try {
+                        int value = Integer.parseInt(id.substring("var-".length())) + 1;
+                        if (value > variableSequence.get()) {
+                            variableSequence.set(value);
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+    }
+
+    private static final class McpSnapshot {
+        public Map<String, Map<String, Object>> customTools =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> customMcps =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> mcpServers =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> customPrompts =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> customSkills =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> acquiredSkills =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> builtinSkillVariableStores =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, Map<String, Object>> skillConversations =
+                new LinkedHashMap<String, Map<String, Object>>();
+        public Map<String, String> builtinToolApiKeys = new LinkedHashMap<String, String>();
+        public int variableSequence = 1;
     }
 
     private Map<String, Object> defaultApiAuth() {

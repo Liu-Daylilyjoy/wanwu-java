@@ -133,12 +133,17 @@ services:
     container_name: wanwu-java-mcp
     environment:
       DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      SPRING_DATASOURCE_URL: ${WANWU_MCP_DATASOURCE_URL:-jdbc:mysql://mysql:3306/mcp_service?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=Asia/Shanghai}
+      SPRING_DATASOURCE_USERNAME: ${WANWU_MCP_DATASOURCE_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${WANWU_MCP_DATASOURCE_PASSWORD:-}
       JAVA_OPTS: ${WANWU_MCP_JAVA_OPTS:-}
     ports:
       - "8087:8087"
       - "20887:20887"
     depends_on:
       nacos:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8087/actuator/health >/dev/null"]
