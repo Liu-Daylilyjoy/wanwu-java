@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,6 +59,53 @@ public class KnowledgeServiceImplTest {
                 selectKnowledge("", 0, -1)).get("knowledgeList")).size());
     }
 
+    @Test
+    public void qaPairLifecycleFollowsFrontendAndGoContract() {
+        Map<String, Object> createdKnowledge = service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Dev QA", 1));
+        String knowledgeId = (String) createdKnowledge.get("knowledgeId");
+
+        Map<String, Object> createdPair = service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "What is Wanwu?", "An AI platform."));
+        String qaPairId = (String) createdPair.get("qaPairId");
+        assertNotNull(qaPairId);
+
+        Map<String, Object> list = service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "Wanwu", Collections.singletonList(2)));
+        assertEquals(1, list.get("total"));
+        assertEquals("Dev QA", map(list.get("qaKnowledgeInfo")).get("knowledgeName"));
+        Map<String, Object> pair = listOfMaps(list.get("list")).get(0);
+        assertEquals(qaPairId, pair.get("qaPairId"));
+        assertEquals("What is Wanwu?", pair.get("question"));
+        assertEquals("An AI platform.", pair.get("answer"));
+        assertEquals(2, pair.get("status"));
+        assertTrue((Boolean) pair.get("switch"));
+        assertEquals("admin", pair.get("author"));
+
+        service.updateQaPair("dev-admin", "default-org",
+                qaPairUpdate(qaPairId, "What is Wanwu Java?", "A Java reproduction."));
+        service.updateQaPairSwitch("dev-admin", "default-org", qaPairSwitch(qaPairId, false));
+
+        Map<String, Object> updatedList = service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "Java", Collections.singletonList(-1)));
+        Map<String, Object> updatedPair = listOfMaps(updatedList.get("list")).get(0);
+        assertEquals("What is Wanwu Java?", updatedPair.get("question"));
+        assertFalse((Boolean) updatedPair.get("switch"));
+
+        service.updateQaPairSwitch("dev-admin", "default-org", qaPairSwitch(qaPairId, true));
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org", qaHit(knowledgeId, "Wanwu Java"));
+        assertEquals(1, listOfMaps(hit.get("searchList")).size());
+        assertEquals(qaPairId, listOfMaps(hit.get("searchList")).get(0).get("qaPairId"));
+
+        Map<String, Object> tip = service.getQaImportTip("dev-admin", "default-org", singleton("knowledgeId", knowledgeId));
+        assertEquals(2, tip.get("uploadstatus"));
+        assertEquals("Dev QA", tip.get("knowledgeName"));
+
+        service.deleteQaPairs("dev-admin", "default-org", qaPairDelete(knowledgeId, qaPairId));
+        assertEquals(0, service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "", Collections.singletonList(-1))).get("total"));
+    }
+
     private Map<String, Object> createKnowledge(String name, int category) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("name", name);
@@ -106,6 +154,54 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("tagIdList", Collections.singletonList(tagId));
+        return request;
+    }
+
+    private Map<String, Object> qaPairCreate(String knowledgeId, String question, String answer) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("question", question);
+        request.put("answer", answer);
+        return request;
+    }
+
+    private Map<String, Object> qaPairUpdate(String qaPairId, String question, String answer) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("qaPairId", qaPairId);
+        request.put("question", question);
+        request.put("answer", answer);
+        return request;
+    }
+
+    private Map<String, Object> qaPairSwitch(String qaPairId, boolean enabled) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("qaPairId", qaPairId);
+        request.put("switch", enabled);
+        return request;
+    }
+
+    private Map<String, Object> qaPairDelete(String knowledgeId, String qaPairId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("QAPairIdList", Collections.singletonList(qaPairId));
+        return request;
+    }
+
+    private Map<String, Object> qaPairList(String knowledgeId, String name, List<Integer> status) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("name", name);
+        request.put("status", status);
+        request.put("pageNo", 1);
+        request.put("pageSize", 10);
+        return request;
+    }
+
+    private Map<String, Object> qaHit(String knowledgeId, String question) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("question", question);
+        request.put("knowledgeList", Collections.singletonList(singleton("knowledgeId", knowledgeId)));
+        request.put("knowledgeMatchParams", singleton("topK", 5));
         return request;
     }
 

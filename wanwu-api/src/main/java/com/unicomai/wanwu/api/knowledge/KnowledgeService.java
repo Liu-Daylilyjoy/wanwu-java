@@ -119,4 +119,22 @@ public interface KnowledgeService {
     void deleteExportRecord(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> getDocByName(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createQaPair(String userId, String orgId, Map<String, Object> request);
+
+    void updateQaPair(String userId, String orgId, Map<String, Object> request);
+
+    void updateQaPairSwitch(String userId, String orgId, Map<String, Object> request);
+
+    void deleteQaPairs(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listQaPairs(String userId, String orgId, Map<String, Object> request);
+
+    void importQaPairs(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> getQaImportTip(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> exportQaPairs(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> hitQaPairs(String userId, String orgId, Map<String, Object> request);
 }

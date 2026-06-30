@@ -1076,7 +1076,7 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.deleteKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PostMapping({"/knowledge/hit", "/knowledge/qa/hit"})
+    @PostMapping("/knowledge/hit")
     public FrontendResponse<Map<String, Object>> hitKnowledge(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
@@ -1427,42 +1427,76 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.getDocByName(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PostMapping({"/knowledge/qa/pair", "/knowledge/qa/pair/import"})
-    public FrontendResponse<Map<String, Object>> mutateQaPairPost() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    @PostMapping("/knowledge/qa/pair")
+    public FrontendResponse<Map<String, Object>> createQaPair(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createQaPair(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PutMapping({"/knowledge/qa/pair", "/knowledge/qa/pair/switch"})
-    public FrontendResponse<Map<String, Object>> mutateQaPairPut() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    @PutMapping("/knowledge/qa/pair")
+    public FrontendResponse<Map<String, Object>> updateQaPair(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateQaPair(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PutMapping("/knowledge/qa/pair/switch")
+    public FrontendResponse<Map<String, Object>> updateQaPairSwitch(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateQaPairSwitch(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @DeleteMapping("/knowledge/qa/pair")
-    public FrontendResponse<Map<String, Object>> deleteQaPair() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> deleteQaPair(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @PostMapping("/knowledge/qa/pair/list")
-    public FrontendResponse<Map<String, Object>> listQaPairs(@RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> safe = objectMap(request);
-        Map<String, Object> result = emptyListResult();
-        result.put("pageNo", intParam(safe.get("pageNo"), 1));
-        result.put("pageSize", intParam(safe.get("pageSize"), 10));
-        return FrontendResponse.ok(result);
+    public FrontendResponse<Map<String, Object>> listQaPairs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/qa/pair/import/tip")
-    public FrontendResponse<Map<String, Object>> qaImportTip(@RequestParam Map<String, String> request) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("msg", "");
-        result.put("uploadstatus", 2);
-        result.put("knowledgeId", request.get("knowledgeId"));
-        return FrontendResponse.ok(result);
+    public FrontendResponse<Map<String, Object>> qaImportTip(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getQaImportTip(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/qa/pair/import")
+    public FrontendResponse<Map<String, Object>> importQaPairs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.importQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/qa/export")
-    public FrontendResponse<Map<String, Object>> exportQaPairs() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> exportQaPairs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.exportQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/qa/hit")
+    public FrontendResponse<Map<String, Object>> hitQaPairs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.hitQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/external/api/select")

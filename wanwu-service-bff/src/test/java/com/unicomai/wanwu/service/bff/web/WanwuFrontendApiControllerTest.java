@@ -511,6 +511,97 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
+        when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("qaPairId", "qa-001"));
+        when(knowledgeService.listQaPairs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(qaPairPage("knowledge-qa-001", "Dev QA",
+                        qaPair("qa-001", "knowledge-qa-001", "What is Wanwu?", "An AI platform.", true)));
+        when(knowledgeService.getQaImportTip(anyString(), anyString(), any(Map.class)))
+                .thenReturn(docImportTip("knowledge-qa-001", "Dev QA"));
+        when(knowledgeService.exportQaPairs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("recordCreated", true));
+        when(knowledgeService.hitQaPairs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("searchList", Collections.singletonList(
+                        qaHitResult("qa-001", "knowledge-qa-001", "Dev QA", "What is Wanwu?", "An AI platform."))));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/pair")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"question\":\"What is Wanwu?\",\"answer\":\"An AI platform.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.qaPairId").value("qa-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/pair/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"name\":\"Wanwu\",\"status\":[2],\"pageNo\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.qaKnowledgeInfo.knowledgeName").value("Dev QA"))
+                .andExpect(jsonPath("$.data.list[0].qaPairId").value("qa-001"))
+                .andExpect(jsonPath("$.data.list[0].switch").value(true));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/qa/pair")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"qaPairId\":\"qa-001\",\"question\":\"Updated?\",\"answer\":\"Updated.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/qa/pair/switch")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"qaPairId\":\"qa-001\",\"switch\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/hit")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"Wanwu\",\"knowledgeList\":[{\"knowledgeId\":\"knowledge-qa-001\"}],\"knowledgeMatchParams\":{\"topK\":5}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.searchList[0].qaPairId").value("qa-001"))
+                .andExpect(jsonPath("$.data.searchList[0].contentType").value("qa"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/qa/pair/import/tip")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-qa-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeName").value("Dev QA"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/pair/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"docInfoList\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/qa/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-qa-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recordCreated").value(true));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/qa/pair")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"QAPairIdList\":[\"qa-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).createQaPair(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listQaPairs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateQaPair(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateQaPairSwitch(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).hitQaPairs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).getQaImportTip(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).importQaPairs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).exportQaPairs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteQaPairs(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
     public void createAssistantReturnsFrontendAssistantId() throws Exception {
         when(appService.createAssistant(any(AssistantCreateCommand.class)))
                 .thenReturn(new AssistantCreateResult("assistant-001"));
@@ -1423,6 +1514,48 @@ public class WanwuFrontendApiControllerTest {
         tip.put("knowledgeId", knowledgeId);
         tip.put("knowledgeName", knowledgeName);
         return tip;
+    }
+
+    private Map<String, Object> qaPairPage(String knowledgeId, String knowledgeName, Map<String, Object> pair) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(pair));
+        page.put("total", 1);
+        page.put("pageNo", 1);
+        page.put("pageSize", 10);
+
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("knowledgeId", knowledgeId);
+        info.put("knowledgeName", knowledgeName);
+        page.put("qaKnowledgeInfo", info);
+        return page;
+    }
+
+    private Map<String, Object> qaPair(String qaPairId, String knowledgeId, String question, String answer, boolean enabled) {
+        Map<String, Object> pair = new LinkedHashMap<>();
+        pair.put("qaPairId", qaPairId);
+        pair.put("knowledgeId", knowledgeId);
+        pair.put("question", question);
+        pair.put("answer", answer);
+        pair.put("metaDataList", Collections.emptyList());
+        pair.put("author", "admin");
+        pair.put("uploadTime", "2026-06-30 00:00:00");
+        pair.put("status", 2);
+        pair.put("switch", enabled);
+        pair.put("errorMsg", "");
+        return pair;
+    }
+
+    private Map<String, Object> qaHitResult(String qaPairId, String knowledgeId, String knowledgeName,
+                                            String question, String answer) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("title", question);
+        result.put("question", question);
+        result.put("answer", answer);
+        result.put("qaPairId", qaPairId);
+        result.put("qaBase", knowledgeName);
+        result.put("qaId", knowledgeId);
+        result.put("contentType", "qa");
+        return result;
     }
 
     private Map<String, Object> uploadLimit(String type, int maxSize, String... ext) {

@@ -28,6 +28,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int PERMISSION_EDIT = 10;
     private static final int PERMISSION_ADMIN = 20;
     private static final int CATEGORY_KNOWLEDGE = 0;
+    private static final int QA_STATUS_FINISHED = 2;
     private static final int EXTERNAL_ALL = -1;
     private static final int EXTERNAL_INTERNAL = 0;
     private static final int DOC_STATUS_FINISHED = 1;
@@ -37,6 +38,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, SplitterState> splitters = new LinkedHashMap<String, SplitterState>();
     private final Map<String, List<String>> tagIdsByKnowledgeId = new LinkedHashMap<String, List<String>>();
     private final Map<String, List<DocState>> docsByKnowledgeId = new LinkedHashMap<String, List<DocState>>();
+    private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
+    private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
     private final Map<String, List<Map<String, Object>>> metasByKnowledgeId = new LinkedHashMap<String, List<Map<String, Object>>>();
     private final Map<String, List<PermissionState>> permissionsByKnowledgeId = new LinkedHashMap<String, List<PermissionState>>();
 
@@ -44,6 +47,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextTagId = new AtomicLong(1000);
     private final AtomicLong nextSplitterId = new AtomicLong(1000);
     private final AtomicLong nextDocId = new AtomicLong(1000);
+    private final AtomicLong nextQaPairId = new AtomicLong(1000);
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
 
@@ -114,6 +118,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         knowledgeBases.put(knowledgeId, knowledge);
         tagIdsByKnowledgeId.put(knowledgeId, new ArrayList<String>());
         docsByKnowledgeId.put(knowledgeId, new ArrayList<DocState>());
+        qaPairsByKnowledgeId.put(knowledgeId, new ArrayList<QaPairState>());
         metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
         permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
         addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
@@ -143,6 +148,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         knowledgeBases.remove(knowledgeId);
         tagIdsByKnowledgeId.remove(knowledgeId);
         docsByKnowledgeId.remove(knowledgeId);
+        for (QaPairState pair : qaPairs(knowledgeId)) {
+            qaPairsById.remove(pair.qaPairId);
+        }
+        qaPairsByKnowledgeId.remove(knowledgeId);
         metasByKnowledgeId.remove(knowledgeId);
         permissionsByKnowledgeId.remove(knowledgeId);
     }
@@ -702,6 +711,177 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return new LinkedHashMap<String, Object>();
     }
 
+    @Override
+    public synchronized Map<String, Object> createQaPair(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        String qaPairId = "qa-" + nextQaPairId.incrementAndGet();
+        QaPairState pair = new QaPairState();
+        pair.qaPairId = qaPairId;
+        pair.knowledgeId = knowledgeId;
+        pair.question = string(safe.get("question")).trim();
+        pair.answer = string(safe.get("answer")).trim();
+        pair.userId = defaultIfBlank(userId, DEFAULT_USER_ID);
+        pair.author = displayUserName(pair.userId);
+        pair.uploadTime = CREATED_AT;
+        pair.status = QA_STATUS_FINISHED;
+        pair.enabled = true;
+        pair.errorMsg = "";
+        qaPairs(knowledgeId).add(pair);
+        qaPairsById.put(qaPairId, pair);
+        return singleton("qaPairId", qaPairId);
+    }
+
+    @Override
+    public synchronized void updateQaPair(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        QaPairState pair = existingQaPair(string(safe.get("qaPairId")));
+        pair.question = string(safe.get("question")).trim();
+        pair.answer = string(safe.get("answer")).trim();
+    }
+
+    @Override
+    public synchronized void updateQaPairSwitch(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        QaPairState pair = existingQaPair(string(safe.get("qaPairId")));
+        pair.enabled = booleanValue(safe.get("switch"), pair.enabled);
+    }
+
+    @Override
+    public synchronized void deleteQaPairs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        Set<String> ids = new LinkedHashSet<String>(stringList(safe.get("QAPairIdList")));
+        if (ids.isEmpty()) {
+            ids.addAll(stringList(safe.get("qaPairIdList")));
+        }
+        List<QaPairState> pairs = qaPairs(knowledgeId);
+        for (int i = pairs.size() - 1; i >= 0; i--) {
+            QaPairState pair = pairs.get(i);
+            if (ids.contains(pair.qaPairId)) {
+                pairs.remove(i);
+                qaPairsById.remove(pair.qaPairId);
+            }
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> listQaPairs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        String name = string(safe.get("name")).trim();
+        String metaValue = string(safe.get("metaValue")).trim();
+        List<Integer> statuses = intList(safe.get("status"));
+        boolean allStatuses = statuses.isEmpty() || statuses.contains(-1);
+        List<Map<String, Object>> filtered = new ArrayList<Map<String, Object>>();
+        for (QaPairState pair : qaPairs(knowledgeId)) {
+            if (!isBlank(name) && !containsIgnoreCase(pair.question, name) && !containsIgnoreCase(pair.answer, name)) {
+                continue;
+            }
+            if (!allStatuses && !statuses.contains(pair.status)) {
+                continue;
+            }
+            if (!isBlank(metaValue) && !qaMetaContains(pair, metaValue)) {
+                continue;
+            }
+            filtered.add(toQaPairInfo(pair));
+        }
+        Map<String, Object> result = page(filtered,
+                intValue(safe.get("pageNo"), 1),
+                intValue(safe.get("pageSize"), 10));
+        Map<String, Object> info = new LinkedHashMap<String, Object>();
+        info.put("knowledgeId", knowledge.knowledgeId);
+        info.put("knowledgeName", knowledge.name);
+        result.put("qaKnowledgeInfo", info);
+        return result;
+    }
+
+    @Override
+    public synchronized void importQaPairs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        for (Object rawDoc : list(safe.get("docInfoList"))) {
+            Map<String, Object> doc = map(rawDoc);
+            String docName = defaultIfBlank(string(doc.get("docName")), string(doc.get("name")));
+            if (isBlank(docName)) {
+                continue;
+            }
+            Map<String, Object> create = new LinkedHashMap<String, Object>();
+            create.put("knowledgeId", knowledgeId);
+            create.put("question", "Imported from " + docName);
+            create.put("answer", "");
+            createQaPair(userId, orgId, create);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> getQaImportTip(String userId, String orgId, Map<String, Object> request) {
+        KnowledgeState knowledge = existingKnowledge(string(safe(request).get("knowledgeId")));
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("msg", "");
+        result.put("uploadstatus", QA_STATUS_FINISHED);
+        result.put("knowledgeId", knowledge.knowledgeId);
+        result.put("knowledgeName", knowledge.name);
+        return result;
+    }
+
+    @Override
+    public synchronized Map<String, Object> exportQaPairs(String userId, String orgId, Map<String, Object> request) {
+        KnowledgeState knowledge = existingKnowledge(string(safe(request).get("knowledgeId")));
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("knowledgeId", knowledge.knowledgeId);
+        result.put("knowledgeName", knowledge.name);
+        result.put("recordCreated", true);
+        result.put("fileUrl", "");
+        result.put("downloadUrl", "");
+        return result;
+    }
+
+    @Override
+    public synchronized Map<String, Object> hitQaPairs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String question = string(safe.get("question"));
+        int topK = intValue(map(safe.get("knowledgeMatchParams")).get("topK"), 5);
+        Set<String> knowledgeIds = new LinkedHashSet<String>();
+        for (Object raw : list(safe.get("knowledgeList"))) {
+            String knowledgeId = string(map(raw).get("knowledgeId"));
+            if (!isBlank(knowledgeId)) {
+                knowledgeIds.add(knowledgeId);
+            }
+        }
+        if (knowledgeIds.isEmpty()) {
+            knowledgeIds.addAll(qaPairsByKnowledgeId.keySet());
+        }
+
+        List<Map<String, Object>> searchList = new ArrayList<Map<String, Object>>();
+        List<Double> scores = new ArrayList<Double>();
+        for (String knowledgeId : knowledgeIds) {
+            KnowledgeState knowledge = knowledgeBases.get(knowledgeId);
+            if (knowledge == null) {
+                continue;
+            }
+            for (QaPairState pair : qaPairs(knowledgeId)) {
+                if (!pair.enabled || pair.status != QA_STATUS_FINISHED) {
+                    continue;
+                }
+                if (!isBlank(question) && !containsIgnoreCase(pair.question, question)
+                        && !containsIgnoreCase(pair.answer, question)) {
+                    continue;
+                }
+                searchList.add(toQaHitInfo(pair, knowledge));
+                scores.add(1.0D);
+                if (searchList.size() >= topK) {
+                    return qaHitResult(searchList, scores);
+                }
+            }
+        }
+        return qaHitResult(searchList, scores);
+    }
+
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.KNOWLEDGE, "Knowledge Service", "knowledge");
     }
@@ -825,6 +1005,40 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private Map<String, Object> toQaPairInfo(QaPairState pair) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("qaPairId", pair.qaPairId);
+        result.put("knowledgeId", pair.knowledgeId);
+        result.put("question", pair.question);
+        result.put("answer", pair.answer);
+        result.put("metaDataList", new ArrayList<Map<String, Object>>(pair.metaDataList));
+        result.put("author", pair.author);
+        result.put("uploadTime", pair.uploadTime);
+        result.put("status", pair.status);
+        result.put("switch", pair.enabled);
+        result.put("errorMsg", pair.errorMsg);
+        return result;
+    }
+
+    private Map<String, Object> toQaHitInfo(QaPairState pair, KnowledgeState knowledge) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("title", pair.question);
+        result.put("question", pair.question);
+        result.put("answer", pair.answer);
+        result.put("qaPairId", pair.qaPairId);
+        result.put("qaBase", knowledge.name);
+        result.put("qaId", knowledge.knowledgeId);
+        result.put("contentType", "qa");
+        return result;
+    }
+
+    private Map<String, Object> qaHitResult(List<Map<String, Object>> searchList, List<Double> scores) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("searchList", searchList);
+        result.put("score", scores);
+        return result;
+    }
+
     private Map<String, Object> toPermissionInfo(PermissionState permission) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("userId", permission.userId);
@@ -905,6 +1119,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return null;
     }
 
+    private QaPairState existingQaPair(String qaPairId) {
+        QaPairState pair = qaPairsById.get(qaPairId);
+        if (pair == null) {
+            throw new IllegalArgumentException("qa pair not found: " + qaPairId);
+        }
+        return pair;
+    }
+
     private PermissionState findPermission(String permissionId) {
         if (isBlank(permissionId)) {
             return null;
@@ -952,6 +1174,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return docs;
     }
 
+    private List<QaPairState> qaPairs(String knowledgeId) {
+        List<QaPairState> pairs = qaPairsByKnowledgeId.get(knowledgeId);
+        if (pairs == null) {
+            pairs = new ArrayList<QaPairState>();
+            qaPairsByKnowledgeId.put(knowledgeId, pairs);
+        }
+        return pairs;
+    }
+
     private List<Map<String, Object>> metas(String knowledgeId) {
         List<Map<String, Object>> metas = metasByKnowledgeId.get(knowledgeId);
         if (metas == null) {
@@ -986,6 +1217,17 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 metas.remove(i);
             }
         }
+    }
+
+    private boolean qaMetaContains(QaPairState pair, String expected) {
+        for (Map<String, Object> meta : pair.metaDataList) {
+            for (Object value : meta.values()) {
+                if (containsIgnoreCase(string(value), expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private String embeddingModelId(Object raw) {
@@ -1074,6 +1316,27 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return fallback;
     }
 
+    private List<Integer> intList(Object raw) {
+        List<Integer> result = new ArrayList<Integer>();
+        if (!(raw instanceof List)) {
+            return result;
+        }
+        for (Object item : (List<?>) raw) {
+            result.add(intValue(item, 0));
+        }
+        return result;
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value != null) {
+            return Boolean.parseBoolean(String.valueOf(value));
+        }
+        return fallback;
+    }
+
     private long longValue(Object value, long fallback) {
         if (value instanceof Number) {
             return ((Number) value).longValue();
@@ -1095,6 +1358,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private String defaultIfBlank(String value, String fallback) {
         return isBlank(value) ? fallback : value;
+    }
+
+    private String displayUserName(String userId) {
+        if ("dev-admin".equals(userId)) {
+            return "admin";
+        }
+        if ("dev-app".equals(userId)) {
+            return "app";
+        }
+        return defaultIfBlank(userId, DEFAULT_USER_ID);
     }
 
     private boolean isBlank(String value) {
@@ -1143,6 +1416,20 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String segmentMethod;
         private String author;
         private int graphStatus;
+    }
+
+    private static final class QaPairState {
+        private String qaPairId;
+        private String knowledgeId;
+        private String question;
+        private String answer;
+        private String userId;
+        private String author;
+        private String uploadTime;
+        private int status;
+        private boolean enabled;
+        private String errorMsg;
+        private final List<Map<String, Object>> metaDataList = new ArrayList<Map<String, Object>>();
     }
 
     private static final class PermissionState {

@@ -19,7 +19,8 @@ Date: 2026-06-30
   - Document list empty state, document config, import tip, upload limit, segment list shell, URL analysis shell, import shell, reimport shell, and delete shell.
   - Metadata key/value shells.
   - Permission owner/admin/user/org compatibility.
-  - Graph, report, export record, QA pair, and external knowledge compatibility shells.
+  - QA pair create/list/update/switch/delete, import-tip, export shell, and local text hit.
+  - Graph, report, export record, and external knowledge compatibility shells.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1/knowledge`.
 - Docker Compose `full` profile includes `knowledge` on ports `8083` and `20883`, and BFF now depends on it.
 
@@ -34,10 +35,12 @@ The Java knowledge service currently uses an in-memory repository. It preserves 
 
 This is enough for the frontend to open the Knowledge module, create a knowledge base, bind tags, view splitters, enter the document empty state, and open permission-related panels without backend 404s. It is not the final Go-equivalent storage or indexing model.
 
+The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, and run a deterministic hit test over enabled finished pairs. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous import or retrieval engine.
+
 ## Still Missing
 
 - MySQL persistence for knowledge bases, tags, splitters, docs, metadata, permissions, QA pairs, reports, and external knowledge.
 - Real document upload, file parsing, chunking, vector indexing, reimport, and export.
-- Real QA pair storage/import/export/switch behavior.
+- Real QA file import parsing, persisted export records, and vector/keyword/rerank retrieval for QA hit tests.
 - Real keyword extraction, graph generation, report generation, and RAG query integration.
 - Callback status updates from asynchronous document processing.

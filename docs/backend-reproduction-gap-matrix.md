@@ -34,7 +34,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; model select endpoints covered; user/file/doc selects still missing |
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
 | `v1/guest.go` | 13 | Missing |
-| `v1/knowledge.go` | 79 | Partially covered; knowledge CRUD/list, tags, splitters, docs empty state/config/import-tip/upload-limit, metadata shell, permissions, graph/report/export empty contracts, QA/external stubs covered for frontend navigation; real doc import/indexing/QA/report/RAG integration missing |
+| `v1/knowledge.go` | 79 | Partially covered; knowledge CRUD/list, tags, splitters, docs empty state/config/import-tip/upload-limit, metadata shell, permissions, QA pair CRUD/list/switch/hit/import-tip/export shell, graph/report/export empty contracts, and external stubs covered for frontend navigation; real doc import/indexing/report/RAG integration/external knowledge missing |
 | `v1/mcp_square.go` | 3 | Missing |
 | `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
@@ -59,7 +59,7 @@ Measured from this Java repo before the full reproduction pass:
 | `KnowledgeBaseDocService` | 26 | Frontend-compatible list/config/import-tip/upload-limit/segment shell covered; real file import, parsing, chunk indexing, export, and reimport missing |
 | `KnowledgeBaseKeywordsService` | 5 | Missing beyond empty metadata/list compatibility shells |
 | `KnowledgeBasePermissionService` | 6 | Partially covered with owner/admin/user/org frontend compatibility |
-| `KnowledgeBaseQAService` | 10 | Route stubs covered; real QA pair storage/import/export/search missing |
+| `KnowledgeBaseQAService` | 10 | Partially covered with in-memory QA pair create/update/delete/list/switch/import-tip/export shell and local text hit; file import parsing, real vector/keyword search, and persisted export records missing |
 | `KnowledgeBaseReportService` | 6 | Empty list/mutation contracts covered; report generation missing |
 | `KnowledgeBaseService` | 28 | Partially covered with in-memory CRUD/list/hit shell |
 | `KnowledgeBaseSplitterService` | 4 | Partially covered with preset and custom splitter CRUD |
