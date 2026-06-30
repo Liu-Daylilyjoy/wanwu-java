@@ -36,7 +36,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/guest.go` | 13 | Missing |
 | `v1/knowledge.go` | 79 | Missing |
 | `v1/mcp_square.go` | 3 | Missing |
-| `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, and select endpoints covered; model experience dialog and ASR stream missing |
+| `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
 | `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
 | `v1/rag.go` | 10 | Missing |
@@ -65,7 +65,7 @@ Measured from this Java repo before the full reproduction pass:
 | `KnowledgeBaseSplitterService` | 4 | Missing |
 | `KnowledgeBaseTagService` | 6 | Missing |
 | `MCPService` | 65 | Placeholder-level |
-| `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows; model experience persistence and callback inference APIs still missing |
+| `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
 | `RagService` | 15 | Placeholder-level |

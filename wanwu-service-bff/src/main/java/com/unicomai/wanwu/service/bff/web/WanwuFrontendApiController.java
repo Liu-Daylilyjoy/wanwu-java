@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
@@ -49,6 +51,14 @@ import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
@@ -89,6 +99,7 @@ public class WanwuFrontendApiController {
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -317,6 +328,85 @@ public class WanwuFrontendApiController {
     @PostMapping("/model/validate-thinking")
     public FrontendResponse<Map<String, Object>> validateModelThinking() {
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PostMapping("/model/experience/dialog")
+    public FrontendResponse<ModelExperienceDialogInfo> saveModelExperienceDialog(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelExperienceDialogRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ModelExperienceDialogSaveCommand command = request == null
+                    ? new ModelExperienceDialogSaveCommand()
+                    : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(modelService.saveModelExperienceDialog(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/model/experience/dialogs")
+    public FrontendResponse<ModelExperienceDialogListResult> listModelExperienceDialogs(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.listModelExperienceDialogs(
+                new ModelExperienceDialogListQuery(userContext.getUserId(), userContext.getOrgId())));
+    }
+
+    @DeleteMapping("/model/experience/dialog")
+    public FrontendResponse<Map<String, Object>> deleteModelExperienceDialog(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelExperienceDialogIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            String modelExperienceId = request == null ? "" : request.getModelExperienceId();
+            modelService.deleteModelExperienceDialog(
+                    new ModelExperienceDialogDeleteCommand(userContext.getUserId(), userContext.getOrgId(), modelExperienceId));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/model/experience/dialog/records")
+    public FrontendResponse<ModelExperienceDialogRecordListResult> listModelExperienceDialogRecords(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("modelExperienceId") String modelExperienceId) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.listModelExperienceDialogRecords(
+                new ModelExperienceDialogRecordQuery(userContext.getUserId(), userContext.getOrgId(), modelExperienceId, "")));
+    }
+
+    @PostMapping(value = "/model/experience/llm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> modelExperienceLlm(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelExperienceLlmRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ModelExperienceLlmRequest safe = request == null ? new ModelExperienceLlmRequest() : request;
+            ModelInfo model = modelService.getModel(userContext.getUserId(), userContext.getOrgId(), safe.getModelId());
+            if (!Boolean.TRUE.equals(model.getIsActive())) {
+                return ResponseEntity.status(400)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(errorJson("model is inactive"));
+            }
+            String answer = "Echo: " + defaultIfBlank(safe.getContent(), "");
+            modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                    userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
+                    safe.getSessionId(), defaultIfBlank(safe.getContent(), ""), "", "", "user"));
+            modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                    userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
+                    safe.getSessionId(), answer, "", "", "assistant"));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), answer));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()));
+        }
     }
 
     @GetMapping("/appspace/assistant/list")
@@ -1048,6 +1138,45 @@ public class WanwuFrontendApiController {
         return json.toString();
     }
 
+    private String modelExperienceSseFrames(String sessionId, String model, String answer) {
+        String id = "model-experience-" + compactText(sessionId, 48);
+        String modelName = defaultIfBlank(model, "local-model");
+        return "data: " + modelExperienceChunk(id, modelName, answer, "") + "\n\n"
+                + "data: " + modelExperienceChunk(id, modelName, "", "stop") + "\n\n";
+    }
+
+    private String modelExperienceChunk(String id, String model, String content, String finishReason) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        json.append("\"id\":\"").append(jsonEscape(id)).append("\",");
+        json.append("\"object\":\"chat.completion.chunk\",");
+        json.append("\"created\":0,");
+        json.append("\"model\":\"").append(jsonEscape(model)).append("\",");
+        json.append("\"choices\":[{");
+        json.append("\"index\":0,");
+        json.append("\"delta\":{\"role\":\"assistant\",\"content\":\"").append(jsonEscape(content)).append("\"},");
+        json.append("\"finish_reason\":\"").append(jsonEscape(finishReason)).append("\",");
+        json.append("\"logprobs\":null");
+        json.append("}],");
+        json.append("\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}");
+        json.append("}");
+        return json.toString();
+    }
+
+    private static String jsonString(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String) {
+            return String.valueOf(value);
+        }
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("modelSetting serialization failed");
+        }
+    }
+
     private String mapString(Map<String, Object> map, String key) {
         if (map == null || key == null) {
             return "";
@@ -1176,6 +1305,114 @@ public class WanwuFrontendApiController {
         command.setOrgId(userContext.getOrgId());
         appService.deleteAssistant(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    public static class ModelExperienceDialogRequest {
+        private String modelId;
+        private String sessionId;
+        private String title;
+        private Object modelSetting;
+
+        public ModelExperienceDialogSaveCommand toCommand() {
+            ModelExperienceDialogSaveCommand command = new ModelExperienceDialogSaveCommand();
+            command.setModelId(modelId);
+            command.setSessionId(sessionId);
+            command.setTitle(title);
+            command.setModelSetting(jsonString(modelSetting));
+            return command;
+        }
+
+        public String getModelId() {
+            return modelId;
+        }
+
+        public void setModelId(String modelId) {
+            this.modelId = modelId;
+        }
+
+        public String getSessionId() {
+            return sessionId;
+        }
+
+        public void setSessionId(String sessionId) {
+            this.sessionId = sessionId;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public Object getModelSetting() {
+            return modelSetting;
+        }
+
+        public void setModelSetting(Object modelSetting) {
+            this.modelSetting = modelSetting;
+        }
+    }
+
+    public static class ModelExperienceDialogIdRequest {
+        private String modelExperienceId;
+
+        public String getModelExperienceId() {
+            return modelExperienceId;
+        }
+
+        public void setModelExperienceId(String modelExperienceId) {
+            this.modelExperienceId = modelExperienceId;
+        }
+    }
+
+    public static class ModelExperienceLlmRequest {
+        private String modelId;
+        private String sessionId;
+        private String modelExperienceId;
+        private String content;
+        private List<String> fileIdList = new ArrayList<String>();
+
+        public String getModelId() {
+            return modelId;
+        }
+
+        public void setModelId(String modelId) {
+            this.modelId = modelId;
+        }
+
+        public String getSessionId() {
+            return sessionId;
+        }
+
+        public void setSessionId(String sessionId) {
+            this.sessionId = sessionId;
+        }
+
+        public String getModelExperienceId() {
+            return modelExperienceId;
+        }
+
+        public void setModelExperienceId(String modelExperienceId) {
+            this.modelExperienceId = modelExperienceId;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
+        }
+
+        public List<String> getFileIdList() {
+            return fileIdList;
+        }
+
+        public void setFileIdList(List<String> fileIdList) {
+            this.fileIdList = fileIdList == null ? new ArrayList<String>() : fileIdList;
+        }
     }
 
     public static class ModelUpsertRequest {

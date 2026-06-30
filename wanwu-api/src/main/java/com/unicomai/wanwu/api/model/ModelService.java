@@ -1,6 +1,14 @@
 package com.unicomai.wanwu.api.model;
 
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
@@ -33,4 +41,14 @@ public interface ModelService {
     ProviderModelTypeResult listImportProviders(ProviderListQuery query);
 
     RecommendModelResult recommendModels(RecommendModelQuery query);
+
+    ModelExperienceDialogInfo saveModelExperienceDialog(ModelExperienceDialogSaveCommand command);
+
+    ModelExperienceDialogListResult listModelExperienceDialogs(ModelExperienceDialogListQuery query);
+
+    void deleteModelExperienceDialog(ModelExperienceDialogDeleteCommand command);
+
+    void saveModelExperienceDialogRecord(ModelExperienceDialogRecordSaveCommand command);
+
+    ModelExperienceDialogRecordListResult listModelExperienceDialogRecords(ModelExperienceDialogRecordQuery query);
 }

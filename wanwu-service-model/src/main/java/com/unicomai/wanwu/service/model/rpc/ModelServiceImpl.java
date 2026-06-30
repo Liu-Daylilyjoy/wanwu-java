@@ -2,6 +2,15 @@ package com.unicomai.wanwu.service.model.rpc;
 
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
@@ -50,9 +59,14 @@ public class ModelServiceImpl implements ModelService {
     private static final String MODEL_TYPE_GUI = "gui";
     private static final String MODEL_TYPE_PDF = "pdf-parser";
     private static final String MODEL_TYPE_ASR = "sync-asr";
+    private static final long CREATED_AT_MILLIS = 1782806400000L;
 
     private final Map<String, ModelInfo> models = new LinkedHashMap<String, ModelInfo>();
+    private final Map<String, ExperienceDialogState> experienceDialogs = new LinkedHashMap<String, ExperienceDialogState>();
+    private final Map<String, String> experienceDialogIdsBySession = new LinkedHashMap<String, String>();
+    private final List<ModelExperienceDialogRecordInfo> experienceDialogRecords = new ArrayList<ModelExperienceDialogRecordInfo>();
     private final AtomicLong nextId = new AtomicLong(100);
+    private final AtomicLong nextExperienceId = new AtomicLong(1000);
 
     public ModelServiceImpl() {
         seedBuiltInModels();
@@ -180,6 +194,83 @@ public class ModelServiceImpl implements ModelService {
             result.add(model);
         }
         return new RecommendModelResult(result, result.size());
+    }
+
+    @Override
+    public synchronized ModelExperienceDialogInfo saveModelExperienceDialog(ModelExperienceDialogSaveCommand command) {
+        validateExperienceDialog(command);
+        String existingId = experienceDialogIdsBySession.get(command.getSessionId());
+        if (existingId != null) {
+            ExperienceDialogState existing = experienceDialogs.get(existingId);
+            existing.modelSetting = defaultIfBlank(command.getModelSetting(), "");
+            return toDialogInfo(existing);
+        }
+        String id = String.valueOf(nextExperienceId.incrementAndGet());
+        ExperienceDialogState dialog = new ExperienceDialogState();
+        dialog.id = id;
+        dialog.userId = defaultIfBlank(command.getUserId(), DEFAULT_USER_ID);
+        dialog.orgId = defaultIfBlank(command.getOrgId(), DEFAULT_ORG_ID);
+        dialog.modelId = command.getModelId();
+        dialog.sessionId = command.getSessionId();
+        dialog.title = defaultIfBlank(command.getTitle(), "");
+        dialog.modelSetting = defaultIfBlank(command.getModelSetting(), "");
+        dialog.createdAt = CREATED_AT_MILLIS;
+        experienceDialogs.put(id, dialog);
+        experienceDialogIdsBySession.put(dialog.sessionId, id);
+        return toDialogInfo(dialog);
+    }
+
+    @Override
+    public synchronized ModelExperienceDialogListResult listModelExperienceDialogs(ModelExperienceDialogListQuery query) {
+        ModelExperienceDialogListQuery safe = query == null ? new ModelExperienceDialogListQuery() : query;
+        List<ModelExperienceDialogInfo> result = new ArrayList<ModelExperienceDialogInfo>();
+        for (ExperienceDialogState dialog : experienceDialogs.values()) {
+            if (!matchesExperienceOwner(safe.getUserId(), safe.getOrgId(), dialog)) {
+                continue;
+            }
+            result.add(0, toDialogInfo(dialog));
+        }
+        return new ModelExperienceDialogListResult(result, result.size());
+    }
+
+    @Override
+    public synchronized void deleteModelExperienceDialog(ModelExperienceDialogDeleteCommand command) {
+        if (command == null || isBlank(command.getModelExperienceId())) {
+            throw new IllegalArgumentException("modelExperienceId cannot be empty");
+        }
+        ExperienceDialogState dialog = experienceDialogs.get(command.getModelExperienceId());
+        if (dialog == null || !matchesExperienceOwner(command.getUserId(), command.getOrgId(), dialog)) {
+            return;
+        }
+        experienceDialogs.remove(command.getModelExperienceId());
+        experienceDialogIdsBySession.remove(dialog.sessionId);
+        for (int i = experienceDialogRecords.size() - 1; i >= 0; i--) {
+            if (command.getModelExperienceId().equals(experienceDialogRecords.get(i).getModelExperienceId())) {
+                experienceDialogRecords.remove(i);
+            }
+        }
+    }
+
+    @Override
+    public synchronized void saveModelExperienceDialogRecord(ModelExperienceDialogRecordSaveCommand command) {
+        validateExperienceRecord(command);
+        experienceDialogRecords.add(toRecordInfo(command));
+    }
+
+    @Override
+    public synchronized ModelExperienceDialogRecordListResult listModelExperienceDialogRecords(ModelExperienceDialogRecordQuery query) {
+        ModelExperienceDialogRecordQuery safe = query == null ? new ModelExperienceDialogRecordQuery() : query;
+        List<ModelExperienceDialogRecordInfo> result = new ArrayList<ModelExperienceDialogRecordInfo>();
+        for (ModelExperienceDialogRecordInfo record : experienceDialogRecords) {
+            if (!isBlank(safe.getModelExperienceId()) && !safe.getModelExperienceId().equals(record.getModelExperienceId())) {
+                continue;
+            }
+            if (!isBlank(safe.getSessionId()) && !safe.getSessionId().equals(record.getSessionId())) {
+                continue;
+            }
+            result.add(copyRecord(record));
+        }
+        return new ModelExperienceDialogRecordListResult(result, result.size());
     }
 
     public static ServiceDescriptor descriptor() {
@@ -330,6 +421,75 @@ public class ModelServiceImpl implements ModelService {
         }
     }
 
+    private void validateExperienceDialog(ModelExperienceDialogSaveCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("model experience dialog cannot be empty");
+        }
+        if (isBlank(command.getModelId())) {
+            throw new IllegalArgumentException("modelId cannot be empty");
+        }
+        if (isBlank(command.getSessionId())) {
+            throw new IllegalArgumentException("sessionId cannot be empty");
+        }
+    }
+
+    private void validateExperienceRecord(ModelExperienceDialogRecordSaveCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("model experience dialog record cannot be empty");
+        }
+        if (isBlank(command.getSessionId())) {
+            throw new IllegalArgumentException("sessionId cannot be empty");
+        }
+        if (isBlank(command.getModelId())) {
+            throw new IllegalArgumentException("modelId cannot be empty");
+        }
+        if (isBlank(command.getRole())) {
+            throw new IllegalArgumentException("role cannot be empty");
+        }
+    }
+
+    private boolean matchesExperienceOwner(String userId, String orgId, ExperienceDialogState dialog) {
+        if (!isBlank(userId) && !userId.equals(dialog.userId)) {
+            return false;
+        }
+        return isBlank(orgId) || orgId.equals(dialog.orgId);
+    }
+
+    private ModelExperienceDialogInfo toDialogInfo(ExperienceDialogState source) {
+        ModelExperienceDialogInfo info = new ModelExperienceDialogInfo();
+        info.setId(source.id);
+        info.setModelId(source.modelId);
+        info.setSessionId(source.sessionId);
+        info.setTitle(source.title);
+        info.setModelSetting(source.modelSetting);
+        info.setCreatedAt(source.createdAt);
+        return info;
+    }
+
+    private ModelExperienceDialogRecordInfo toRecordInfo(ModelExperienceDialogRecordSaveCommand source) {
+        ModelExperienceDialogRecordInfo info = new ModelExperienceDialogRecordInfo();
+        info.setModelExperienceId(defaultIfBlank(source.getModelExperienceId(), "0"));
+        info.setModelId(source.getModelId());
+        info.setSessionId(source.getSessionId());
+        info.setOriginalContent(defaultIfBlank(source.getOriginalContent(), ""));
+        info.setHandledContent(defaultIfBlank(source.getHandledContent(), ""));
+        info.setReasoningContent(defaultIfBlank(source.getReasoningContent(), ""));
+        info.setRole(source.getRole());
+        return info;
+    }
+
+    private ModelExperienceDialogRecordInfo copyRecord(ModelExperienceDialogRecordInfo source) {
+        ModelExperienceDialogRecordInfo copy = new ModelExperienceDialogRecordInfo();
+        copy.setModelExperienceId(source.getModelExperienceId());
+        copy.setModelId(source.getModelId());
+        copy.setSessionId(source.getSessionId());
+        copy.setOriginalContent(source.getOriginalContent());
+        copy.setHandledContent(source.getHandledContent());
+        copy.setReasoningContent(source.getReasoningContent());
+        copy.setRole(source.getRole());
+        return copy;
+    }
+
     private List<Map<String, Object>> tags(String scopeType, String importSource, String modelType) {
         List<Map<String, Object>> tags = new ArrayList<Map<String, Object>>();
         tags.add(singletonMap("text", scopeName(scopeType)));
@@ -461,5 +621,16 @@ public class ModelServiceImpl implements ModelService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static final class ExperienceDialogState {
+        private String id;
+        private String userId;
+        private String orgId;
+        private String modelId;
+        private String sessionId;
+        private String title;
+        private String modelSetting;
+        private long createdAt;
     }
 }

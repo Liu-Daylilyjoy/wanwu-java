@@ -48,6 +48,10 @@ import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
 import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.dto.ModelTypeInfo;
@@ -74,6 +78,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -294,6 +299,70 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listImportProviders(any());
         verify(modelService).recommendModels(any());
         verify(modelService).changeModelStatus(any());
+    }
+
+    @Test
+    public void modelExperienceRoutesReturnFrontendContracts() throws Exception {
+        when(modelService.saveModelExperienceDialog(any()))
+                .thenReturn(modelExperienceDialog("exp-001", "model-001", "session-001", "hello"));
+        when(modelService.listModelExperienceDialogs(any()))
+                .thenReturn(new ModelExperienceDialogListResult(
+                        Collections.singletonList(modelExperienceDialog("exp-001", "model-001", "session-001", "hello")), 1));
+        when(modelService.listModelExperienceDialogRecords(any()))
+                .thenReturn(new ModelExperienceDialogRecordListResult(java.util.Arrays.asList(
+                        modelExperienceRecord("exp-001", "model-001", "session-001", "hello", "", "user"),
+                        modelExperienceRecord("exp-001", "model-001", "session-001", "Echo: hello", "thinking", "assistant")
+                ), 2));
+        when(modelService.getModel(anyString(), anyString(), anyString()))
+                .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/dialog")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\",\"title\":\"hello\",\"modelSetting\":{\"temperature\":0.7}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value("exp-001"))
+                .andExpect(jsonPath("$.data.modelSetting").value("{\"temperature\":0.7}"));
+
+        mockMvc.perform(get("/user/api/v1/model/experience/dialogs")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].id").value("exp-001"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(get("/user/api/v1/model/experience/dialog/records")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelExperienceId", "exp-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].role").value("user"))
+                .andExpect(jsonPath("$.data.list[1].role").value("assistant"))
+                .andExpect(jsonPath("$.data.list[1].reasoningContent").value("thinking"));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\",\"modelExperienceId\":\"exp-001\",\"content\":\"hello\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("data:")))
+                .andExpect(content().string(containsString("\"content\":\"Echo: hello\"")))
+                .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
+
+        mockMvc.perform(delete("/user/api/v1/model/experience/dialog")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelExperienceId\":\"exp-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(modelService).saveModelExperienceDialog(any());
+        verify(modelService).listModelExperienceDialogs(any());
+        verify(modelService).listModelExperienceDialogRecords(any());
+        verify(modelService).deleteModelExperienceDialog(any());
+        verify(modelService, times(2)).saveModelExperienceDialogRecord(any());
     }
 
     @Test
@@ -1251,6 +1320,29 @@ public class WanwuFrontendApiControllerTest {
         info.setScopeType("1");
         info.setAllowEdit(true);
         info.setImportSource("builtin");
+        return info;
+    }
+
+    private ModelExperienceDialogInfo modelExperienceDialog(String id, String modelId, String sessionId, String title) {
+        ModelExperienceDialogInfo info = new ModelExperienceDialogInfo();
+        info.setId(id);
+        info.setModelId(modelId);
+        info.setSessionId(sessionId);
+        info.setTitle(title);
+        info.setModelSetting("{\"temperature\":0.7}");
+        info.setCreatedAt(1782806400000L);
+        return info;
+    }
+
+    private ModelExperienceDialogRecordInfo modelExperienceRecord(
+            String id, String modelId, String sessionId, String content, String reasoning, String role) {
+        ModelExperienceDialogRecordInfo info = new ModelExperienceDialogRecordInfo();
+        info.setModelExperienceId(id);
+        info.setModelId(modelId);
+        info.setSessionId(sessionId);
+        info.setOriginalContent(content);
+        info.setReasoningContent(reasoning);
+        info.setRole(role);
         return info;
     }
 

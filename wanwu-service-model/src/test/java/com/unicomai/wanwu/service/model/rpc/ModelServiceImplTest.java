@@ -1,6 +1,15 @@
 package com.unicomai.wanwu.service.model.rpc;
 
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.dto.ModelStatusCommand;
@@ -85,5 +94,56 @@ public class ModelServiceImplTest {
         RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("DeepSeek", "llm"));
         assertTrue(recommended.getTotal() >= 1);
         assertEquals("deepseek-chat", recommended.getList().get(0).getModel());
+    }
+
+    @Test
+    public void modelExperienceDialogLifecycleFollowsGoContract() {
+        ModelExperienceDialogSaveCommand create = new ModelExperienceDialogSaveCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setModelId("1");
+        create.setSessionId("session-001");
+        create.setTitle("hello model");
+        create.setModelSetting("{\"temperature\":0.7}");
+
+        ModelExperienceDialogInfo created = service.saveModelExperienceDialog(create);
+        assertNotNull(created.getId());
+        assertEquals("1", created.getModelId());
+        assertEquals("session-001", created.getSessionId());
+        assertEquals("hello model", created.getTitle());
+
+        create.setModelId("2");
+        create.setModelSetting("{\"temperature\":0.2}");
+        ModelExperienceDialogInfo updated = service.saveModelExperienceDialog(create);
+        assertEquals(created.getId(), updated.getId());
+        assertEquals("1", updated.getModelId());
+        assertEquals("{\"temperature\":0.2}", updated.getModelSetting());
+
+        service.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                "dev-admin", "default-org", created.getId(), "2", "session-001",
+                "hello", "", "", "user"));
+        service.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                "dev-admin", "default-org", created.getId(), "2", "session-001",
+                "Echo: hello", "", "thinking", "assistant"));
+
+        ModelExperienceDialogRecordListResult records = service.listModelExperienceDialogRecords(
+                new ModelExperienceDialogRecordQuery("dev-admin", "default-org", created.getId(), ""));
+        assertEquals(2, records.getTotal());
+        ModelExperienceDialogRecordInfo first = records.getList().get(0);
+        assertEquals("user", first.getRole());
+        assertEquals("hello", first.getOriginalContent());
+        assertEquals("assistant", records.getList().get(1).getRole());
+        assertEquals("thinking", records.getList().get(1).getReasoningContent());
+
+        ModelExperienceDialogListResult dialogs = service.listModelExperienceDialogs(
+                new ModelExperienceDialogListQuery("dev-admin", "default-org"));
+        assertEquals(1, dialogs.getTotal());
+        assertEquals(created.getId(), dialogs.getList().get(0).getId());
+
+        service.deleteModelExperienceDialog(new ModelExperienceDialogDeleteCommand("dev-admin", "default-org", created.getId()));
+        assertEquals(0, service.listModelExperienceDialogs(
+                new ModelExperienceDialogListQuery("dev-admin", "default-org")).getTotal());
+        assertEquals(0, service.listModelExperienceDialogRecords(
+                new ModelExperienceDialogRecordQuery("dev-admin", "default-org", created.getId(), "")).getTotal());
     }
 }
