@@ -1,9 +1,11 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -16,6 +18,7 @@ import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -98,6 +102,38 @@ public class WanwuFrontendApiController {
         command.setUserId(userContext.getUserId());
         command.setOrgId(userContext.getOrgId());
         return FrontendResponse.ok(appService.createAssistant(command));
+    }
+
+    @PutMapping("/assistant")
+    public FrontendResponse<Map<String, Object>> updateAssistant(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AssistantUpdateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AssistantUpdateCommand command = request.toUpdateCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateAssistant(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/assistant/config")
+    public FrontendResponse<Map<String, Object>> updateAssistantConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AssistantConfigRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AssistantConfigUpdateCommand command = request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateAssistantConfig(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping("/assistant/draft")
@@ -212,6 +248,149 @@ public class WanwuFrontendApiController {
 
         public void setAvatar(AvatarRequest avatar) {
             this.avatar = avatar;
+        }
+    }
+
+    public static class AssistantUpdateRequest extends AssistantCreateRequest {
+        private String assistantId;
+
+        public AssistantUpdateCommand toUpdateCommand() {
+            AssistantUpdateCommand command = new AssistantUpdateCommand();
+            command.setAssistantId(assistantId);
+            command.setName(getName());
+            command.setDesc(getDesc());
+            command.setCategory(getCategory());
+            if (getAvatar() != null) {
+                command.setAvatarKey(getAvatar().getKey());
+                command.setAvatarPath(getAvatar().getPath());
+            }
+            return command;
+        }
+
+        public String getAssistantId() {
+            return assistantId;
+        }
+
+        public void setAssistantId(String assistantId) {
+            this.assistantId = assistantId;
+        }
+    }
+
+    public static class AssistantConfigRequest {
+        private String assistantId;
+        private String prologue;
+        private String instructions;
+        private Map<String, Object> memoryConfig;
+        private Map<String, Object> knowledgeBaseConfig;
+        private Map<String, Object> modelConfig;
+        private Map<String, Object> safetyConfig;
+        private Map<String, Object> visionConfig;
+        private Map<String, Object> rerankConfig;
+        private Map<String, Object> recommendConfig;
+        private List<String> recommendQuestion;
+
+        public AssistantConfigUpdateCommand toCommand() {
+            AssistantConfigUpdateCommand command = new AssistantConfigUpdateCommand();
+            command.setAssistantId(assistantId);
+            command.setPrologue(prologue);
+            command.setInstructions(instructions);
+            command.setMemoryConfig(memoryConfig);
+            command.setKnowledgeBaseConfig(knowledgeBaseConfig);
+            command.setModelConfig(modelConfig);
+            command.setSafetyConfig(safetyConfig);
+            command.setVisionConfig(visionConfig);
+            command.setRerankConfig(rerankConfig);
+            command.setRecommendConfig(recommendConfig);
+            command.setRecommendQuestion(recommendQuestion);
+            return command;
+        }
+
+        public String getAssistantId() {
+            return assistantId;
+        }
+
+        public void setAssistantId(String assistantId) {
+            this.assistantId = assistantId;
+        }
+
+        public String getPrologue() {
+            return prologue;
+        }
+
+        public void setPrologue(String prologue) {
+            this.prologue = prologue;
+        }
+
+        public String getInstructions() {
+            return instructions;
+        }
+
+        public void setInstructions(String instructions) {
+            this.instructions = instructions;
+        }
+
+        public Map<String, Object> getMemoryConfig() {
+            return memoryConfig;
+        }
+
+        public void setMemoryConfig(Map<String, Object> memoryConfig) {
+            this.memoryConfig = memoryConfig;
+        }
+
+        public Map<String, Object> getKnowledgeBaseConfig() {
+            return knowledgeBaseConfig;
+        }
+
+        public void setKnowledgeBaseConfig(Map<String, Object> knowledgeBaseConfig) {
+            this.knowledgeBaseConfig = knowledgeBaseConfig;
+        }
+
+        public Map<String, Object> getModelConfig() {
+            return modelConfig;
+        }
+
+        public void setModelConfig(Map<String, Object> modelConfig) {
+            this.modelConfig = modelConfig;
+        }
+
+        public Map<String, Object> getSafetyConfig() {
+            return safetyConfig;
+        }
+
+        public void setSafetyConfig(Map<String, Object> safetyConfig) {
+            this.safetyConfig = safetyConfig;
+        }
+
+        public Map<String, Object> getVisionConfig() {
+            return visionConfig;
+        }
+
+        public void setVisionConfig(Map<String, Object> visionConfig) {
+            this.visionConfig = visionConfig;
+        }
+
+        public Map<String, Object> getRerankConfig() {
+            return rerankConfig;
+        }
+
+        public void setRerankConfig(Map<String, Object> rerankConfig) {
+            this.rerankConfig = rerankConfig;
+        }
+
+        public Map<String, Object> getRecommendConfig() {
+            return recommendConfig;
+        }
+
+        public void setRecommendConfig(Map<String, Object> recommendConfig) {
+            this.recommendConfig = recommendConfig;
+        }
+
+        public List<String> getRecommendQuestion() {
+            return recommendQuestion;
+        }
+
+        public void setRecommendQuestion(List<String> recommendQuestion) {
+            this.recommendQuestion = recommendQuestion;
         }
     }
 

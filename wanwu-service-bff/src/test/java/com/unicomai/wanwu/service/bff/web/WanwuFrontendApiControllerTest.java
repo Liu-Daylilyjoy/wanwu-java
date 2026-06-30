@@ -1,9 +1,11 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -23,12 +25,14 @@ import java.util.Map;
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -112,6 +116,65 @@ public class WanwuFrontendApiControllerTest {
         assertEquals("/static/demo.png", captor.getValue().getAvatarPath());
         assertEquals("dev-admin", captor.getValue().getUserId());
         assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void updateAssistantReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(put("/user/api/v1/assistant")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"category\":2,\"name\":\"UpdatedAgent\",\"desc\":\"updated desc\",\"avatar\":{\"key\":\"avatars/updated.png\",\"path\":\"/static/updated.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AssistantUpdateCommand> captor = forClass(AssistantUpdateCommand.class);
+        verify(appService).updateAssistant(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("UpdatedAgent", captor.getValue().getName());
+        assertEquals("updated desc", captor.getValue().getDesc());
+        assertEquals(2, captor.getValue().getCategory());
+        assertEquals("avatars/updated.png", captor.getValue().getAvatarKey());
+        assertEquals("/static/updated.png", captor.getValue().getAvatarPath());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void updateAssistantConfigReturnsFrontendSuccessAndMapsNestedPayload() throws Exception {
+        mockMvc.perform(put("/user/api/v1/assistant/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"prologue\":\"Hello from draft\",\"instructions\":\"Be concise\",\"memoryConfig\":{\"maxHistoryLength\":9},\"modelConfig\":{\"config\":{\"temperature\":0.7},\"modelId\":\"llm-001\"},\"visionConfig\":{\"picNum\":5},\"recommendQuestion\":[\"What can you do?\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AssistantConfigUpdateCommand> captor = forClass(AssistantConfigUpdateCommand.class);
+        verify(appService).updateAssistantConfig(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("Hello from draft", captor.getValue().getPrologue());
+        assertEquals("Be concise", captor.getValue().getInstructions());
+        assertEquals(9, captor.getValue().getMemoryConfig().get("maxHistoryLength"));
+        assertEquals("llm-001", captor.getValue().getModelConfig().get("modelId"));
+        assertEquals(5, captor.getValue().getVisionConfig().get("picNum"));
+        assertEquals("What can you do?", captor.getValue().getRecommendQuestion().get(0));
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void updateAssistantConfigReturnsFrontendFailureWhenAssistantIsMissing() throws Exception {
+        doThrow(new IllegalArgumentException("assistant draft not found"))
+                .when(appService).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
+
+        mockMvc.perform(put("/user/api/v1/assistant/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-missing\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("assistant draft not found"));
     }
 
     @Test

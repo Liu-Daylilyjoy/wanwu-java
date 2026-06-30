@@ -6,6 +6,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -47,4 +48,17 @@ public interface AppMapper extends BaseMapper<AppEntity> {
     AppRecord selectAssistantRecord(@Param("userId") String userId,
                                     @Param("orgId") String orgId,
                                     @Param("assistantId") String assistantId);
+
+    @Update({
+            "UPDATE apps",
+            "SET updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'agent'",
+            "  AND app_id = #{assistantId}"
+    })
+    int updateAssistantUpdatedAt(@Param("userId") String userId,
+                                 @Param("orgId") String orgId,
+                                 @Param("assistantId") String assistantId,
+                                 @Param("updatedAt") Long updatedAt);
 }

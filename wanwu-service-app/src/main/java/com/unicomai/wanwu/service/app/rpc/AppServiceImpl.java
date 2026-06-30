@@ -1,14 +1,20 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -32,21 +38,31 @@ public class AppServiceImpl implements AppService {
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
+    };
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<List<String>>() {
+    };
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.of("Asia/Shanghai"));
 
     private final ApplicationRepository applicationRepository;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     @Autowired
     public AppServiceImpl(ApplicationRepository applicationRepository) {
-        this(applicationRepository, Clock.systemUTC());
+        this(applicationRepository, Clock.systemUTC(), new ObjectMapper());
     }
 
     public AppServiceImpl(ApplicationRepository applicationRepository, Clock clock) {
+        this(applicationRepository, clock, new ObjectMapper());
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, ObjectMapper objectMapper) {
         this.applicationRepository = applicationRepository;
         this.clock = clock;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -81,6 +97,83 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public void updateAssistant(AssistantUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant update command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("assistant name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord existing = applicationRepository.findAssistant(userId, orgId, command.getAssistantId());
+        if (existing == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+
+        AppRecord record = new AppRecord();
+        record.setId(existing.getId());
+        record.setCreatedAt(existing.getCreatedAt());
+        record.setUpdatedAt(clock.millis());
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(command.getAssistantId());
+        record.setAppType(existing.getAppType());
+        record.setPublishType(existing.getPublishType());
+        record.setName(command.getName().trim());
+        record.setDesc(defaultIfBlank(command.getDesc(), ""));
+        record.setAvatarKey(defaultIfBlank(command.getAvatarKey(), ""));
+        record.setAvatarPath(defaultIfBlank(command.getAvatarPath(), ""));
+        record.setCategory(command.getCategory() == 0 ? existing.getCategory() : command.getCategory());
+        if (record.getCategory() == null || record.getCategory() == 0) {
+            record.setCategory(1);
+        }
+
+        AppRecord updated = applicationRepository.updateAssistant(record);
+        if (updated == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+    }
+
+    @Override
+    public void updateAssistantConfig(AssistantConfigUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant config command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord existing = applicationRepository.findAssistant(userId, orgId, command.getAssistantId());
+        if (existing == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+
+        long now = clock.millis();
+        AssistantDraftConfigRecord record = new AssistantDraftConfigRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAssistantId(command.getAssistantId());
+        record.setPrologue(defaultIfBlank(command.getPrologue(), ""));
+        record.setInstructions(defaultIfBlank(command.getInstructions(), ""));
+        record.setMemoryConfigJson(toJsonOrNull(command.getMemoryConfig()));
+        record.setKnowledgeBaseConfigJson(toJsonOrNull(command.getKnowledgeBaseConfig()));
+        record.setModelConfigJson(toJsonOrNull(command.getModelConfig()));
+        record.setSafetyConfigJson(toJsonOrNull(command.getSafetyConfig()));
+        record.setVisionConfigJson(toJsonOrNull(command.getVisionConfig()));
+        record.setRerankConfigJson(toJsonOrNull(command.getRerankConfig()));
+        record.setRecommendConfigJson(toJsonOrNull(command.getRecommendConfig()));
+        record.setRecommendQuestionsJson(toJsonOrNull(command.getRecommendQuestion()));
+        applicationRepository.saveAssistantConfig(record);
+    }
+
+    @Override
     public ApplicationListResult listAssistants(ApplicationListQuery query) {
         String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
         String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
@@ -104,7 +197,8 @@ public class AppServiceImpl implements AppService {
         if (record == null) {
             throw new IllegalArgumentException("assistant draft not found");
         }
-        return toFrontendDraft(record);
+        AssistantDraftConfigRecord config = applicationRepository.findAssistantConfig(userId, orgId, query.getAssistantId());
+        return toFrontendDraft(record, config);
     }
 
     public static ServiceDescriptor descriptor() {
@@ -128,7 +222,7 @@ public class AppServiceImpl implements AppService {
         return item;
     }
 
-    private Map<String, Object> toFrontendDraft(AppRecord record) {
+    private Map<String, Object> toFrontendDraft(AppRecord record, AssistantDraftConfigRecord config) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("assistantId", record.getAppId());
         item.put("uuid", record.getAppId());
@@ -138,16 +232,20 @@ public class AppServiceImpl implements AppService {
         item.put("desc", record.getDesc());
         item.put("category", record.getCategory());
         item.put("publishType", record.getPublishType());
-        item.put("prologue", "");
-        item.put("instructions", "");
-        item.put("memoryConfig", memoryConfig());
-        item.put("visionConfig", visionConfig());
-        item.put("knowledgeBaseConfig", knowledgeBaseConfig());
-        item.put("modelConfig", modelConfig());
-        item.put("rerankConfig", rerankConfig());
-        item.put("recommendQuestion", Collections.emptyList());
-        item.put("safetyConfig", null);
-        item.put("recommendConfig", null);
+        item.put("prologue", config == null ? "" : defaultIfBlank(config.getPrologue(), ""));
+        item.put("instructions", config == null ? "" : defaultIfBlank(config.getInstructions(), ""));
+        item.put("memoryConfig", config == null ? memoryConfig() : mapOrDefault(config.getMemoryConfigJson(), memoryConfig()));
+        item.put("visionConfig", config == null ? visionConfig() : mapOrDefault(config.getVisionConfigJson(), visionConfig()));
+        item.put("knowledgeBaseConfig", config == null
+                ? knowledgeBaseConfig()
+                : mapOrDefault(config.getKnowledgeBaseConfigJson(), knowledgeBaseConfig()));
+        item.put("modelConfig", config == null ? modelConfig() : mapOrDefault(config.getModelConfigJson(), modelConfig()));
+        item.put("rerankConfig", config == null ? rerankConfig() : mapOrDefault(config.getRerankConfigJson(), rerankConfig()));
+        item.put("recommendQuestion", config == null
+                ? Collections.emptyList()
+                : stringListOrDefault(config.getRecommendQuestionsJson(), Collections.<String>emptyList()));
+        item.put("safetyConfig", config == null ? null : nullableMap(config.getSafetyConfigJson()));
+        item.put("recommendConfig", config == null ? null : nullableMap(config.getRecommendConfigJson()));
         return item;
     }
 
@@ -217,6 +315,50 @@ public class AppServiceImpl implements AppService {
 
     private String newAssistantId() {
         return "assistant-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String toJsonOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("assistant config is invalid", ex);
+        }
+    }
+
+    private Map<String, Object> mapOrDefault(String json, Map<String, Object> defaultValue) {
+        if (isBlank(json)) {
+            return defaultValue;
+        }
+        try {
+            return objectMapper.readValue(json, MAP_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant draft config is invalid", ex);
+        }
+    }
+
+    private Map<String, Object> nullableMap(String json) {
+        if (isBlank(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, MAP_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant draft config is invalid", ex);
+        }
+    }
+
+    private List<String> stringListOrDefault(String json, List<String> defaultValue) {
+        if (isBlank(json)) {
+            return defaultValue;
+        }
+        try {
+            return objectMapper.readValue(json, STRING_LIST_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant draft config is invalid", ex);
+        }
     }
 
     private String defaultIfBlank(String value, String defaultValue) {

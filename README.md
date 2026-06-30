@@ -137,6 +137,24 @@ Invoke-RestMethod -Uri 'http://localhost:8080/user/api/v1/appspace/assistant/lis
 docker exec wanwu-java-mysql mysql -uroot -e "USE app_service; SHOW TABLES; SELECT version, description, success FROM flyway_schema_history;"
 ```
 
+智能体草稿编辑闭环快速验收：
+
+```powershell
+$headers = @{ Authorization = 'Bearer dev-token' }
+$createBody = @{ category = 1; name = 'DraftLoopAgent'; desc = 'before update'; avatar = @{ key = ''; path = '' } } | ConvertTo-Json -Depth 5
+$created = Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/user/api/v1/assistant' -Headers $headers -ContentType 'application/json' -Body $createBody
+$assistantId = $created.data.assistantId
+
+$updateBody = @{ assistantId = $assistantId; category = 2; name = 'DraftLoopUpdated'; desc = 'after update'; avatar = @{ key = 'avatars/updated.png'; path = '/static/updated.png' } } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method Put -Uri 'http://localhost:8080/user/api/v1/assistant' -Headers $headers -ContentType 'application/json' -Body $updateBody
+
+$configBody = @{ assistantId = $assistantId; prologue = 'Draft prologue'; instructions = 'Draft instructions'; memoryConfig = @{ maxHistoryLength = 7 }; visionConfig = @{ picNum = 4 }; modelConfig = @{ config = @{ temperature = 0.2 }; modelId = 'llm-demo' }; recommendQuestion = @('Ask one', 'Ask two') } | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Put -Uri 'http://localhost:8080/user/api/v1/assistant/config' -Headers $headers -ContentType 'application/json' -Body $configBody
+
+Invoke-RestMethod -Uri "http://localhost:8080/user/api/v1/assistant/draft?assistantId=$assistantId" -Headers $headers
+Invoke-RestMethod -Uri 'http://localhost:8080/user/api/v1/appspace/assistant/list?name=DraftLoopUpdated' -Headers $headers
+```
+
 停止服务：
 
 ```powershell

@@ -1,10 +1,13 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.junit.jupiter.api.Test;
@@ -13,12 +16,15 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class AppServiceImplTest {
@@ -73,6 +79,95 @@ public class AppServiceImplTest {
         assertTrue(draft.containsKey("rerankConfig"));
     }
 
+    @Test
+    public void updateAssistantPersistsAndListReflectsBaseFields() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("BeforeAgent", "before desc"));
+
+        AssistantUpdateCommand update = new AssistantUpdateCommand();
+        update.setAssistantId(created.getAssistantId());
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        update.setName("AfterAgent");
+        update.setDesc("after desc");
+        update.setCategory(2);
+        update.setAvatarKey("avatars/after.png");
+        update.setAvatarPath("/static/after.png");
+
+        service.updateAssistant(update);
+
+        ApplicationListResult result = service.listAssistants(
+                new ApplicationListQuery("agent", "After", "dev-admin", "default-org"));
+        assertEquals(1, result.getTotal());
+        Map<String, Object> item = result.getList().get(0);
+        assertEquals(created.getAssistantId(), item.get("appId"));
+        assertEquals("AfterAgent", item.get("name"));
+        assertEquals("after desc", item.get("desc"));
+        assertEquals(2, item.get("category"));
+        assertEquals("/static/after.png", ((Map<?, ?>) item.get("avatar")).get("path"));
+
+        Map<String, Object> draft = service.getAssistantDraft(
+                new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org"));
+        assertEquals("AfterAgent", draft.get("name"));
+        assertEquals("after desc", draft.get("desc"));
+    }
+
+    @Test
+    public void updateAssistantConfigPersistsAndDraftEchoesConfig() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("ConfigAgent", "config desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setPrologue("Hello from draft");
+        config.setInstructions("Always answer with concise steps.");
+
+        Map<String, Object> memoryConfig = new LinkedHashMap<>();
+        memoryConfig.put("maxHistoryLength", 9);
+        config.setMemoryConfig(memoryConfig);
+
+        Map<String, Object> modelParams = new LinkedHashMap<>();
+        modelParams.put("temperature", 0.7);
+        Map<String, Object> modelConfig = new LinkedHashMap<>();
+        modelConfig.put("config", modelParams);
+        modelConfig.put("modelId", "llm-001");
+        modelConfig.put("model", "demo-model");
+        config.setModelConfig(modelConfig);
+
+        Map<String, Object> visionConfig = new LinkedHashMap<>();
+        visionConfig.put("picNum", 5);
+        config.setVisionConfig(visionConfig);
+        config.setRecommendQuestion(Arrays.asList("What can you do?", "Show me an example."));
+
+        service.updateAssistantConfig(config);
+
+        Map<String, Object> draft = service.getAssistantDraft(
+                new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org"));
+        assertEquals("Hello from draft", draft.get("prologue"));
+        assertEquals("Always answer with concise steps.", draft.get("instructions"));
+        assertEquals(memoryConfig, draft.get("memoryConfig"));
+        assertEquals(modelConfig, draft.get("modelConfig"));
+        assertEquals(visionConfig, draft.get("visionConfig"));
+        assertEquals(Arrays.asList("What can you do?", "Show me an example."), draft.get("recommendQuestion"));
+    }
+
+    @Test
+    public void updateAssistantConfigRequiresExistingAssistant() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId("assistant-missing");
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.updateAssistantConfig(config));
+        assertEquals("assistant draft not found", error.getMessage());
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -93,6 +188,7 @@ public class AppServiceImplTest {
 
         private final AtomicLong ids = new AtomicLong();
         private final List<AppRecord> records = new ArrayList<>();
+        private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -127,6 +223,44 @@ public class AppServiceImplTest {
                         && orgId.equals(record.getOrgId())
                         && assistantId.equals(record.getAppId())) {
                     return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AppRecord updateAssistant(AppRecord record) {
+            AppRecord existing = findAssistant(record.getUserId(), record.getOrgId(), record.getAppId());
+            if (existing == null) {
+                return null;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDesc(record.getDesc());
+            existing.setAvatarKey(record.getAvatarKey());
+            existing.setAvatarPath(record.getAvatarPath());
+            existing.setCategory(record.getCategory());
+            return existing;
+        }
+
+        @Override
+        public AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record) {
+            AssistantDraftConfigRecord existing = findAssistantConfig(
+                    record.getUserId(), record.getOrgId(), record.getAssistantId());
+            if (existing != null) {
+                configs.remove(existing);
+            }
+            configs.add(record);
+            return record;
+        }
+
+        @Override
+        public AssistantDraftConfigRecord findAssistantConfig(String userId, String orgId, String assistantId) {
+            for (AssistantDraftConfigRecord config : configs) {
+                if (userId.equals(config.getUserId())
+                        && orgId.equals(config.getOrgId())
+                        && assistantId.equals(config.getAssistantId())) {
+                    return config;
                 }
             }
             return null;

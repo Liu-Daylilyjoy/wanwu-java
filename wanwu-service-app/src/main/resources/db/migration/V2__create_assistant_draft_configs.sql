@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS assistant_draft_configs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  assistant_id VARCHAR(64) NOT NULL,
+  prologue VARCHAR(512) NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL,
+  memory_config JSON NULL,
+  knowledge_base_config JSON NULL,
+  model_config JSON NULL,
+  safety_config JSON NULL,
+  vision_config JSON NULL,
+  rerank_config JSON NULL,
+  recommend_config JSON NULL,
+  recommend_questions JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_assistant_draft_config_assistant_id (assistant_id),
+  KEY idx_assistant_draft_config_user_id (user_id),
+  KEY idx_assistant_draft_config_org_id (org_id),
+  KEY idx_assistant_draft_config_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
