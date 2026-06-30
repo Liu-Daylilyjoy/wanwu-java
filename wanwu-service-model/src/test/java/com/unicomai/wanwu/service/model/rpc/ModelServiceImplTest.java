@@ -19,18 +19,34 @@ import com.unicomai.wanwu.api.model.dto.ProviderListQuery;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
+import com.unicomai.wanwu.service.model.persistence.entity.ModelRecordEntity;
+import com.unicomai.wanwu.service.model.persistence.mapper.ModelRecordMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class ModelServiceImplTest {
 
-    private final ModelServiceImpl service = new ModelServiceImpl();
+    private ModelServiceImpl service;
+
+    @BeforeEach
+    public void setUp() {
+        service = new ModelServiceImpl();
+    }
 
     @Test
     public void listModelsReturnsBuiltInDevelopmentModelsForFrontend() {
@@ -145,5 +161,86 @@ public class ModelServiceImplTest {
                 new ModelExperienceDialogListQuery("dev-admin", "default-org")).getTotal());
         assertEquals(0, service.listModelExperienceDialogRecords(
                 new ModelExperienceDialogRecordQuery("dev-admin", "default-org", created.getId(), "")).getTotal());
+    }
+
+    @Test
+    public void modelWritesArePersistedAsJsonRecordsWhenMapperIsAvailable() {
+        ModelRecordMapper mapper = mock(ModelRecordMapper.class);
+        when(mapper.selectByType(anyString())).thenReturn(Collections.<ModelRecordEntity>emptyList());
+        ModelServiceImpl persistent = new ModelServiceImpl(mapper);
+
+        ModelUpsertCommand create = new ModelUpsertCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setProvider("DeepSeek");
+        create.setModelType("llm");
+        create.setModel("deepseek-chat");
+        create.setDisplayName("Persistent Model");
+        create.setConfig(Collections.singletonMap("apiKey", "persist-key"));
+        ModelInfo created = persistent.importModel(create);
+        persistent.changeModelStatus(new ModelStatusCommand("dev-admin", "default-org", created.getModelId(), false));
+        persistent.deleteModel("dev-admin", "default-org", created.getModelId());
+
+        ModelExperienceDialogSaveCommand dialog = new ModelExperienceDialogSaveCommand();
+        dialog.setUserId("dev-admin");
+        dialog.setOrgId("default-org");
+        dialog.setModelId("1");
+        dialog.setSessionId("persist-session");
+        dialog.setTitle("Persistent Dialog");
+        ModelExperienceDialogInfo createdDialog = persistent.saveModelExperienceDialog(dialog);
+        persistent.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                "dev-admin", "default-org", createdDialog.getId(), "1", "persist-session",
+                "hello", "", "", "user"));
+
+        ArgumentCaptor<ModelRecordEntity> captor = ArgumentCaptor.forClass(ModelRecordEntity.class);
+        verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
+        assertTrue(captor.getAllValues().stream().anyMatch(item ->
+                "model".equals(item.getRecordType()) && item.getPayload().contains("Persistent Model")));
+        assertTrue(captor.getAllValues().stream().anyMatch(item ->
+                "model_deleted".equals(item.getRecordType()) && created.getModelId().equals(item.getRecordId())));
+        assertTrue(captor.getAllValues().stream().anyMatch(item ->
+                "dialog".equals(item.getRecordType()) && item.getPayload().contains("Persistent Dialog")));
+        assertTrue(captor.getAllValues().stream().anyMatch(item ->
+                "records".equals(item.getRecordType()) && item.getPayload().contains("hello")));
+        verify(mapper).deleteRecord("model", created.getModelId());
+    }
+
+    @Test
+    public void persistedModelRecordsAreLoadedAndSequencesContinueAfterRestart() {
+        ModelRecordMapper mapper = mock(ModelRecordMapper.class);
+        when(mapper.selectByType(eq("model_deleted"))).thenReturn(Collections.<ModelRecordEntity>emptyList());
+        when(mapper.selectByType(eq("dialog"))).thenReturn(Collections.singletonList(record("dialog", "1009",
+                "{\"id\":\"1009\",\"userId\":\"dev-admin\",\"orgId\":\"default-org\",\"modelId\":\"120\",\"sessionId\":\"loaded-session\",\"title\":\"Loaded Dialog\",\"modelSetting\":\"{}\",\"createdAt\":1782806400000}")));
+        when(mapper.selectByType(eq("records"))).thenReturn(Collections.singletonList(record("records", "all",
+                "[{\"modelExperienceId\":\"1009\",\"modelId\":\"120\",\"sessionId\":\"loaded-session\",\"originalContent\":\"loaded\",\"handledContent\":\"\",\"reasoningContent\":\"\",\"role\":\"user\"}]")));
+        when(mapper.selectByType(eq("model"))).thenReturn(Collections.singletonList(record("model", "120",
+                "{\"modelId\":\"120\",\"uuid\":\"model-uuid-120\",\"provider\":\"DeepSeek\",\"modelType\":\"llm\",\"model\":\"loaded-model\",\"displayName\":\"Loaded Model\",\"avatar\":{\"path\":\"\"},\"publishDate\":\"2026-06-30\",\"isActive\":true,\"userId\":\"dev-admin\",\"orgId\":\"default-org\",\"createdAt\":\"2026-06-30 00:00:00\",\"updatedAt\":\"2026-06-30 00:00:00\",\"modelDesc\":\"\",\"tags\":[],\"config\":{},\"scopeType\":\"1\",\"allowEdit\":true,\"importSource\":\"external\"}")));
+
+        ModelServiceImpl persistent = new ModelServiceImpl(mapper);
+
+        assertEquals("Loaded Model", persistent.getModel("dev-admin", "default-org", "120").getDisplayName());
+        assertEquals("Loaded Dialog", persistent.listModelExperienceDialogs(
+                new ModelExperienceDialogListQuery("dev-admin", "default-org")).getList().get(0).getTitle());
+        assertEquals("loaded", persistent.listModelExperienceDialogRecords(
+                new ModelExperienceDialogRecordQuery("dev-admin", "default-org", "1009", "")).getList().get(0).getOriginalContent());
+
+        ModelUpsertCommand create = new ModelUpsertCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setProvider("DeepSeek");
+        create.setModelType("llm");
+        create.setModel("next-model");
+        ModelInfo next = persistent.importModel(create);
+        assertEquals("121", next.getModelId());
+    }
+
+    private ModelRecordEntity record(String type, String id, String payload) {
+        ModelRecordEntity record = new ModelRecordEntity();
+        record.setRecordType(type);
+        record.setRecordId(id);
+        record.setPayload(payload);
+        record.setCreatedAt(1L);
+        record.setUpdatedAt(1L);
+        return record;
     }
 }

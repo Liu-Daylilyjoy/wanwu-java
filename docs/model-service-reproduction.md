@@ -33,7 +33,7 @@ The Java model service uses an in-memory repository seeded with Docker developme
 - OpenAI-compatible embedding: `text-embedding-3-small`
 - Jina rerank: `jina-reranker-v2-base-multilingual`
 
-The same in-memory boundary now stores model experience dialogs by `sessionId` and records by `modelExperienceId`, mirroring the Go service's create-or-update and cascade-delete behavior. This is enough for real frontend navigation, model select dependencies, model-management CRUD smoke tests, and the model experience history loop. It is not the final Go-equivalent database model. The later persistence slice should move this repository behind MySQL tables matching the original model service behavior.
+The same boundary now stores model experience dialogs by `sessionId` and records by `modelExperienceId`, mirroring the Go service's create-or-update and cascade-delete behavior. The mutable model state is now durable through `model_service.model_records`, so Docker restarts preserve imported models, status changes, delete tombstones, model-experience dialogs, and records. It is still not the final Go-equivalent database model; later slices should normalize this compatibility table into imported-model and model-experience relational tables matching the original model service behavior.
 
 ## Still Missing
 

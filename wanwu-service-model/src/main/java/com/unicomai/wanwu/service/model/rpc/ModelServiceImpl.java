@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.model.rpc;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
@@ -26,8 +28,12 @@ import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.model.persistence.entity.ModelRecordEntity;
+import com.unicomai.wanwu.service.model.persistence.mapper.ModelRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -40,6 +46,17 @@ import java.util.concurrent.atomic.AtomicLong;
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class ModelServiceImpl implements ModelService {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
+    };
+    private static final TypeReference<List<ModelExperienceDialogRecordInfo>> RECORD_LIST_TYPE =
+            new TypeReference<List<ModelExperienceDialogRecordInfo>>() {
+            };
+    private static final String TYPE_MODEL = "model";
+    private static final String TYPE_MODEL_DELETED = "model_deleted";
+    private static final String TYPE_DIALOG = "dialog";
+    private static final String TYPE_RECORDS = "records";
+    private static final String RECORDS_ID = "all";
     private static final String DEFAULT_USER_ID = "dev-admin";
     private static final String DEFAULT_ORG_ID = "default-org";
     private static final String CREATED_AT = "2026-06-30 00:00:00";
@@ -67,9 +84,45 @@ public class ModelServiceImpl implements ModelService {
     private final List<ModelExperienceDialogRecordInfo> experienceDialogRecords = new ArrayList<ModelExperienceDialogRecordInfo>();
     private final AtomicLong nextId = new AtomicLong(100);
     private final AtomicLong nextExperienceId = new AtomicLong(1000);
+    @Autowired(required = false)
+    private ModelRecordMapper modelRecordMapper;
 
     public ModelServiceImpl() {
         seedBuiltInModels();
+    }
+
+    ModelServiceImpl(ModelRecordMapper modelRecordMapper) {
+        this();
+        this.modelRecordMapper = modelRecordMapper;
+        loadPersistedRecords();
+    }
+
+    @PostConstruct
+    public synchronized void loadPersistedRecords() {
+        if (modelRecordMapper == null) {
+            return;
+        }
+        for (ModelRecordEntity record : modelRecordMapper.selectByType(TYPE_MODEL_DELETED)) {
+            models.remove(record.getRecordId());
+            bumpSequence(nextId, record.getRecordId());
+        }
+        for (ModelRecordEntity record : modelRecordMapper.selectByType(TYPE_MODEL)) {
+            ModelInfo model = read(record, ModelInfo.class);
+            models.put(record.getRecordId(), model);
+            bumpSequence(nextId, record.getRecordId());
+        }
+        for (ModelRecordEntity record : modelRecordMapper.selectByType(TYPE_DIALOG)) {
+            ExperienceDialogState dialog = dialogFromMap(readMap(record));
+            experienceDialogs.put(dialog.id, dialog);
+            experienceDialogIdsBySession.put(dialog.sessionId, dialog.id);
+            bumpSequence(nextExperienceId, dialog.id);
+        }
+        for (ModelRecordEntity record : modelRecordMapper.selectByType(TYPE_RECORDS)) {
+            if (RECORDS_ID.equals(record.getRecordId())) {
+                experienceDialogRecords.clear();
+                experienceDialogRecords.addAll(readRecords(record));
+            }
+        }
     }
 
     @Override
@@ -91,6 +144,8 @@ public class ModelServiceImpl implements ModelService {
             model.setImportSource(IMPORT_EXTERNAL);
         }
         models.put(id, copyForUser(model, command.getUserId()));
+        saveRecord(TYPE_MODEL, id, model);
+        deleteRecord(TYPE_MODEL_DELETED, id);
         return copyForUser(model, command.getUserId());
     }
 
@@ -108,12 +163,16 @@ public class ModelServiceImpl implements ModelService {
             updated.setImportSource(existing.getImportSource());
         }
         models.put(updated.getModelId(), copyForUser(updated, command.getUserId()));
+        saveRecord(TYPE_MODEL, updated.getModelId(), updated);
+        deleteRecord(TYPE_MODEL_DELETED, updated.getModelId());
     }
 
     @Override
     public synchronized void deleteModel(String userId, String orgId, String modelId) {
         existing(modelId);
         models.remove(modelId);
+        deleteRecord(TYPE_MODEL, modelId);
+        saveRecord(TYPE_MODEL_DELETED, modelId, singletonMap("modelId", modelId));
     }
 
     @Override
@@ -124,6 +183,7 @@ public class ModelServiceImpl implements ModelService {
         ModelInfo model = existing(command.getModelId());
         model.setIsActive(Boolean.TRUE.equals(command.getIsActive()));
         model.setUpdatedAt(CREATED_AT);
+        saveRecord(TYPE_MODEL, model.getModelId(), model);
     }
 
     @Override
@@ -203,6 +263,7 @@ public class ModelServiceImpl implements ModelService {
         if (existingId != null) {
             ExperienceDialogState existing = experienceDialogs.get(existingId);
             existing.modelSetting = defaultIfBlank(command.getModelSetting(), "");
+            saveRecord(TYPE_DIALOG, existing.id, dialogToMap(existing));
             return toDialogInfo(existing);
         }
         String id = String.valueOf(nextExperienceId.incrementAndGet());
@@ -217,6 +278,7 @@ public class ModelServiceImpl implements ModelService {
         dialog.createdAt = CREATED_AT_MILLIS;
         experienceDialogs.put(id, dialog);
         experienceDialogIdsBySession.put(dialog.sessionId, id);
+        saveRecord(TYPE_DIALOG, id, dialogToMap(dialog));
         return toDialogInfo(dialog);
     }
 
@@ -244,17 +306,20 @@ public class ModelServiceImpl implements ModelService {
         }
         experienceDialogs.remove(command.getModelExperienceId());
         experienceDialogIdsBySession.remove(dialog.sessionId);
+        deleteRecord(TYPE_DIALOG, command.getModelExperienceId());
         for (int i = experienceDialogRecords.size() - 1; i >= 0; i--) {
             if (command.getModelExperienceId().equals(experienceDialogRecords.get(i).getModelExperienceId())) {
                 experienceDialogRecords.remove(i);
             }
         }
+        saveExperienceRecords();
     }
 
     @Override
     public synchronized void saveModelExperienceDialogRecord(ModelExperienceDialogRecordSaveCommand command) {
         validateExperienceRecord(command);
         experienceDialogRecords.add(toRecordInfo(command));
+        saveExperienceRecords();
     }
 
     @Override
@@ -275,6 +340,101 @@ public class ModelServiceImpl implements ModelService {
 
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.MODEL, "Model Service", "model");
+    }
+
+    private <T> T read(ModelRecordEntity record, Class<T> type) {
+        try {
+            return JSON.readValue(record.getPayload(), type);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read model record " + record.getRecordType()
+                    + "/" + record.getRecordId(), ex);
+        }
+    }
+
+    private Map<String, Object> readMap(ModelRecordEntity record) {
+        try {
+            return JSON.readValue(record.getPayload(), MAP_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read model record " + record.getRecordType()
+                    + "/" + record.getRecordId(), ex);
+        }
+    }
+
+    private List<ModelExperienceDialogRecordInfo> readRecords(ModelRecordEntity record) {
+        try {
+            return JSON.readValue(record.getPayload(), RECORD_LIST_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read model experience records", ex);
+        }
+    }
+
+    private void saveRecord(String recordType, String recordId, Object payload) {
+        if (modelRecordMapper == null || isBlank(recordId)) {
+            return;
+        }
+        try {
+            long now = System.currentTimeMillis();
+            ModelRecordEntity entity = new ModelRecordEntity();
+            entity.setRecordType(recordType);
+            entity.setRecordId(recordId);
+            entity.setPayload(JSON.writeValueAsString(payload));
+            entity.setCreatedAt(now);
+            entity.setUpdatedAt(now);
+            modelRecordMapper.upsertRecord(entity);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to save model record " + recordType + "/" + recordId, ex);
+        }
+    }
+
+    private void deleteRecord(String recordType, String recordId) {
+        if (modelRecordMapper == null || isBlank(recordId)) {
+            return;
+        }
+        modelRecordMapper.deleteRecord(recordType, recordId);
+    }
+
+    private void saveExperienceRecords() {
+        saveRecord(TYPE_RECORDS, RECORDS_ID, experienceDialogRecords);
+    }
+
+    private Map<String, Object> dialogToMap(ExperienceDialogState dialog) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", dialog.id);
+        result.put("userId", dialog.userId);
+        result.put("orgId", dialog.orgId);
+        result.put("modelId", dialog.modelId);
+        result.put("sessionId", dialog.sessionId);
+        result.put("title", dialog.title);
+        result.put("modelSetting", dialog.modelSetting);
+        result.put("createdAt", dialog.createdAt);
+        return result;
+    }
+
+    private ExperienceDialogState dialogFromMap(Map<String, Object> map) {
+        ExperienceDialogState dialog = new ExperienceDialogState();
+        dialog.id = stringValue(map, "id", "");
+        dialog.userId = stringValue(map, "userId", DEFAULT_USER_ID);
+        dialog.orgId = stringValue(map, "orgId", DEFAULT_ORG_ID);
+        dialog.modelId = stringValue(map, "modelId", "");
+        dialog.sessionId = stringValue(map, "sessionId", "");
+        dialog.title = stringValue(map, "title", "");
+        dialog.modelSetting = stringValue(map, "modelSetting", "");
+        dialog.createdAt = longValue(map, "createdAt", CREATED_AT_MILLIS);
+        return dialog;
+    }
+
+    private void bumpSequence(AtomicLong sequence, String value) {
+        if (isBlank(value)) {
+            return;
+        }
+        try {
+            long numeric = Long.parseLong(value);
+            if (numeric > sequence.get()) {
+                sequence.set(numeric);
+            }
+        } catch (NumberFormatException ignored) {
+            // Human-supplied IDs do not participate in numeric sequence continuation.
+        }
     }
 
     private void seedBuiltInModels() {
@@ -617,6 +777,28 @@ public class ModelServiceImpl implements ModelService {
 
     private String defaultIfBlank(String value, String fallback) {
         return isBlank(value) ? fallback : value;
+    }
+
+    private String stringValue(Map<String, Object> map, String key, String fallback) {
+        if (map == null || map.get(key) == null) {
+            return fallback;
+        }
+        return String.valueOf(map.get(key));
+    }
+
+    private long longValue(Map<String, Object> map, String key, long fallback) {
+        if (map == null || map.get(key) == null) {
+            return fallback;
+        }
+        Object value = map.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
     }
 
     private boolean isBlank(String value) {
