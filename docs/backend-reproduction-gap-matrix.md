@@ -25,12 +25,12 @@ Measured from this Java repo before the full reproduction pass:
 
 | Group | Go routes | Java status |
 | --- | ---: | --- |
-| `callback/router.go` | 31 | Missing |
+| `callback/router.go` | 31 | Partially covered; `/callback/v1` file/model/workflow/MCP/chatflow/agent/RAG/WGA/app/skill route shapes now return stable development responses and stream shells through Docker Nginx, while real provider execution, RAG recall, sandbox runtime, auth/signature checks, and callback metrics remain missing |
 | `openapi/router.go` | 11 | Partially covered; public `/service/api/openapi/v1` agent/conversation/chat/RAG/workflow/chatflow/model/knowledge/MCP/OAuth route shapes now exist with API-key/dev-token context; real inference, workflow engine, OAuth signing, MCP runtime, knowledge indexing, and API usage metrics remain missing |
 | `openurl/router.go` | 11 | Mostly covered for Agent OpenURL plus anonymous file upload/merge/clean compatibility; deeper public runtime parity remains partial |
 | `v1/api_key.go` | 5 | Covered for create/update/delete/list/status |
 | `v1/assistant.go` | 32 | Partially covered; assistant CRUD/config/copy/publish/version/conversation/OpenURL plus local tool/workflow/MCP/skill/multi-agent binding/select compatibility and assistant template list/detail/copy covered; real assistant-side orchestration still missing |
-| `v1/callback.go` | 5 | Missing |
+| `v1/callback.go` | 5 | Partially covered; doc status, deploy info, category info, doc status init, and knowledge status aliases now exist for `/user/api/v1/api/*` and `/api/*`, while real persisted import/indexing status mutation remains missing |
 | `v1/common.go` | 48 | Partially covered; app-key, app-list, model selects, user info/language/password/avatar compatibility, local file upload/check/merge/clean/delete/direct-upload compatibility, and doc-center shell covered; several select helpers and real IAM/file/doc persistence still missing |
 | `v1/explore.go` | 25 | Partially covered; exploration app list/favorite/history contracts, prompt template, MCP square, and Skill square frontend routes are covered; chatflow, marketplace history recording, and deeper published app runtime remain partial |
 | `v1/guest.go` | 13 | Partially covered; workflow template list/detail/recommend/download contracts covered for Template Square; other guest/public routes still missing |
@@ -88,7 +88,7 @@ Measured from this Java repo before the full reproduction pass:
 13. Common user/doc center: user info, password/avatar/language compatibility, and doc-center menu/markdown/search/entry are covered with development data; real IAM profile persistence and static manual indexing remain next.
 14. RAG: draft/publish/chat/copy/version and knowledge integration. Management lifecycle, frontend chat shell, and upload response shape are covered; retrieval/search-list generation remains next.
 15. Assistant full surface: Workflow app lifecycle is now covered as a local shell; continue with deeper runtime orchestration and select endpoints.
-16. Guest/callback/openapi: public API compatibility shell is covered for the main Go OpenAPI route family; API usage metrics runtime, real public execution, and callback compatibility remain next.
+16. Guest/callback/openapi: public API compatibility shells are covered for the main Go OpenAPI and callback route families; API usage metrics runtime, real public execution, callback auth/signature checks, provider execution, and persisted status mutation remain next.
 17. WGA/general agent and sandbox integrations remain out of the current exposed frontend scope unless explicitly reintroduced.
 
 ## Development IAM Accounts
