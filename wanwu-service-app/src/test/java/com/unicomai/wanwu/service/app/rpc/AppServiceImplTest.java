@@ -52,6 +52,15 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
@@ -63,6 +72,8 @@ import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -260,6 +271,87 @@ public class AppServiceImplTest {
                 ragChatCommand(created.getRagId(), "published", false));
         assertEquals("published", published.getQuestion());
         assertEquals(true, published.getResponse().contains("Demo RAG response"));
+    }
+
+    @Test
+    public void workflowLifecycleSupportsFrontendAppspaceLoop() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("PolicyFlow");
+        create.setDesc("policy workflow");
+        create.setAvatarKey("avatars/workflow.png");
+        create.setAvatarPath("/static/workflow.png");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        ApplicationListResult list = service.listApplications(
+                new ApplicationListQuery("workflow", "Policy", "dev-admin", "default-org"));
+        assertEquals(1, list.getTotal());
+        assertEquals(created.getWorkflowId(), list.getList().get(0).get("appId"));
+        assertEquals("workflow", list.getList().get(0).get("appType"));
+
+        Map<String, Object> workflowSelect = service.listAssistantWorkflowSelect("dev-admin", "default-org", "Policy");
+        List<Map<String, Object>> workflowOptions = castList(workflowSelect.get("list"));
+        assertEquals(1, workflowOptions.size());
+        assertEquals(created.getWorkflowId(), workflowOptions.get(0).get("workFlowId"));
+        assertEquals("PolicyFlow", workflowOptions.get(0).get("name"));
+
+        WorkflowExportResult draftExport = service.exportWorkflow(
+                new WorkflowExportQuery(created.getWorkflowId(), "", false, "dev-admin", "default-org"));
+        assertEquals("PolicyFlow", draftExport.getName());
+        assertTrue(draftExport.getSchema().contains(created.getWorkflowId()));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getWorkflowId());
+        publish.setAppType("workflow");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setDesc("first workflow version");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        assertEquals("v1.0.0", service.getLatestAppVersion(
+                new AppVersionQuery(created.getWorkflowId(), "workflow", "dev-admin", "default-org")).getVersion());
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.singletonMap("question", "hello"));
+        WorkflowRunResult runResult = service.runWorkflow(run);
+        assertEquals(created.getWorkflowId(), runResult.getWorkflowId());
+        assertEquals("hello", runResult.getOutput().get("question"));
+
+        WorkflowCopyCommand copy = new WorkflowCopyCommand();
+        copy.setWorkflowId(created.getWorkflowId());
+        copy.setUserId("dev-admin");
+        copy.setOrgId("default-org");
+        WorkflowCreateResult copied = service.copyWorkflow(copy);
+        assertNotEquals(created.getWorkflowId(), copied.getWorkflowId());
+        assertEquals(2, service.listApplications(
+                new ApplicationListQuery("workflow", "PolicyFlow", "dev-admin", "default-org")).getTotal());
+
+        WorkflowImportCommand importCommand = new WorkflowImportCommand();
+        importCommand.setName("ImportedFlow");
+        importCommand.setDesc("imported");
+        importCommand.setSchema("{\"nodes\":[]}");
+        importCommand.setUserId("dev-admin");
+        importCommand.setOrgId("default-org");
+        WorkflowCreateResult imported = service.importWorkflow(importCommand);
+        assertEquals("ImportedFlow", service.exportWorkflow(
+                new WorkflowExportQuery(imported.getWorkflowId(), "", false, "dev-admin", "default-org")).getName());
+
+        WorkflowDeleteCommand delete = new WorkflowDeleteCommand();
+        delete.setWorkflowId(created.getWorkflowId());
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        service.deleteWorkflow(delete);
+        assertEquals(0, service.listApplications(
+                new ApplicationListQuery("workflow", created.getWorkflowId(), "dev-admin", "default-org")).getTotal());
     }
 
     @Test
@@ -1213,6 +1305,8 @@ public class AppServiceImplTest {
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
         private final List<RagDraftConfigRecord> ragConfigs = new ArrayList<>();
         private final List<RagSnapshotRecord> ragSnapshots = new ArrayList<>();
+        private final List<WorkflowDraftRecord> workflowDrafts = new ArrayList<>();
+        private final List<WorkflowSnapshotRecord> workflowSnapshots = new ArrayList<>();
         private final List<AppUrlRecord> appUrls = new ArrayList<>();
         private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
@@ -1668,6 +1762,182 @@ public class AppServiceImplTest {
             existing.setAvatarPath(record.getAvatarPath());
             existing.setCategory(record.getCategory());
             saveRagConfig(config);
+            return true;
+        }
+
+        @Override
+        public AppRecord saveWorkflow(AppRecord record, WorkflowDraftRecord draft) {
+            record.setId(ids.incrementAndGet());
+            records.add(record);
+            if (draft != null) {
+                draft.setId(ids.incrementAndGet());
+                workflowDrafts.add(draft);
+            }
+            return record;
+        }
+
+        @Override
+        public List<AppRecord> listWorkflows(String userId, String orgId, String name) {
+            List<AppRecord> matches = new ArrayList<>();
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && "workflow".equals(record.getAppType())
+                        && (name == null || name.isEmpty() || record.getName().contains(name))) {
+                    matches.add(record);
+                }
+            }
+            matches.sort(Comparator.comparing(AppRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public AppRecord findWorkflow(String userId, String orgId, String workflowId) {
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && workflowId.equals(record.getAppId())
+                        && "workflow".equals(record.getAppType())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public WorkflowDraftRecord findWorkflowDraft(String userId, String orgId, String workflowId) {
+            for (WorkflowDraftRecord draft : workflowDrafts) {
+                if (userId.equals(draft.getUserId())
+                        && orgId.equals(draft.getOrgId())
+                        && workflowId.equals(draft.getWorkflowId())) {
+                    return draft;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean deleteWorkflow(String userId, String orgId, String workflowId) {
+            AppRecord existing = findWorkflow(userId, orgId, workflowId);
+            if (existing == null) {
+                return false;
+            }
+            records.remove(existing);
+            WorkflowDraftRecord draft = findWorkflowDraft(userId, orgId, workflowId);
+            if (draft != null) {
+                workflowDrafts.remove(draft);
+            }
+            List<WorkflowSnapshotRecord> removed = new ArrayList<>();
+            for (WorkflowSnapshotRecord snapshot : workflowSnapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && workflowId.equals(snapshot.getWorkflowId())) {
+                    removed.add(snapshot);
+                }
+            }
+            workflowSnapshots.removeAll(removed);
+            return true;
+        }
+
+        @Override
+        public List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix) {
+            List<String> names = new ArrayList<>();
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && "workflow".equals(record.getAppType())
+                        && record.getName() != null
+                        && record.getName().startsWith(prefix)) {
+                    names.add(record.getName());
+                }
+            }
+            return names;
+        }
+
+        @Override
+        public AppRecord copyWorkflow(AppRecord record, WorkflowDraftRecord draft) {
+            return saveWorkflow(record, draft);
+        }
+
+        @Override
+        public WorkflowSnapshotRecord saveWorkflowSnapshot(WorkflowSnapshotRecord snapshot) {
+            snapshot.setId(ids.incrementAndGet());
+            workflowSnapshots.add(snapshot);
+            return snapshot;
+        }
+
+        @Override
+        public List<WorkflowSnapshotRecord> listWorkflowSnapshots(String userId, String orgId, String workflowId) {
+            List<WorkflowSnapshotRecord> matches = new ArrayList<>();
+            for (WorkflowSnapshotRecord snapshot : workflowSnapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && workflowId.equals(snapshot.getWorkflowId())) {
+                    matches.add(snapshot);
+                }
+            }
+            matches.sort(Comparator.comparing(WorkflowSnapshotRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public WorkflowSnapshotRecord findLatestWorkflowSnapshot(String userId, String orgId, String workflowId) {
+            List<WorkflowSnapshotRecord> matches = listWorkflowSnapshots(userId, orgId, workflowId);
+            return matches.isEmpty() ? null : matches.get(0);
+        }
+
+        @Override
+        public WorkflowSnapshotRecord findWorkflowSnapshotByVersion(String userId, String orgId, String workflowId, String version) {
+            for (WorkflowSnapshotRecord snapshot : workflowSnapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && workflowId.equals(snapshot.getWorkflowId())
+                        && version.equals(snapshot.getVersion())) {
+                    return snapshot;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean updateLatestWorkflowSnapshot(String userId, String orgId, String workflowId, String desc, long updatedAt) {
+            WorkflowSnapshotRecord latest = findLatestWorkflowSnapshot(userId, orgId, workflowId);
+            if (latest == null) {
+                return false;
+            }
+            latest.setDesc(desc);
+            latest.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String publishType, long updatedAt) {
+            AppRecord existing = findWorkflow(userId, orgId, workflowId);
+            if (existing == null) {
+                return false;
+            }
+            existing.setPublishType(publishType);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft) {
+            AppRecord existing = findWorkflow(record.getUserId(), record.getOrgId(), record.getAppId());
+            if (existing == null) {
+                return false;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDesc(record.getDesc());
+            existing.setAvatarKey(record.getAvatarKey());
+            existing.setAvatarPath(record.getAvatarPath());
+            existing.setCategory(record.getCategory());
+            WorkflowDraftRecord existingDraft = findWorkflowDraft(draft.getUserId(), draft.getOrgId(), draft.getWorkflowId());
+            if (existingDraft != null) {
+                workflowDrafts.remove(existingDraft);
+            }
+            workflowDrafts.add(draft);
             return true;
         }
 

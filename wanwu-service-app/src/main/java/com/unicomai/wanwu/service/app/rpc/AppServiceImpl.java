@@ -56,6 +56,15 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -70,6 +79,8 @@ import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -93,6 +104,7 @@ public class AppServiceImpl implements AppService {
     private static final String APP_TYPE_AGENT = "agent";
     private static final String APP_TYPE_ASSISTANT = "assistant";
     private static final String APP_TYPE_RAG = "rag";
+    private static final String APP_TYPE_WORKFLOW = "workflow";
     private static final String PUBLISH_TYPE_UNPUBLISHED = "";
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
@@ -448,6 +460,10 @@ public class AppServiceImpl implements AppService {
             publishRag(command, userId, orgId, publishType);
             return;
         }
+        if (APP_TYPE_WORKFLOW.equals(appType)) {
+            publishWorkflow(command, userId, orgId, publishType);
+            return;
+        }
         if (!APP_TYPE_AGENT.equals(appType)) {
             throw new IllegalArgumentException("unsupported app type");
         }
@@ -501,6 +517,13 @@ public class AppServiceImpl implements AppService {
             }
             return;
         }
+        if (APP_TYPE_WORKFLOW.equals(appType)) {
+            if (!applicationRepository.updateWorkflowPublishType(
+                    userId, orgId, command.getAppId(), PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
+                throw new IllegalArgumentException("workflow draft not found");
+            }
+            return;
+        }
         if (!APP_TYPE_AGENT.equals(appType)) {
             throw new IllegalArgumentException("unsupported app type");
         }
@@ -519,6 +542,18 @@ public class AppServiceImpl implements AppService {
                 throw new IllegalArgumentException("rag draft not found");
             }
             RagSnapshotRecord latest = applicationRepository.findLatestRagSnapshot(
+                    context.userId, context.orgId, context.appId);
+            if (latest == null) {
+                return new AppVersionInfo("", "", "", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+            }
+            return toVersionInfo(latest, defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        }
+        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+            AppRecord record = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId);
+            if (record == null) {
+                throw new IllegalArgumentException("workflow draft not found");
+            }
+            WorkflowSnapshotRecord latest = applicationRepository.findLatestWorkflowSnapshot(
                     context.userId, context.orgId, context.appId);
             if (latest == null) {
                 return new AppVersionInfo("", "", "", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
@@ -545,6 +580,15 @@ public class AppServiceImpl implements AppService {
                     context.userId, context.orgId, context.appId);
             List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
             for (RagSnapshotRecord snapshot : snapshots) {
+                versions.add(toVersionInfo(snapshot, ""));
+            }
+            return new AppVersionListResult(versions, versions.size());
+        }
+        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+            List<WorkflowSnapshotRecord> snapshots = applicationRepository.listWorkflowSnapshots(
+                    context.userId, context.orgId, context.appId);
+            List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
+            for (WorkflowSnapshotRecord snapshot : snapshots) {
                 versions.add(toVersionInfo(snapshot, ""));
             }
             return new AppVersionListResult(versions, versions.size());
@@ -576,6 +620,16 @@ public class AppServiceImpl implements AppService {
             }
             return;
         }
+        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+            if (!applicationRepository.updateLatestWorkflowSnapshot(
+                    context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
+                throw new IllegalArgumentException("workflow snapshot not found");
+            }
+            if (!applicationRepository.updateWorkflowPublishType(context.userId, context.orgId, context.appId, publishType, now)) {
+                throw new IllegalArgumentException("workflow draft not found");
+            }
+            return;
+        }
         if (!applicationRepository.updateLatestAssistantSnapshot(
                 context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
             throw new IllegalArgumentException("assistant snapshot not found");
@@ -596,6 +650,10 @@ public class AppServiceImpl implements AppService {
         VersionContext context = versionContext(command.getAppId(), command.getAppType(), command.getUserId(), command.getOrgId());
         if (APP_TYPE_RAG.equals(context.appType)) {
             rollbackRagVersion(command, context);
+            return;
+        }
+        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+            rollbackWorkflowVersion(command, context);
             return;
         }
         AppRecord existing = applicationRepository.findAssistant(context.userId, context.orgId, context.appId);
@@ -637,6 +695,17 @@ public class AppServiceImpl implements AppService {
             String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
             String name = query == null ? "" : defaultIfBlank(query.getName(), "");
             List<AppRecord> records = applicationRepository.listRags(userId, orgId, name);
+            List<Map<String, Object>> items = new ArrayList<>(records.size());
+            for (AppRecord record : records) {
+                items.add(toFrontendCard(record));
+            }
+            return new ApplicationListResult(items, items.size());
+        }
+        if (APP_TYPE_WORKFLOW.equals(appType)) {
+            String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
+            String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+            String name = query == null ? "" : defaultIfBlank(query.getName(), "");
+            List<AppRecord> records = applicationRepository.listWorkflows(userId, orgId, name);
             List<Map<String, Object>> items = new ArrayList<>(records.size());
             for (AppRecord record : records) {
                 items.add(toFrontendCard(record));
@@ -952,6 +1021,148 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public WorkflowCreateResult createWorkflow(WorkflowCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("workflow create command is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("workflow name is required");
+        }
+        long now = clock.millis();
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String workflowId = newWorkflowId();
+
+        AppRecord record = new AppRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(workflowId);
+        record.setAppType(APP_TYPE_WORKFLOW);
+        record.setPublishType(PUBLISH_TYPE_UNPUBLISHED);
+        record.setName(command.getName().trim());
+        record.setDesc(defaultIfBlank(command.getDesc(), ""));
+        record.setAvatarKey(defaultIfBlank(command.getAvatarKey(), ""));
+        record.setAvatarPath(defaultIfBlank(command.getAvatarPath(), ""));
+        record.setCategory(0);
+
+        WorkflowDraftRecord draft = workflowDraft(userId, orgId, workflowId, now,
+                defaultIfBlank(command.getSchema(), defaultWorkflowSchema(workflowId)));
+        applicationRepository.saveWorkflow(record, draft);
+        return new WorkflowCreateResult(workflowId);
+    }
+
+    @Override
+    public WorkflowCreateResult importWorkflow(WorkflowImportCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("workflow import command is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("workflow name is required");
+        }
+        if (isBlank(command.getDesc())) {
+            throw new IllegalArgumentException("workflow desc is required");
+        }
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName(command.getName());
+        create.setDesc(command.getDesc());
+        create.setSchema(command.getSchema());
+        create.setUserId(command.getUserId());
+        create.setOrgId(command.getOrgId());
+        return createWorkflow(create);
+    }
+
+    @Override
+    public WorkflowCreateResult copyWorkflow(WorkflowCopyCommand command) {
+        if (command == null || isBlank(command.getWorkflowId())) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord source = applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId());
+        if (source == null) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+        if (command.isNeedPublished()
+                && applicationRepository.findLatestWorkflowSnapshot(userId, orgId, command.getWorkflowId()) == null) {
+            throw new IllegalArgumentException("workflow snapshot not found");
+        }
+
+        long now = clock.millis();
+        String newWorkflowId = newWorkflowId();
+        AppRecord copied = copyBaseRecord(source, newWorkflowId, nextWorkflowCopyName(userId, orgId, source.getName()), now);
+        WorkflowDraftRecord sourceDraft = applicationRepository.findWorkflowDraft(userId, orgId, command.getWorkflowId());
+        WorkflowDraftRecord copiedDraft = copyWorkflowDraft(sourceDraft, userId, orgId, newWorkflowId, now);
+        applicationRepository.copyWorkflow(copied, copiedDraft);
+        return new WorkflowCreateResult(newWorkflowId);
+    }
+
+    @Override
+    public void deleteWorkflow(WorkflowDeleteCommand command) {
+        if (command == null || isBlank(command.getWorkflowId())) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (!applicationRepository.deleteWorkflow(userId, orgId, command.getWorkflowId())) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+    }
+
+    @Override
+    public WorkflowExportResult exportWorkflow(WorkflowExportQuery query) {
+        if (query == null || isBlank(query.getWorkflowId())) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AppRecord workflow = applicationRepository.findWorkflow(userId, orgId, query.getWorkflowId());
+        if (workflow == null) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+        if (query.isPublished() || !isBlank(query.getVersion())) {
+            WorkflowSnapshotRecord snapshot = isBlank(query.getVersion())
+                    ? applicationRepository.findLatestWorkflowSnapshot(userId, orgId, query.getWorkflowId())
+                    : applicationRepository.findWorkflowSnapshotByVersion(userId, orgId, query.getWorkflowId(), query.getVersion());
+            if (snapshot == null) {
+                throw new IllegalArgumentException("workflow snapshot not found");
+            }
+            Map<String, Object> snapshotInfo = mapOrDefault(snapshot.getWorkflowInfoJson(), new LinkedHashMap<String, Object>());
+            return new WorkflowExportResult(
+                    defaultIfBlank((String) snapshotInfo.get("name"), workflow.getName()),
+                    defaultIfBlank((String) snapshotInfo.get("desc"), workflow.getDesc()),
+                    defaultIfBlank(snapshot.getWorkflowSchemaJson(), defaultWorkflowSchema(query.getWorkflowId())));
+        }
+        WorkflowDraftRecord draft = applicationRepository.findWorkflowDraft(userId, orgId, query.getWorkflowId());
+        return new WorkflowExportResult(
+                workflow.getName(),
+                defaultIfBlank(workflow.getDesc(), ""),
+                draft == null ? defaultWorkflowSchema(query.getWorkflowId()) : defaultIfBlank(draft.getSchemaJson(), defaultWorkflowSchema(query.getWorkflowId())));
+    }
+
+    @Override
+    public WorkflowRunResult runWorkflow(WorkflowRunCommand command) {
+        if (command == null || isBlank(command.getWorkflowId())) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId()) == null) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("workflowId", command.getWorkflowId());
+        output.put("status", "success");
+        output.put("message", "Demo workflow response");
+        Map<String, Object> input = command.getInput() == null
+                ? Collections.<String, Object>emptyMap()
+                : command.getInput();
+        output.putAll(input);
+        return new WorkflowRunResult(command.getWorkflowId(), output);
+    }
+
+    @Override
     public void addAssistantWorkflow(AssistantResourceCommand command) {
         AssistantDraftConfigRecord config = resourceConfig(command);
         List<Map<String, Object>> list = listMapOrDefault(config.getWorkflowInfosJson());
@@ -1183,6 +1394,19 @@ public class AppServiceImpl implements AppService {
     @Override
     public Map<String, Object> listAssistantWorkflowSelect(String userId, String orgId, String name) {
         List<Map<String, Object>> list = new ArrayList<>();
+        List<AppRecord> workflows = applicationRepository.listWorkflows(
+                defaultIfBlank(userId, DEV_USER_ID),
+                defaultIfBlank(orgId, DEV_ORG_ID),
+                defaultIfBlank(name, ""));
+        for (AppRecord workflowRecord : workflows) {
+            Map<String, Object> workflow = toFrontendWorkflow(workflowRecord);
+            workflow.put("uniqueId", uniqueId(APP_TYPE_WORKFLOW, workflowRecord.getAppId()));
+            workflow.put("workFlowId", workflowRecord.getAppId());
+            list.add(workflow);
+        }
+        if (!list.isEmpty()) {
+            return listResult(list);
+        }
         Map<String, Object> workflow = new LinkedHashMap<>();
         workflow.put("uniqueId", "workflow_workflow-demo");
         workflow.put("workFlowId", "workflow-demo");
@@ -2141,6 +2365,21 @@ public class AppServiceImpl implements AppService {
         return item;
     }
 
+    private Map<String, Object> toFrontendWorkflow(AppRecord record) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("workflowId", record.getAppId());
+        item.put("workflow_id", record.getAppId());
+        item.put("appId", record.getAppId());
+        item.put("appType", APP_TYPE_WORKFLOW);
+        item.put("uuid", record.getAppId());
+        item.put("avatar", avatar(record));
+        item.put("name", record.getName());
+        item.put("desc", record.getDesc());
+        item.put("category", record.getCategory());
+        item.put("publishType", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        return item;
+    }
+
     private AppRecord copyBaseRecord(AppRecord source, String newAssistantId, String newName, long now) {
         AppRecord copied = new AppRecord();
         copied.setCreatedAt(now);
@@ -2216,6 +2455,27 @@ public class AppServiceImpl implements AppService {
         return copied;
     }
 
+    private WorkflowDraftRecord workflowDraft(String userId, String orgId, String workflowId, long now, String schema) {
+        WorkflowDraftRecord draft = new WorkflowDraftRecord();
+        draft.setCreatedAt(now);
+        draft.setUpdatedAt(now);
+        draft.setUserId(userId);
+        draft.setOrgId(orgId);
+        draft.setWorkflowId(workflowId);
+        draft.setSchemaJson(defaultIfBlank(schema, defaultWorkflowSchema(workflowId)));
+        return draft;
+    }
+
+    private WorkflowDraftRecord copyWorkflowDraft(WorkflowDraftRecord source,
+                                                  String userId,
+                                                  String orgId,
+                                                  String newWorkflowId,
+                                                  long now) {
+        WorkflowDraftRecord copied = workflowDraft(userId, orgId, newWorkflowId, now,
+                source == null ? defaultWorkflowSchema(newWorkflowId) : source.getSchemaJson());
+        return copied;
+    }
+
     private String nextCopyName(String userId, String orgId, String sourceName) {
         String prefix = sourceName + "_";
         int max = 0;
@@ -2236,6 +2496,22 @@ public class AppServiceImpl implements AppService {
         String prefix = sourceName + "_";
         int max = 0;
         for (String name : applicationRepository.listRagNamesByPrefix(userId, orgId, prefix)) {
+            if (name == null || !name.startsWith(prefix)) {
+                continue;
+            }
+            String suffix = name.substring(prefix.length());
+            try {
+                max = Math.max(max, Integer.parseInt(suffix));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return prefix + (max + 1);
+    }
+
+    private String nextWorkflowCopyName(String userId, String orgId, String sourceName) {
+        String prefix = sourceName + "_";
+        int max = 0;
+        for (String name : applicationRepository.listWorkflowNamesByPrefix(userId, orgId, prefix)) {
             if (name == null || !name.startsWith(prefix)) {
                 continue;
             }
@@ -2284,6 +2560,42 @@ public class AppServiceImpl implements AppService {
         applicationRepository.updateRagPublishType(userId, orgId, command.getAppId(), publishType, now);
     }
 
+    private void publishWorkflow(AppPublishCommand command, String userId, String orgId, String publishType) {
+        AppRecord record = applicationRepository.findWorkflow(userId, orgId, command.getAppId());
+        if (record == null) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+        WorkflowSnapshotRecord latest = applicationRepository.findLatestWorkflowSnapshot(userId, orgId, command.getAppId());
+        String version = isBlank(command.getVersion()) ? nextVersion(latestVersion(latest)) : command.getVersion().trim();
+        validateVersion(version);
+        if (latest != null && compareVersion(version, latest.getVersion()) <= 0) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+        if (applicationRepository.findWorkflowSnapshotByVersion(userId, orgId, command.getAppId(), version) != null) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+
+        long now = clock.millis();
+        WorkflowDraftRecord draft = applicationRepository.findWorkflowDraft(userId, orgId, command.getAppId());
+        WorkflowSnapshotRecord snapshot = new WorkflowSnapshotRecord();
+        snapshot.setCreatedAt(now);
+        snapshot.setUpdatedAt(now);
+        snapshot.setUserId(userId);
+        snapshot.setOrgId(orgId);
+        snapshot.setWorkflowId(command.getAppId());
+        snapshot.setVersion(version);
+        snapshot.setDesc(defaultIfBlank(command.getDesc(), ""));
+        snapshot.setCategory(record.getCategory());
+        Map<String, Object> workflowInfo = toFrontendWorkflow(record);
+        workflowInfo.put("publishType", publishType);
+        snapshot.setWorkflowInfoJson(toJsonOrNull(workflowInfo));
+        snapshot.setWorkflowSchemaJson(draft == null
+                ? defaultWorkflowSchema(command.getAppId())
+                : defaultIfBlank(draft.getSchemaJson(), defaultWorkflowSchema(command.getAppId())));
+        applicationRepository.saveWorkflowSnapshot(snapshot);
+        applicationRepository.updateWorkflowPublishType(userId, orgId, command.getAppId(), publishType, now);
+    }
+
     private void rollbackRagVersion(AppVersionRollbackCommand command, VersionContext context) {
         AppRecord existing = applicationRepository.findRag(context.userId, context.orgId, context.appId);
         if (existing == null) {
@@ -2303,6 +2615,29 @@ public class AppServiceImpl implements AppService {
         }
     }
 
+    private void rollbackWorkflowVersion(AppVersionRollbackCommand command, VersionContext context) {
+        AppRecord existing = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId);
+        if (existing == null) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+        WorkflowSnapshotRecord snapshot = applicationRepository.findWorkflowSnapshotByVersion(
+                context.userId, context.orgId, context.appId, command.getVersion());
+        if (snapshot == null) {
+            throw new IllegalArgumentException("workflow snapshot not found");
+        }
+        Map<String, Object> snapshotDraft = mapOrDefault(snapshot.getWorkflowInfoJson(), new LinkedHashMap<String, Object>());
+        AppRecord restored = restoreRecord(existing, snapshotDraft, clock.millis());
+        WorkflowDraftRecord restoredDraft = workflowDraft(
+                context.userId,
+                context.orgId,
+                context.appId,
+                restored.getUpdatedAt(),
+                snapshot.getWorkflowSchemaJson());
+        if (!applicationRepository.rollbackWorkflow(restored, restoredDraft)) {
+            throw new IllegalArgumentException("workflow draft not found");
+        }
+    }
+
     private VersionContext versionContext(AppVersionQuery query) {
         if (query == null) {
             throw new IllegalArgumentException("app version query is required");
@@ -2312,7 +2647,9 @@ public class AppServiceImpl implements AppService {
 
     private VersionContext versionContext(String appId, String appType, String userId, String orgId) {
         String normalizedAppType = normalizeAppType(appType);
-        if (!APP_TYPE_AGENT.equals(normalizedAppType) && !APP_TYPE_RAG.equals(normalizedAppType)) {
+        if (!APP_TYPE_AGENT.equals(normalizedAppType)
+                && !APP_TYPE_RAG.equals(normalizedAppType)
+                && !APP_TYPE_WORKFLOW.equals(normalizedAppType)) {
             throw new IllegalArgumentException("unsupported app type");
         }
         if (isBlank(appId)) {
@@ -2369,9 +2706,17 @@ public class AppServiceImpl implements AppService {
         return latest == null ? "" : latest.getVersion();
     }
 
+    private String latestVersion(WorkflowSnapshotRecord latest) {
+        return latest == null ? "" : latest.getVersion();
+    }
+
     private String latestVersion(AppRecord record) {
         if (APP_TYPE_RAG.equals(record.getAppType())) {
             return latestVersion(applicationRepository.findLatestRagSnapshot(
+                    record.getUserId(), record.getOrgId(), record.getAppId()));
+        }
+        if (APP_TYPE_WORKFLOW.equals(record.getAppType())) {
+            return latestVersion(applicationRepository.findLatestWorkflowSnapshot(
                     record.getUserId(), record.getOrgId(), record.getAppId()));
         }
         AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(
@@ -2409,6 +2754,14 @@ public class AppServiceImpl implements AppService {
     }
 
     private AppVersionInfo toVersionInfo(RagSnapshotRecord snapshot, String publishType) {
+        return new AppVersionInfo(
+                snapshot.getVersion(),
+                defaultIfBlank(snapshot.getDesc(), ""),
+                formatMillis(snapshot.getCreatedAt()),
+                publishType);
+    }
+
+    private AppVersionInfo toVersionInfo(WorkflowSnapshotRecord snapshot, String publishType) {
         return new AppVersionInfo(
                 snapshot.getVersion(),
                 defaultIfBlank(snapshot.getDesc(), ""),
@@ -2577,6 +2930,14 @@ public class AppServiceImpl implements AppService {
         return rerankConfig;
     }
 
+    private String defaultWorkflowSchema(String workflowId) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("workflowId", workflowId);
+        schema.put("nodes", Collections.emptyList());
+        schema.put("edges", Collections.emptyList());
+        return toJsonOrNull(schema);
+    }
+
     private Map<String, Object> avatar(AppRecord record) {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("key", defaultIfBlank(record.getAvatarKey(), ""));
@@ -2611,6 +2972,10 @@ public class AppServiceImpl implements AppService {
 
     private String newRagId() {
         return "rag-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newWorkflowId() {
+        return "workflow-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String newConversationId() {

@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS workflow_drafts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  workflow_id VARCHAR(64) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(512) NOT NULL,
+  avatar_key VARCHAR(512) NOT NULL,
+  avatar_path VARCHAR(512) NOT NULL,
+  category INT NOT NULL,
+  schema_json JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_workflow_draft_workflow_id (workflow_id),
+  KEY idx_workflow_draft_user_id (user_id),
+  KEY idx_workflow_draft_org_id (org_id),
+  KEY idx_workflow_draft_name (name),
+  KEY idx_workflow_draft_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS workflow_snapshots (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  workflow_id VARCHAR(64) NOT NULL,
+  version VARCHAR(64) NOT NULL,
+  snapshot_desc VARCHAR(512) NOT NULL DEFAULT '',
+  category INT NOT NULL,
+  workflow_info_json JSON NULL,
+  workflow_schema_json JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_workflow_snapshot_version (user_id, org_id, workflow_id, version),
+  KEY idx_workflow_snapshot_workflow_id (workflow_id),
+  KEY idx_workflow_snapshot_user_id (user_id),
+  KEY idx_workflow_snapshot_org_id (org_id),
+  KEY idx_workflow_snapshot_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

@@ -39,6 +39,7 @@ public class IamServiceImplTest {
         List<String> permissions = permissions(result.getOrgPermission());
         assertTrue(permissions.contains("app"));
         assertTrue(permissions.contains("app.rag"));
+        assertTrue(permissions.contains("app.workflow"));
         assertTrue(permissions.contains("app.agent"));
         assertTrue(permissions.contains("api_key"));
         assertTrue(permissions.contains("api_key.api_key_management"));
@@ -52,7 +53,7 @@ public class IamServiceImplTest {
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(12, permissions.size());
+        assertEquals(13, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -65,7 +66,7 @@ public class IamServiceImplTest {
         assertEquals("dev-token-app", result.getToken());
         assertEquals("user", result.getUserCategory());
         assertFalse((Boolean) result.getOrgPermission().get("isAdmin"));
-        assertEquals(java.util.Arrays.asList("app", "app.rag", "app.agent"), permissions(result.getOrgPermission()));
+        assertEquals(java.util.Arrays.asList("app", "app.rag", "app.workflow", "app.agent"), permissions(result.getOrgPermission()));
     }
 
     @Test
@@ -78,12 +79,12 @@ public class IamServiceImplTest {
         assertEquals(java.util.Arrays.asList(
                 "permission", "permission.user", "permission.org", "permission.role",
                 "model", "model.model_management",
-                "app", "app.rag", "app.agent", "api_key", "api_key.api_key_management",
+                "app", "app.rag", "app.workflow", "app.agent", "api_key", "api_key.api_key_management",
                 "resource.knowledge"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
-        assertEquals(java.util.Arrays.asList("app", "app.rag", "app.agent"), permissions(appResult.getOrgPermission()));
+        assertEquals(java.util.Arrays.asList("app", "app.rag", "app.workflow", "app.agent"), permissions(appResult.getOrgPermission()));
     }
 
     @Test
@@ -120,8 +121,9 @@ public class IamServiceImplTest {
         assertEquals(3, ((List) firstRoute.get("children")).size());
         Map appRoute = (Map) ((List) template.get("routes")).get(2);
         assertEquals("app", appRoute.get("perm"));
-        assertEquals(2, ((List) appRoute.get("children")).size());
+        assertEquals(3, ((List) appRoute.get("children")).size());
         assertEquals("app.rag", ((Map) ((List) appRoute.get("children")).get(0)).get("perm"));
+        assertEquals("app.workflow", ((Map) ((List) appRoute.get("children")).get(1)).get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));

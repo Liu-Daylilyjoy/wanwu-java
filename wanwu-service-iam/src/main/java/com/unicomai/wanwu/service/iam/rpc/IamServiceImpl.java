@@ -22,7 +22,7 @@ import java.util.Map;
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class IamServiceImpl implements IamService {
 
-    private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.rag", "app.agent");
+    private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.rag", "app.workflow", "app.agent");
     private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
             "permission",
             "permission.user",
@@ -32,6 +32,7 @@ public class IamServiceImpl implements IamService {
             "model.model_management",
             "app",
             "app.rag",
+            "app.workflow",
             "app.agent",
             "api_key",
             "api_key.api_key_management",
@@ -199,6 +200,7 @@ public class IamServiceImpl implements IamService {
         Map<String, Object> defaultIcon = new LinkedHashMap<>();
         defaultIcon.put("agentIcon", "");
         defaultIcon.put("ragIcon", "");
+        defaultIcon.put("workflowIcon", "");
         defaultIcon.put("modelIcon", "");
 
         config.put("login", login);
@@ -319,6 +321,7 @@ public class IamServiceImpl implements IamService {
                 )),
                 route("Application", "app", Arrays.asList(
                         route("RAG", "app.rag", Collections.<Map<String, Object>>emptyList()),
+                        route("Workflow", "app.workflow", Collections.<Map<String, Object>>emptyList()),
                         route("Agent", "app.agent", Collections.<Map<String, Object>>emptyList())
                 )),
                 route("API Key", "api_key", Collections.singletonList(
@@ -354,6 +357,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("app.agent".equals(perm)) {
             return "Agent";
+        }
+        if ("app.workflow".equals(perm)) {
+            return "Workflow";
         }
         if ("app.rag".equals(perm)) {
             return "RAG";

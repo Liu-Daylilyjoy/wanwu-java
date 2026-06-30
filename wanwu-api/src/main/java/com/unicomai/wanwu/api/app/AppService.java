@@ -52,6 +52,15 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 
 import java.util.Map;
@@ -106,6 +115,18 @@ public interface AppService {
     Map<String, Object> getPublishedRag(RagDetailQuery query);
 
     RagChatResult streamRagChat(RagChatCommand command);
+
+    WorkflowCreateResult createWorkflow(WorkflowCreateCommand command);
+
+    WorkflowCreateResult importWorkflow(WorkflowImportCommand command);
+
+    WorkflowCreateResult copyWorkflow(WorkflowCopyCommand command);
+
+    void deleteWorkflow(WorkflowDeleteCommand command);
+
+    WorkflowExportResult exportWorkflow(WorkflowExportQuery query);
+
+    WorkflowRunResult runWorkflow(WorkflowRunCommand command);
 
     void addAssistantWorkflow(AssistantResourceCommand command);
 

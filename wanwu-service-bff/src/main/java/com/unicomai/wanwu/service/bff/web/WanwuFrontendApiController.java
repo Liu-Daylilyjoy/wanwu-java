@@ -54,6 +54,15 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
@@ -96,6 +105,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -112,6 +122,7 @@ public class WanwuFrontendApiController {
     private static final String DEV_ORG_ID = "default-org";
     private static final String AGENT_APP_TYPE = "agent";
     private static final String RAG_APP_TYPE = "rag";
+    private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
@@ -745,6 +756,122 @@ public class WanwuFrontendApiController {
         }
     }
 
+    @GetMapping("/appspace/workflow/list")
+    public FrontendResponse<ApplicationListResult> workflowList(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.listApplications(
+                    new ApplicationListQuery(WORKFLOW_APP_TYPE, name, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/workflow")
+    public FrontendResponse<Map<String, Object>> createWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowCreateCommand command = request == null ? new WorkflowCreateRequest().toCreateCommand() : request.toCreateCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.createWorkflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping({"/appspace/workflow/copy", "/appspace/workflow/copy/draft"})
+    public FrontendResponse<Map<String, Object>> copyWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowCopyCommand command = new WorkflowCopyCommand();
+            command.setWorkflowId(request == null ? null : request.workflowId());
+            command.setNeedPublished(request != null && request.isNeedPublished());
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.copyWorkflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/workflow/import")
+    public FrontendResponse<Map<String, Object>> importWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam Map<String, String> form) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowImportRequest request = workflowImportRequest(file, form);
+            WorkflowImportCommand command = request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.importWorkflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        } catch (IOException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/workflow/export/draft")
+    public ResponseEntity<byte[]> exportWorkflowDraft(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return exportWorkflowJson(authorization, request, false);
+    }
+
+    @GetMapping("/appspace/workflow/export")
+    public ResponseEntity<byte[]> exportWorkflowPublished(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return exportWorkflowJson(authorization, request, true);
+    }
+
+    @PostMapping("/appspace/workflow/convert")
+    public FrontendResponse<Map<String, Object>> convertWorkflow() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @GetMapping("/appspace/workflow/model/select/{modelType}")
+    public FrontendResponse<ModelListResult> selectWorkflowModels(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @org.springframework.web.bind.annotation.PathVariable("modelType") String modelType) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.listTypeModels(
+                new ModelTypeQuery(modelType, userContext.getUserId(), userContext.getOrgId())));
+    }
+
+    @GetMapping({
+            "/workflow/tool/select",
+            "/workflow/tool/action",
+            "/workflow/tool/box"
+    })
+    public FrontendResponse<Map<String, Object>> workflowToolShell() {
+        return FrontendResponse.ok(emptyListResult());
+    }
+
+    @PostMapping("/workflow/run")
+    public FrontendResponse<Map<String, Object>> runWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowRunRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowRunCommand command = request == null ? new WorkflowRunRequest().toCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowRunResult(appService.runWorkflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     @PostMapping(value = "/rag/chat/draft", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<String> ragDraftChat(
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -806,6 +933,15 @@ public class WanwuFrontendApiController {
                 command.setUserId(userContext.getUserId());
                 command.setOrgId(userContext.getOrgId());
                 appService.deleteRag(command);
+                return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+            }
+            if (WORKFLOW_APP_TYPE.equals(request.getAppType())) {
+                WorkflowDeleteCommand command = new WorkflowDeleteCommand();
+                command.setWorkflowId(request.getAppId());
+                UserContext userContext = userContext(authorization);
+                command.setUserId(userContext.getUserId());
+                command.setOrgId(userContext.getOrgId());
+                appService.deleteWorkflow(command);
                 return FrontendResponse.ok(Collections.<String, Object>emptyMap());
             }
             if (!AGENT_APP_TYPE.equals(request.getAppType())) {
@@ -2447,6 +2583,90 @@ public class WanwuFrontendApiController {
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
+    private ResponseEntity<byte[]> exportWorkflowJson(String authorization, Map<String, String> request, boolean published) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowExportQuery query = new WorkflowExportQuery();
+            query.setWorkflowId(workflowId(request));
+            query.setVersion(request == null ? "" : request.get("version"));
+            query.setPublished(published);
+            query.setUserId(userContext.getUserId());
+            query.setOrgId(userContext.getOrgId());
+            WorkflowExportResult result = appService.exportWorkflow(query);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("name", result == null ? "" : result.getName());
+            body.put("desc", result == null ? "" : result.getDesc());
+            body.put("schema", result == null ? "" : result.getSchema());
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(JSON.writeValueAsBytes(body));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()).getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private WorkflowImportRequest workflowImportRequest(MultipartFile file, Map<String, String> form) throws IOException {
+        WorkflowImportRequest request = new WorkflowImportRequest();
+        if (file != null && !file.isEmpty()) {
+            request = JSON.readValue(file.getBytes(), WorkflowImportRequest.class);
+        }
+        if (form == null) {
+            return request;
+        }
+        if (!isBlank(form.get("name"))) {
+            request.setName(form.get("name"));
+        }
+        if (!isBlank(form.get("workflowName"))) {
+            request.setName(form.get("workflowName"));
+        }
+        if (!isBlank(form.get("desc"))) {
+            request.setDesc(form.get("desc"));
+        }
+        if (!isBlank(form.get("workflowDesc"))) {
+            request.setDesc(form.get("workflowDesc"));
+        }
+        if (!isBlank(form.get("schema"))) {
+            request.setSchema(form.get("schema"));
+        }
+        return request;
+    }
+
+    private Map<String, Object> workflowCreateResult(WorkflowCreateResult result) {
+        String workflowId = result == null ? "" : defaultIfBlank(result.getWorkflowId(), "");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("workflow_id", workflowId);
+        body.put("workflowId", workflowId);
+        return body;
+    }
+
+    private Map<String, Object> workflowRunResult(WorkflowRunResult result) {
+        String workflowId = result == null ? "" : defaultIfBlank(result.getWorkflowId(), "");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("workflow_id", workflowId);
+        body.put("workflowId", workflowId);
+        body.put("output", result == null || result.getOutput() == null
+                ? Collections.emptyMap()
+                : result.getOutput());
+        return body;
+    }
+
+    private String workflowId(Map<String, String> request) {
+        if (request == null) {
+            return "";
+        }
+        String workflowId = request.get("workflow_id");
+        if (!isBlank(workflowId)) {
+            return workflowId;
+        }
+        return defaultIfBlank(request.get("workflowId"), "");
+    }
+
     public static class ModelExperienceDialogRequest {
         private String modelId;
         private String sessionId;
@@ -2962,6 +3182,172 @@ public class WanwuFrontendApiController {
 
         public void setAvatar(AvatarRequest avatar) {
             this.avatar = avatar;
+        }
+    }
+
+    public static class WorkflowCreateRequest {
+        private String name;
+        private String desc;
+        private AvatarRequest avatar = new AvatarRequest();
+        private String schema;
+
+        public WorkflowCreateCommand toCreateCommand() {
+            WorkflowCreateCommand command = new WorkflowCreateCommand();
+            command.setName(name);
+            command.setDesc(desc);
+            command.setSchema(schema);
+            if (avatar != null) {
+                command.setAvatarKey(avatar.getKey());
+                command.setAvatarPath(avatar.getPath());
+            }
+            return command;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public AvatarRequest getAvatar() {
+            return avatar;
+        }
+
+        public void setAvatar(AvatarRequest avatar) {
+            this.avatar = avatar;
+        }
+
+        public String getSchema() {
+            return schema;
+        }
+
+        public void setSchema(String schema) {
+            this.schema = schema;
+        }
+    }
+
+    public static class WorkflowImportRequest {
+        private String name;
+        private String desc;
+        private String schema;
+
+        public WorkflowImportCommand toCommand() {
+            WorkflowImportCommand command = new WorkflowImportCommand();
+            command.setName(name);
+            command.setDesc(desc);
+            command.setSchema(schema);
+            return command;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public void setWorkflowName(String workflowName) {
+            this.name = workflowName;
+        }
+
+        public void setWorkflow_name(String workflowName) {
+            this.name = workflowName;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public void setWorkflowDesc(String workflowDesc) {
+            this.desc = workflowDesc;
+        }
+
+        public void setWorkflow_desc(String workflowDesc) {
+            this.desc = workflowDesc;
+        }
+
+        public String getSchema() {
+            return schema;
+        }
+
+        public void setSchema(String schema) {
+            this.schema = schema;
+        }
+    }
+
+    public static class WorkflowIdRequest {
+        private String workflowId;
+        private boolean needPublished;
+
+        public String workflowId() {
+            return workflowId;
+        }
+
+        public String getWorkflowId() {
+            return workflowId;
+        }
+
+        public void setWorkflowId(String workflowId) {
+            this.workflowId = workflowId;
+        }
+
+        public void setWorkflow_id(String workflowId) {
+            this.workflowId = workflowId;
+        }
+
+        public boolean isNeedPublished() {
+            return needPublished;
+        }
+
+        public void setNeedPublished(boolean needPublished) {
+            this.needPublished = needPublished;
+        }
+    }
+
+    public static class WorkflowRunRequest {
+        private String workflowId;
+        private Map<String, Object> input;
+
+        public WorkflowRunCommand toCommand() {
+            WorkflowRunCommand command = new WorkflowRunCommand();
+            command.setWorkflowId(workflowId);
+            command.setInput(input == null ? Collections.<String, Object>emptyMap() : input);
+            return command;
+        }
+
+        public String getWorkflowId() {
+            return workflowId;
+        }
+
+        public void setWorkflowId(String workflowId) {
+            this.workflowId = workflowId;
+        }
+
+        public void setWorkflow_id(String workflowId) {
+            this.workflowId = workflowId;
+        }
+
+        public Map<String, Object> getInput() {
+            return input;
+        }
+
+        public void setInput(Map<String, Object> input) {
+            this.input = input;
         }
     }
 

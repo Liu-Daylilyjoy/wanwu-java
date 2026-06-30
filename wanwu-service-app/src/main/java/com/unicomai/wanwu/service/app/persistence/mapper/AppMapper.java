@@ -126,6 +126,55 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                         @Param("orgId") String orgId,
                                         @Param("prefix") String prefix);
 
+    @Select({
+            "<script>",
+            "SELECT a.id, a.created_at, a.updated_at, a.user_id, a.org_id,",
+            "       a.app_id, a.app_type, a.publish_type,",
+            "       d.name, d.description AS `desc`, d.avatar_key, d.avatar_path, d.category",
+            "FROM apps a",
+            "JOIN workflow_drafts d ON d.workflow_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'workflow'",
+            "<if test='name != null and name != \"\"'>",
+            "  AND d.name LIKE CONCAT('%', #{name}, '%')",
+            "</if>",
+            "ORDER BY a.id DESC",
+            "</script>"
+    })
+    List<AppRecord> selectWorkflowRecords(@Param("userId") String userId,
+                                          @Param("orgId") String orgId,
+                                          @Param("name") String name);
+
+    @Select({
+            "SELECT a.id, a.created_at, a.updated_at, a.user_id, a.org_id,",
+            "       a.app_id, a.app_type, a.publish_type,",
+            "       d.name, d.description AS `desc`, d.avatar_key, d.avatar_path, d.category",
+            "FROM apps a",
+            "JOIN workflow_drafts d ON d.workflow_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'workflow'",
+            "  AND a.app_id = #{workflowId}",
+            "LIMIT 1"
+    })
+    AppRecord selectWorkflowRecord(@Param("userId") String userId,
+                                   @Param("orgId") String orgId,
+                                   @Param("workflowId") String workflowId);
+
+    @Select({
+            "SELECT d.name",
+            "FROM apps a",
+            "JOIN workflow_drafts d ON d.workflow_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'workflow'",
+            "  AND d.name LIKE CONCAT(#{prefix}, '%')"
+    })
+    List<String> selectWorkflowNamesByPrefix(@Param("userId") String userId,
+                                             @Param("orgId") String orgId,
+                                             @Param("prefix") String prefix);
+
     @Update({
             "UPDATE apps",
             "SET updated_at = #{updatedAt}",
@@ -180,6 +229,33 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                              @Param("publishType") String publishType,
                              @Param("updatedAt") Long updatedAt);
 
+    @Update({
+            "UPDATE apps",
+            "SET updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'workflow'",
+            "  AND app_id = #{workflowId}"
+    })
+    int updateWorkflowUpdatedAt(@Param("userId") String userId,
+                                @Param("orgId") String orgId,
+                                @Param("workflowId") String workflowId,
+                                @Param("updatedAt") Long updatedAt);
+
+    @Update({
+            "UPDATE apps",
+            "SET publish_type = #{publishType}, updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'workflow'",
+            "  AND app_id = #{workflowId}"
+    })
+    int updateWorkflowPublishType(@Param("userId") String userId,
+                                  @Param("orgId") String orgId,
+                                  @Param("workflowId") String workflowId,
+                                  @Param("publishType") String publishType,
+                                  @Param("updatedAt") Long updatedAt);
+
     @Delete({
             "DELETE FROM apps",
             "WHERE user_id = #{userId}",
@@ -201,4 +277,15 @@ public interface AppMapper extends BaseMapper<AppEntity> {
     int deleteRagApp(@Param("userId") String userId,
                      @Param("orgId") String orgId,
                      @Param("ragId") String ragId);
+
+    @Delete({
+            "DELETE FROM apps",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'workflow'",
+            "  AND app_id = #{workflowId}"
+    })
+    int deleteWorkflowApp(@Param("userId") String userId,
+                          @Param("orgId") String orgId,
+                          @Param("workflowId") String workflowId);
 }

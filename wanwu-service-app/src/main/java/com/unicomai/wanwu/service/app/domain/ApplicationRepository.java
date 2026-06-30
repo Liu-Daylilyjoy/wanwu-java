@@ -70,6 +70,34 @@ public interface ApplicationRepository {
 
     boolean rollbackRag(AppRecord record, RagDraftConfigRecord config);
 
+    AppRecord saveWorkflow(AppRecord record, WorkflowDraftRecord draft);
+
+    List<AppRecord> listWorkflows(String userId, String orgId, String name);
+
+    AppRecord findWorkflow(String userId, String orgId, String workflowId);
+
+    WorkflowDraftRecord findWorkflowDraft(String userId, String orgId, String workflowId);
+
+    boolean deleteWorkflow(String userId, String orgId, String workflowId);
+
+    List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix);
+
+    AppRecord copyWorkflow(AppRecord record, WorkflowDraftRecord draft);
+
+    WorkflowSnapshotRecord saveWorkflowSnapshot(WorkflowSnapshotRecord snapshot);
+
+    List<WorkflowSnapshotRecord> listWorkflowSnapshots(String userId, String orgId, String workflowId);
+
+    WorkflowSnapshotRecord findLatestWorkflowSnapshot(String userId, String orgId, String workflowId);
+
+    WorkflowSnapshotRecord findWorkflowSnapshotByVersion(String userId, String orgId, String workflowId, String version);
+
+    boolean updateLatestWorkflowSnapshot(String userId, String orgId, String workflowId, String desc, long updatedAt);
+
+    boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String publishType, long updatedAt);
+
+    boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft);
+
     ApiKeyRecord saveApiKey(ApiKeyRecord record);
 
     ApiKeyRecord updateApiKey(ApiKeyRecord record);

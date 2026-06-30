@@ -1,0 +1,43 @@
+package com.unicomai.wanwu.api.app.dto;
+
+import java.io.Serializable;
+
+public class WorkflowCopyCommand implements Serializable {
+
+    private String workflowId;
+    private String userId;
+    private String orgId;
+    private boolean needPublished;
+
+    public String getWorkflowId() {
+        return workflowId;
+    }
+
+    public void setWorkflowId(String workflowId) {
+        this.workflowId = workflowId;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    public String getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(String orgId) {
+        this.orgId = orgId;
+    }
+
+    public boolean isNeedPublished() {
+        return needPublished;
+    }
+
+    public void setNeedPublished(boolean needPublished) {
+        this.needPublished = needPublished;
+    }
+}

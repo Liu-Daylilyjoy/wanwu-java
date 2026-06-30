@@ -52,6 +52,15 @@ import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
+import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
+import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
+import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
@@ -76,6 +85,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -146,9 +156,10 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("model.model_management"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("app"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app.rag"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("app.agent"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("api_key"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("app.workflow"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("api_key"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[11].perm").value("api_key.api_key_management"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -191,6 +202,176 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1));
 
         verify(appService).listApplications(any(ApplicationListQuery.class));
+    }
+
+    @Test
+    public void workflowAppspaceRoutesReturnFrontendContractsAndMapCommands() throws Exception {
+        Map<String, Object> workflowCard = new LinkedHashMap<>();
+        workflowCard.put("appId", "workflow-001");
+        workflowCard.put("workflowId", "workflow-001");
+        workflowCard.put("workflow_id", "workflow-001");
+        workflowCard.put("appType", "workflow");
+        workflowCard.put("name", "PolicyFlow");
+        workflowCard.put("desc", "policy workflow");
+        workflowCard.put("publishType", "private");
+        workflowCard.put("version", "");
+        when(appService.createWorkflow(any(WorkflowCreateCommand.class)))
+                .thenReturn(new WorkflowCreateResult("workflow-001"));
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(workflowCard), 1));
+        when(appService.copyWorkflow(any(WorkflowCopyCommand.class)))
+                .thenReturn(new WorkflowCreateResult("workflow-002"));
+        when(appService.exportWorkflow(any(WorkflowExportQuery.class)))
+                .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", "{\"nodes\":[]}"));
+        when(appService.importWorkflow(any(WorkflowImportCommand.class)))
+                .thenReturn(new WorkflowCreateResult("workflow-003"));
+        when(appService.runWorkflow(any(WorkflowRunCommand.class)))
+                .thenReturn(new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok")));
+
+        mockMvc.perform(post("/user/api/v1/appspace/workflow")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"PolicyFlow\",\"desc\":\"policy workflow\",\"avatar\":{\"key\":\"avatar-key\",\"path\":\"/avatar.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.workflowId").value("workflow-001"));
+
+        org.mockito.ArgumentCaptor<WorkflowCreateCommand> createCaptor = forClass(WorkflowCreateCommand.class);
+        verify(appService).createWorkflow(createCaptor.capture());
+        assertEquals("PolicyFlow", createCaptor.getValue().getName());
+        assertEquals("policy workflow", createCaptor.getValue().getDesc());
+        assertEquals("avatar-key", createCaptor.getValue().getAvatarKey());
+        assertEquals("/avatar.png", createCaptor.getValue().getAvatarPath());
+        assertEquals("dev-admin", createCaptor.getValue().getUserId());
+        assertEquals("default-org", createCaptor.getValue().getOrgId());
+
+        mockMvc.perform(get("/user/api/v1/appspace/workflow/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appType").value("workflow"))
+                .andExpect(jsonPath("$.data.list[0].workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(post("/user/api/v1/appspace/workflow/copy")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"workflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-002"));
+
+        org.mockito.ArgumentCaptor<WorkflowCopyCommand> copyCaptor = forClass(WorkflowCopyCommand.class);
+        verify(appService).copyWorkflow(copyCaptor.capture());
+        assertEquals("workflow-001", copyCaptor.getValue().getWorkflowId());
+        assertEquals("dev-admin", copyCaptor.getValue().getUserId());
+        assertEquals("default-org", copyCaptor.getValue().getOrgId());
+
+        mockMvc.perform(get("/user/api/v1/appspace/workflow/export/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("workflow_id", "workflow-001"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"name\":\"PolicyFlow\"")))
+                .andExpect(content().string(containsString("\"schema\":\"{\\\"nodes\\\":[]}\"")));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "workflow.json",
+                "application/json",
+                "{\"name\":\"ImportedFlow\",\"desc\":\"imported\",\"schema\":\"{\\\"nodes\\\":[]}\"}"
+                        .getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/user/api/v1/appspace/workflow/import")
+                        .file(file)
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-003"));
+
+        org.mockito.ArgumentCaptor<WorkflowImportCommand> importCaptor = forClass(WorkflowImportCommand.class);
+        verify(appService).importWorkflow(importCaptor.capture());
+        assertEquals("ImportedFlow", importCaptor.getValue().getName());
+        assertEquals("imported", importCaptor.getValue().getDesc());
+        assertEquals("{\"nodes\":[]}", importCaptor.getValue().getSchema());
+        assertEquals("dev-admin", importCaptor.getValue().getUserId());
+        assertEquals("default-org", importCaptor.getValue().getOrgId());
+
+        mockMvc.perform(post("/user/api/v1/workflow/run")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"workflow-001\",\"input\":{\"question\":\"hello\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.output.answer").value("ok"));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/app")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"workflow-001\",\"appType\":\"workflow\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        org.mockito.ArgumentCaptor<WorkflowDeleteCommand> deleteCaptor = forClass(WorkflowDeleteCommand.class);
+        verify(appService).deleteWorkflow(deleteCaptor.capture());
+        assertEquals("workflow-001", deleteCaptor.getValue().getWorkflowId());
+        assertEquals("dev-admin", deleteCaptor.getValue().getUserId());
+        assertEquals("default-org", deleteCaptor.getValue().getOrgId());
+    }
+
+    @Test
+    public void workflowApiAndBotUploadRoutesReturnFrontendContracts() throws Exception {
+        MockMvc workflowApiMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuWorkflowApiController(appService))
+                .build();
+        when(appService.exportWorkflow(any(WorkflowExportQuery.class)))
+                .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", "{\"nodes\":[]}"));
+        when(appService.runWorkflow(any(WorkflowRunCommand.class)))
+                .thenReturn(new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok")));
+
+        workflowApiMvc.perform(get("/workflow/api/workflow/parameter")
+                        .header("x-user-id", "dev-admin")
+                        .header("x-org-id", "default-org")
+                        .param("workflowID", "workflow-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.schema").value("{\"nodes\":[]}"));
+
+        workflowApiMvc.perform(get("/workflow/api/workflow/openapi_schema")
+                        .header("x-user-id", "dev-admin")
+                        .header("x-org-id", "default-org")
+                        .param("workflowID", "workflow-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.workflowId").value("workflow-001"))
+                .andExpect(jsonPath("$.data.base64OpenAPISchema").exists())
+                .andExpect(jsonPath("$.data.openAPISchema", containsString("\"openapi\":\"3.0.1\"")));
+
+        workflowApiMvc.perform(post("/workflow/api/api/workflow/use")
+                        .header("x-user-id", "dev-admin")
+                        .header("x-org-id", "default-org")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflowID\":\"workflow-001\",\"parameters\":{\"question\":\"hello\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.output.answer").value("ok"));
+
+        org.mockito.ArgumentCaptor<WorkflowRunCommand> runCaptor = forClass(WorkflowRunCommand.class);
+        verify(appService).runWorkflow(runCaptor.capture());
+        assertEquals("workflow-001", runCaptor.getValue().getWorkflowId());
+        assertEquals("hello", runCaptor.getValue().getInput().get("question"));
+        assertEquals("dev-admin", runCaptor.getValue().getUserId());
+        assertEquals("default-org", runCaptor.getValue().getOrgId());
+
+        MockMvc uploadMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuBotUploadController())
+                .build();
+        uploadMvc.perform(post("/api/bot/upload_file")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"file_head\":{\"file_type\":\"png\",\"biz_type\":6},\"data\":\"aGVsbG8=\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.upload_uri", containsString("memory://bot/")))
+                .andExpect(jsonPath("$.data.upload_url").value("data:image/png;base64,aGVsbG8="));
     }
 
     @Test
@@ -2105,6 +2286,7 @@ public class WanwuFrontendApiControllerTest {
                 permission("model.model_management"),
                 permission("app"),
                 permission("app.rag"),
+                permission("app.workflow"),
                 permission("app.agent"),
                 permission("api_key"),
                 permission("api_key.api_key_management")
