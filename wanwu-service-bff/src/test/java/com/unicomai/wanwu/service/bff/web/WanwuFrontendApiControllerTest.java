@@ -7,7 +7,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
+import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
+import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
+import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -247,6 +254,166 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void publishAppReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(post("/user/api/v1/appspace/app/publish")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"version\":\"v1.0.0\",\"desc\":\"first release\",\"publishType\":\"organization\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AppPublishCommand> captor = forClass(AppPublishCommand.class);
+        verify(appService).publishApp(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAppId());
+        assertEquals("agent", captor.getValue().getAppType());
+        assertEquals("v1.0.0", captor.getValue().getVersion());
+        assertEquals("first release", captor.getValue().getDesc());
+        assertEquals("organization", captor.getValue().getPublishType());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void publishAppReturnsFrontendFailureWhenVersionIsInvalid() throws Exception {
+        doThrow(new IllegalArgumentException("app version must be greater than latest version"))
+                .when(appService).publishApp(any(AppPublishCommand.class));
+
+        mockMvc.perform(post("/user/api/v1/appspace/app/publish")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"version\":\"v1.0.0\",\"publishType\":\"private\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("app version must be greater than latest version"));
+    }
+
+    @Test
+    public void unpublishAppReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(delete("/user/api/v1/appspace/app/publish")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AppPublishCommand> captor = forClass(AppPublishCommand.class);
+        verify(appService).unpublishApp(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAppId());
+        assertEquals("agent", captor.getValue().getAppType());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void getAppLatestVersionReturnsFrontendShape() throws Exception {
+        when(appService.getLatestAppVersion(any(AppVersionQuery.class)))
+                .thenReturn(versionInfo("v1.0.0", "first release", "2026-06-29 10:00:00", "private"));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/version")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.version").value("v1.0.0"))
+                .andExpect(jsonPath("$.data.desc").value("first release"))
+                .andExpect(jsonPath("$.data.publishType").value("private"));
+
+        org.mockito.ArgumentCaptor<AppVersionQuery> captor = forClass(AppVersionQuery.class);
+        verify(appService).getLatestAppVersion(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAppId());
+        assertEquals("agent", captor.getValue().getAppType());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void getAppVersionListReturnsFrontendTimelineShape() throws Exception {
+        when(appService.listAppVersions(any(AppVersionQuery.class)))
+                .thenReturn(new AppVersionListResult(Collections.singletonList(
+                        versionInfo("v1.0.1", "second release", "2026-06-29 10:01:00", "private")), 1));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/version/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].version").value("v1.0.1"))
+                .andExpect(jsonPath("$.data.list[0].desc").value("second release"))
+                .andExpect(jsonPath("$.data.list[0].createdAt").value("2026-06-29 10:01:00"));
+
+        verify(appService).listAppVersions(any(AppVersionQuery.class));
+    }
+
+    @Test
+    public void updateAppVersionReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(put("/user/api/v1/appspace/app/version")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"desc\":\"updated release\",\"publishType\":\"public\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AppVersionUpdateCommand> captor = forClass(AppVersionUpdateCommand.class);
+        verify(appService).updateAppVersion(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAppId());
+        assertEquals("agent", captor.getValue().getAppType());
+        assertEquals("updated release", captor.getValue().getDesc());
+        assertEquals("public", captor.getValue().getPublishType());
+    }
+
+    @Test
+    public void rollbackAppVersionReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(post("/user/api/v1/appspace/app/version/rollback")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"version\":\"v1.0.0\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AppVersionRollbackCommand> captor = forClass(AppVersionRollbackCommand.class);
+        verify(appService).rollbackAppVersion(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAppId());
+        assertEquals("agent", captor.getValue().getAppType());
+        assertEquals("v1.0.0", captor.getValue().getVersion());
+    }
+
+    @Test
+    public void assistantPublishedInfoReturnsSnapshotEditorShape() throws Exception {
+        Map<String, Object> published = new LinkedHashMap<>();
+        published.put("assistantId", "assistant-001");
+        published.put("uuid", "assistant-001");
+        published.put("name", "PublishedAgent");
+        published.put("desc", "Published desc");
+        published.put("publishType", "private");
+        published.put("modelConfig", Collections.singletonMap("config", null));
+        when(appService.getPublishedAssistant(any(AssistantPublishedQuery.class))).thenReturn(published);
+
+        mockMvc.perform(get("/user/api/v1/assistant")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-001")
+                        .param("version", "v1.0.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.name").value("PublishedAgent"))
+                .andExpect(jsonPath("$.data.publishType").value("private"));
+
+        org.mockito.ArgumentCaptor<AssistantPublishedQuery> captor = forClass(AssistantPublishedQuery.class);
+        verify(appService).getPublishedAssistant(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("v1.0.0", captor.getValue().getVersion());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
     public void assistantListReturnsFrontendCardShape() throws Exception {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("key", "avatars/demo.png");
@@ -346,13 +513,6 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.list", hasSize(0)));
 
-        mockMvc.perform(get("/user/api/v1/appspace/app/version/list")
-                        .param("appId", "assistant-001")
-                        .param("appType", "agent"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.list", hasSize(0)));
-
         mockMvc.perform(post("/user/api/v1/knowledge/select")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -416,5 +576,14 @@ public class WanwuFrontendApiControllerTest {
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("loginEmail", loginEmail);
         return config;
+    }
+
+    private AppVersionInfo versionInfo(String version, String desc, String createdAt, String publishType) {
+        AppVersionInfo info = new AppVersionInfo();
+        info.setVersion(version);
+        info.setDesc(desc);
+        info.setCreatedAt(createdAt);
+        info.setPublishType(publishType);
+        return info;
     }
 }

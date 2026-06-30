@@ -10,13 +10,21 @@ import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
+import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
+import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
+import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -32,14 +40,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class AppServiceImpl implements AppService {
 
     private static final String APP_TYPE_AGENT = "agent";
+    private static final String APP_TYPE_ASSISTANT = "assistant";
+    private static final String PUBLISH_TYPE_UNPUBLISHED = "";
     private static final String PUBLISH_TYPE_PRIVATE = "private";
+    private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
+    private static final String PUBLISH_TYPE_PUBLIC = "public";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
+    private static final String DEFAULT_VERSION = "v1.0.0";
+    private static final Pattern VERSION_PATTERN = Pattern.compile("^v\\d+\\.\\d+\\.\\d+$");
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<List<String>>() {
@@ -88,7 +103,7 @@ public class AppServiceImpl implements AppService {
         record.setOrgId(defaultIfBlank(command.getOrgId(), DEV_ORG_ID));
         record.setAppId(newAssistantId());
         record.setAppType(APP_TYPE_AGENT);
-        record.setPublishType(PUBLISH_TYPE_PRIVATE);
+        record.setPublishType(PUBLISH_TYPE_UNPUBLISHED);
         record.setName(command.getName().trim());
         record.setDesc(defaultIfBlank(command.getDesc(), ""));
         record.setAvatarKey(defaultIfBlank(command.getAvatarKey(), ""));
@@ -223,6 +238,144 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public void publishApp(AppPublishCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app publish command is required");
+        }
+        String appType = normalizeAgentAppType(command.getAppType());
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("only agent publish is supported");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String publishType = normalizePublishType(command.getPublishType(), PUBLISH_TYPE_PRIVATE);
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord record = applicationRepository.findAssistant(userId, orgId, command.getAppId());
+        if (record == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+
+        AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(userId, orgId, command.getAppId());
+        String version = isBlank(command.getVersion()) ? nextVersion(latest) : command.getVersion().trim();
+        validateVersion(version);
+        if (latest != null && compareVersion(version, latest.getVersion()) <= 0) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+        if (applicationRepository.findAssistantSnapshotByVersion(userId, orgId, command.getAppId(), version) != null) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+
+        long now = clock.millis();
+        AssistantDraftConfigRecord config = applicationRepository.findAssistantConfig(userId, orgId, command.getAppId());
+        AssistantSnapshotRecord snapshot = new AssistantSnapshotRecord();
+        snapshot.setCreatedAt(now);
+        snapshot.setUpdatedAt(now);
+        snapshot.setUserId(userId);
+        snapshot.setOrgId(orgId);
+        snapshot.setAssistantId(command.getAppId());
+        snapshot.setVersion(version);
+        snapshot.setDesc(defaultIfBlank(command.getDesc(), ""));
+        snapshot.setCategory(record.getCategory());
+        snapshot.setAssistantInfoJson(toJsonOrNull(toFrontendDraft(record, config)));
+        snapshot.setAssistantConfigJson(toJsonOrNull(config));
+        applicationRepository.saveAssistantSnapshot(snapshot);
+        applicationRepository.updateAssistantPublishType(userId, orgId, command.getAppId(), publishType, now);
+    }
+
+    @Override
+    public void unpublishApp(AppPublishCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app publish command is required");
+        }
+        String appType = normalizeAgentAppType(command.getAppType());
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("only agent publish is supported");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (!applicationRepository.updateAssistantPublishType(
+                userId, orgId, command.getAppId(), PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+    }
+
+    @Override
+    public AppVersionInfo getLatestAppVersion(AppVersionQuery query) {
+        VersionContext context = versionContext(query);
+        AppRecord record = applicationRepository.findAssistant(context.userId, context.orgId, context.appId);
+        if (record == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(
+                context.userId, context.orgId, context.appId);
+        if (latest == null) {
+            return new AppVersionInfo("", "", "", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        }
+        return toVersionInfo(latest, defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+    }
+
+    @Override
+    public AppVersionListResult listAppVersions(AppVersionQuery query) {
+        VersionContext context = versionContext(query);
+        List<AssistantSnapshotRecord> snapshots = applicationRepository.listAssistantSnapshots(
+                context.userId, context.orgId, context.appId);
+        List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
+        for (AssistantSnapshotRecord snapshot : snapshots) {
+            versions.add(toVersionInfo(snapshot, ""));
+        }
+        return new AppVersionListResult(versions, versions.size());
+    }
+
+    @Override
+    public void updateAppVersion(AppVersionUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app version update command is required");
+        }
+        VersionContext context = versionContext(command.getAppId(), command.getAppType(), command.getUserId(), command.getOrgId());
+        String publishType = normalizePublishType(command.getPublishType(), null);
+        long now = clock.millis();
+        if (!applicationRepository.updateLatestAssistantSnapshot(
+                context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
+            throw new IllegalArgumentException("assistant snapshot not found");
+        }
+        if (!applicationRepository.updateAssistantPublishType(context.userId, context.orgId, context.appId, publishType, now)) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+    }
+
+    @Override
+    public void rollbackAppVersion(AppVersionRollbackCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app version rollback command is required");
+        }
+        if (isBlank(command.getVersion())) {
+            throw new IllegalArgumentException("app version is required");
+        }
+        VersionContext context = versionContext(command.getAppId(), command.getAppType(), command.getUserId(), command.getOrgId());
+        AppRecord existing = applicationRepository.findAssistant(context.userId, context.orgId, context.appId);
+        if (existing == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        AssistantSnapshotRecord snapshot = applicationRepository.findAssistantSnapshotByVersion(
+                context.userId, context.orgId, context.appId, command.getVersion());
+        if (snapshot == null) {
+            throw new IllegalArgumentException("assistant snapshot not found");
+        }
+        Map<String, Object> snapshotDraft = mapOrDefault(snapshot.getAssistantInfoJson(), new LinkedHashMap<String, Object>());
+        AppRecord restored = restoreRecord(existing, snapshotDraft, clock.millis());
+        AssistantDraftConfigRecord restoredConfig = restoreConfig(
+                snapshotDraft, context.userId, context.orgId, context.appId, restored.getUpdatedAt());
+        if (!applicationRepository.rollbackAssistant(restored, restoredConfig)) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+    }
+
+    @Override
     public ApplicationListResult listAssistants(ApplicationListQuery query) {
         String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
         String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
@@ -250,6 +403,32 @@ public class AppServiceImpl implements AppService {
         return toFrontendDraft(record, config);
     }
 
+    @Override
+    public Map<String, Object> getPublishedAssistant(AssistantPublishedQuery query) {
+        if (query == null || isBlank(query.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AssistantSnapshotRecord snapshot;
+        if (isBlank(query.getVersion())) {
+            snapshot = applicationRepository.findLatestAssistantSnapshot(userId, orgId, query.getAssistantId());
+        } else {
+            snapshot = applicationRepository.findAssistantSnapshotByVersion(
+                    userId, orgId, query.getAssistantId(), query.getVersion());
+        }
+        if (snapshot == null) {
+            throw new IllegalArgumentException("assistant snapshot not found");
+        }
+        Map<String, Object> draft = mapOrDefault(snapshot.getAssistantInfoJson(), new LinkedHashMap<String, Object>());
+        AppRecord record = applicationRepository.findAssistant(userId, orgId, query.getAssistantId());
+        draft.put("assistantId", query.getAssistantId());
+        draft.put("uuid", query.getAssistantId());
+        draft.put("newAgent", false);
+        draft.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        return draft;
+    }
+
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.APP, "App Service", "app");
     }
@@ -266,7 +445,9 @@ public class AppServiceImpl implements AppService {
         item.put("updatedAt", formatMillis(record.getUpdatedAt()));
         item.put("publishType", record.getPublishType());
         item.put("category", record.getCategory());
-        item.put("version", "v0.0.1");
+        AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(
+                record.getUserId(), record.getOrgId(), record.getAppId());
+        item.put("version", latest == null ? "" : latest.getVersion());
         item.put("user", user(record));
         return item;
     }
@@ -306,7 +487,7 @@ public class AppServiceImpl implements AppService {
         copied.setOrgId(source.getOrgId());
         copied.setAppId(newAssistantId);
         copied.setAppType(source.getAppType());
-        copied.setPublishType(source.getPublishType());
+        copied.setPublishType(PUBLISH_TYPE_UNPUBLISHED);
         copied.setName(newName);
         copied.setDesc(defaultIfBlank(source.getDesc(), ""));
         copied.setAvatarKey(defaultIfBlank(source.getAvatarKey(), ""));
@@ -358,6 +539,151 @@ public class AppServiceImpl implements AppService {
             }
         }
         return prefix + (max + 1);
+    }
+
+    private VersionContext versionContext(AppVersionQuery query) {
+        if (query == null) {
+            throw new IllegalArgumentException("app version query is required");
+        }
+        return versionContext(query.getAppId(), query.getAppType(), query.getUserId(), query.getOrgId());
+    }
+
+    private VersionContext versionContext(String appId, String appType, String userId, String orgId) {
+        String normalizedAppType = normalizeAgentAppType(appType);
+        if (!APP_TYPE_AGENT.equals(normalizedAppType)) {
+            throw new IllegalArgumentException("only agent publish is supported");
+        }
+        if (isBlank(appId)) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        return new VersionContext(
+                appId,
+                normalizedAppType,
+                defaultIfBlank(userId, DEV_USER_ID),
+                defaultIfBlank(orgId, DEV_ORG_ID));
+    }
+
+    private String normalizeAgentAppType(String appType) {
+        String normalized = defaultIfBlank(appType, APP_TYPE_AGENT);
+        if (APP_TYPE_ASSISTANT.equals(normalized)) {
+            return APP_TYPE_AGENT;
+        }
+        return normalized;
+    }
+
+    private String normalizePublishType(String publishType, String defaultValue) {
+        String normalized = defaultValue == null ? publishType : defaultIfBlank(publishType, defaultValue);
+        if (PUBLISH_TYPE_PRIVATE.equals(normalized)
+                || PUBLISH_TYPE_ORGANIZATION.equals(normalized)
+                || PUBLISH_TYPE_PUBLIC.equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException("publish type is invalid");
+    }
+
+    private void validateVersion(String version) {
+        if (!VERSION_PATTERN.matcher(version).matches()) {
+            throw new IllegalArgumentException("app version format is invalid");
+        }
+    }
+
+    private String nextVersion(AssistantSnapshotRecord latest) {
+        if (latest == null || isBlank(latest.getVersion())) {
+            return DEFAULT_VERSION;
+        }
+        int[] parts = versionParts(latest.getVersion());
+        return "v" + parts[0] + "." + parts[1] + "." + (parts[2] + 1);
+    }
+
+    private int compareVersion(String left, String right) {
+        int[] leftParts = versionParts(left);
+        int[] rightParts = versionParts(right);
+        for (int i = 0; i < leftParts.length; i++) {
+            if (leftParts[i] != rightParts[i]) {
+                return leftParts[i] - rightParts[i];
+            }
+        }
+        return 0;
+    }
+
+    private int[] versionParts(String version) {
+        validateVersion(version);
+        String[] parts = version.substring(1).split("\\.");
+        return new int[]{
+                Integer.parseInt(parts[0]),
+                Integer.parseInt(parts[1]),
+                Integer.parseInt(parts[2])
+        };
+    }
+
+    private AppVersionInfo toVersionInfo(AssistantSnapshotRecord snapshot, String publishType) {
+        return new AppVersionInfo(
+                snapshot.getVersion(),
+                defaultIfBlank(snapshot.getDesc(), ""),
+                formatMillis(snapshot.getCreatedAt()),
+                publishType);
+    }
+
+    private AppRecord restoreRecord(AppRecord existing, Map<String, Object> snapshotDraft, long now) {
+        AppRecord restored = new AppRecord();
+        restored.setId(existing.getId());
+        restored.setCreatedAt(existing.getCreatedAt());
+        restored.setUpdatedAt(now);
+        restored.setUserId(existing.getUserId());
+        restored.setOrgId(existing.getOrgId());
+        restored.setAppId(existing.getAppId());
+        restored.setAppType(existing.getAppType());
+        restored.setPublishType(existing.getPublishType());
+        restored.setName(defaultIfBlank((String) snapshotDraft.get("name"), existing.getName()));
+        restored.setDesc(defaultIfBlank((String) snapshotDraft.get("desc"), ""));
+
+        Map<String, Object> avatar = mapValue(snapshotDraft.get("avatar"));
+        restored.setAvatarKey(defaultIfBlank((String) avatar.get("key"), ""));
+        restored.setAvatarPath(defaultIfBlank((String) avatar.get("path"), ""));
+        restored.setCategory(intValue(snapshotDraft.get("category"), existing.getCategory() == null ? 1 : existing.getCategory()));
+        return restored;
+    }
+
+    private AssistantDraftConfigRecord restoreConfig(Map<String, Object> snapshotDraft,
+                                                     String userId,
+                                                     String orgId,
+                                                     String assistantId,
+                                                     long now) {
+        AssistantDraftConfigRecord config = new AssistantDraftConfigRecord();
+        config.setCreatedAt(now);
+        config.setUpdatedAt(now);
+        config.setUserId(userId);
+        config.setOrgId(orgId);
+        config.setAssistantId(assistantId);
+        config.setPrologue(defaultIfBlank((String) snapshotDraft.get("prologue"), ""));
+        config.setInstructions(defaultIfBlank((String) snapshotDraft.get("instructions"), ""));
+        config.setMemoryConfigJson(toJsonOrNull(snapshotDraft.get("memoryConfig")));
+        config.setKnowledgeBaseConfigJson(toJsonOrNull(snapshotDraft.get("knowledgeBaseConfig")));
+        config.setModelConfigJson(toJsonOrNull(snapshotDraft.get("modelConfig")));
+        config.setSafetyConfigJson(toJsonOrNull(snapshotDraft.get("safetyConfig")));
+        config.setVisionConfigJson(toJsonOrNull(snapshotDraft.get("visionConfig")));
+        config.setRerankConfigJson(toJsonOrNull(snapshotDraft.get("rerankConfig")));
+        config.setRecommendConfigJson(toJsonOrNull(snapshotDraft.get("recommendConfig")));
+        config.setRecommendQuestionsJson(toJsonOrNull(snapshotDraft.get("recommendQuestion")));
+        return config;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            return (Map<String, Object>) value;
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private int intValue(Object value, int defaultValue) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String && !isBlank((String) value)) {
+            return Integer.parseInt((String) value);
+        }
+        return defaultValue;
     }
 
     private Map<String, Object> memoryConfig() {
@@ -481,5 +807,19 @@ public class AppServiceImpl implements AppService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static class VersionContext {
+        private final String appId;
+        private final String appType;
+        private final String userId;
+        private final String orgId;
+
+        private VersionContext(String appId, String appType, String userId, String orgId) {
+            this.appId = appId;
+            this.appType = appType;
+            this.userId = userId;
+            this.orgId = orgId;
+        }
     }
 }

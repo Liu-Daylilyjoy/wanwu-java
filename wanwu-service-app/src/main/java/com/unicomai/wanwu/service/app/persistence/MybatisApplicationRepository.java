@@ -1,14 +1,17 @@
 package com.unicomai.wanwu.service.app.persistence;
 
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +23,16 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AppMapper appMapper;
     private final AssistantDraftMapper assistantDraftMapper;
     private final AssistantDraftConfigMapper assistantDraftConfigMapper;
+    private final AssistantSnapshotMapper assistantSnapshotMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
                                         AssistantDraftMapper assistantDraftMapper,
-                                        AssistantDraftConfigMapper assistantDraftConfigMapper) {
+                                        AssistantDraftConfigMapper assistantDraftConfigMapper,
+                                        AssistantSnapshotMapper assistantSnapshotMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
+        this.assistantSnapshotMapper = assistantSnapshotMapper;
     }
 
     @Override
@@ -81,6 +87,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     @Transactional
     public boolean deleteAssistant(String userId, String orgId, String assistantId) {
+        assistantSnapshotMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantDraftConfigMapper.deleteByAssistant(userId, orgId, assistantId);
         int draftDeleted = assistantDraftMapper.deleteDraft(userId, orgId, assistantId);
         int appDeleted = appMapper.deleteAssistantApp(userId, orgId, assistantId);
@@ -111,6 +118,66 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     public AssistantDraftConfigRecord findAssistantConfig(String userId, String orgId, String assistantId) {
         return toRecord(assistantDraftConfigMapper.selectByAssistant(userId, orgId, assistantId));
+    }
+
+    @Override
+    public AssistantSnapshotRecord saveAssistantSnapshot(AssistantSnapshotRecord snapshot) {
+        AssistantSnapshotEntity entity = toEntity(snapshot);
+        assistantSnapshotMapper.insert(entity);
+        snapshot.setId(entity.getId());
+        return snapshot;
+    }
+
+    @Override
+    public List<AssistantSnapshotRecord> listAssistantSnapshots(String userId, String orgId, String assistantId) {
+        return toSnapshotRecords(assistantSnapshotMapper.selectByAssistant(userId, orgId, assistantId));
+    }
+
+    @Override
+    public AssistantSnapshotRecord findLatestAssistantSnapshot(String userId, String orgId, String assistantId) {
+        return toRecord(assistantSnapshotMapper.selectLatest(userId, orgId, assistantId));
+    }
+
+    @Override
+    public AssistantSnapshotRecord findAssistantSnapshotByVersion(String userId,
+                                                                 String orgId,
+                                                                 String assistantId,
+                                                                 String version) {
+        return toRecord(assistantSnapshotMapper.selectByVersion(userId, orgId, assistantId, version));
+    }
+
+    @Override
+    public boolean updateLatestAssistantSnapshot(String userId,
+                                                 String orgId,
+                                                 String assistantId,
+                                                 String desc,
+                                                 long updatedAt) {
+        AssistantSnapshotEntity latest = assistantSnapshotMapper.selectLatest(userId, orgId, assistantId);
+        if (latest == null) {
+            return false;
+        }
+        return assistantSnapshotMapper.updateLatestDescription(latest.getId(), desc, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean updateAssistantPublishType(String userId,
+                                              String orgId,
+                                              String assistantId,
+                                              String publishType,
+                                              long updatedAt) {
+        return appMapper.updateAssistantPublishType(userId, orgId, assistantId, publishType, updatedAt) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config) {
+        appMapper.updateAssistantUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getUpdatedAt());
+        int updated = assistantDraftMapper.updateDraft(record);
+        if (updated <= 0) {
+            return false;
+        }
+        assistantDraftConfigMapper.upsert(toEntity(config));
+        return true;
     }
 
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
@@ -167,6 +234,49 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setRerankConfigJson(entity.getRerankConfigJson());
         record.setRecommendConfigJson(entity.getRecommendConfigJson());
         record.setRecommendQuestionsJson(entity.getRecommendQuestionsJson());
+        return record;
+    }
+
+    private AssistantSnapshotEntity toEntity(AssistantSnapshotRecord record) {
+        AssistantSnapshotEntity entity = new AssistantSnapshotEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAssistantId(record.getAssistantId());
+        entity.setVersion(record.getVersion());
+        entity.setDesc(record.getDesc());
+        entity.setCategory(record.getCategory());
+        entity.setAssistantInfoJson(record.getAssistantInfoJson());
+        entity.setAssistantConfigJson(record.getAssistantConfigJson());
+        return entity;
+    }
+
+    private List<AssistantSnapshotRecord> toSnapshotRecords(List<AssistantSnapshotEntity> entities) {
+        List<AssistantSnapshotRecord> records = new java.util.ArrayList<>();
+        for (AssistantSnapshotEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AssistantSnapshotRecord toRecord(AssistantSnapshotEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AssistantSnapshotRecord record = new AssistantSnapshotRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAssistantId(entity.getAssistantId());
+        record.setVersion(entity.getVersion());
+        record.setDesc(entity.getDesc());
+        record.setCategory(entity.getCategory());
+        record.setAssistantInfoJson(entity.getAssistantInfoJson());
+        record.setAssistantConfigJson(entity.getAssistantConfigJson());
         return record;
     }
 }

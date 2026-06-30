@@ -7,7 +7,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
+import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
+import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
+import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -180,6 +187,112 @@ public class WanwuFrontendApiController {
         }
     }
 
+    @PostMapping("/appspace/app/publish")
+    public FrontendResponse<Map<String, Object>> publishApp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppPublishRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppPublishCommand command = request == null ? new AppPublishCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.publishApp(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/appspace/app/publish")
+    public FrontendResponse<Map<String, Object>> unpublishApp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppPublishRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppPublishCommand command = request == null ? new AppPublishCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.unpublishApp(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/app/version")
+    public FrontendResponse<AppVersionInfo> getLatestAppVersion(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("appId") String appId,
+            @RequestParam("appType") String appType) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.getLatestAppVersion(
+                    new AppVersionQuery(appId, appType, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/app/version/list")
+    public FrontendResponse<AppVersionListResult> listAppVersions(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("appId") String appId,
+            @RequestParam("appType") String appType) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.listAppVersions(
+                    new AppVersionQuery(appId, appType, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/appspace/app/version")
+    public FrontendResponse<Map<String, Object>> updateAppVersion(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppVersionUpdateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppVersionUpdateCommand command = request == null ? new AppVersionUpdateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateAppVersion(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/app/version/rollback")
+    public FrontendResponse<Map<String, Object>> rollbackAppVersion(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppVersionRollbackRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppVersionRollbackCommand command = request == null ? new AppVersionRollbackCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.rollbackAppVersion(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/assistant")
+    public FrontendResponse<Map<String, Object>> assistantPublished(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("assistantId") String assistantId,
+            @RequestParam(value = "version", required = false) String version) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.getPublishedAssistant(
+                    new AssistantPublishedQuery(assistantId, version, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     @GetMapping("/assistant/draft")
     public FrontendResponse<Map<String, Object>> assistantDraft(
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -207,8 +320,7 @@ public class WanwuFrontendApiController {
             "/safe/sensitive/table/select",
             "/tool/select",
             "/agent/skill/select",
-            "/assistant/conversation/draft/detail",
-            "/appspace/app/version/list"
+            "/assistant/conversation/draft/detail"
     })
     public FrontendResponse<Map<String, Object>> emptySelectResult() {
         return FrontendResponse.ok(emptyListResult());
@@ -493,6 +605,150 @@ public class WanwuFrontendApiController {
 
         public void setAssistantId(String assistantId) {
             this.assistantId = assistantId;
+        }
+    }
+
+    public static class AppPublishRequest {
+        private String appId;
+        private String appType;
+        private String version;
+        private String desc;
+        private String publishType;
+
+        public AppPublishCommand toCommand() {
+            AppPublishCommand command = new AppPublishCommand();
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setVersion(version);
+            command.setDesc(desc);
+            command.setPublishType(publishType);
+            return command;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+
+        public String getVersion() {
+            return version;
+        }
+
+        public void setVersion(String version) {
+            this.version = version;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public String getPublishType() {
+            return publishType;
+        }
+
+        public void setPublishType(String publishType) {
+            this.publishType = publishType;
+        }
+    }
+
+    public static class AppVersionUpdateRequest {
+        private String appId;
+        private String appType;
+        private String desc;
+        private String publishType;
+
+        public AppVersionUpdateCommand toCommand() {
+            AppVersionUpdateCommand command = new AppVersionUpdateCommand();
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setDesc(desc);
+            command.setPublishType(publishType);
+            return command;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public String getPublishType() {
+            return publishType;
+        }
+
+        public void setPublishType(String publishType) {
+            this.publishType = publishType;
+        }
+    }
+
+    public static class AppVersionRollbackRequest {
+        private String appId;
+        private String appType;
+        private String version;
+
+        public AppVersionRollbackCommand toCommand() {
+            AppVersionRollbackCommand command = new AppVersionRollbackCommand();
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setVersion(version);
+            return command;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+
+        public String getVersion() {
+            return version;
+        }
+
+        public void setVersion(String version) {
+            this.version = version;
         }
     }
 

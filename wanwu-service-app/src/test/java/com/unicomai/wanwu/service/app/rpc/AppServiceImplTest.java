@@ -6,10 +6,18 @@ import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
+import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
+import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
+import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
+import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.junit.jupiter.api.Test;
@@ -56,7 +64,7 @@ public class AppServiceImplTest {
         assertEquals("agent", item.get("appType"));
         assertEquals("SecondAgent", item.get("name"));
         assertEquals("second", item.get("desc"));
-        assertEquals("private", item.get("publishType"));
+        assertEquals("", item.get("publishType"));
         assertEquals(1, item.get("category"));
         assertTrue(repository.containsApp(first.getAssistantId()));
         assertTrue(repository.containsApp(second.getAssistantId()));
@@ -76,7 +84,7 @@ public class AppServiceImplTest {
         assertEquals(created.getAssistantId(), draft.get("uuid"));
         assertEquals("DraftAgent", draft.get("name"));
         assertEquals("draft desc", draft.get("desc"));
-        assertEquals("private", draft.get("publishType"));
+        assertEquals("", draft.get("publishType"));
         assertTrue(draft.containsKey("knowledgeBaseConfig"));
         assertTrue(draft.containsKey("modelConfig"));
         assertTrue(draft.containsKey("rerankConfig"));
@@ -270,6 +278,154 @@ public class AppServiceImplTest {
         assertEquals("assistant draft not found", error.getMessage());
     }
 
+    @Test
+    public void publishAssistantCreatesSnapshotAndExposeLatestVersion() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("PublishAgent", "draft desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setPrologue("Snapshot prologue");
+        config.setInstructions("Snapshot instructions");
+        Map<String, Object> memoryConfig = new LinkedHashMap<>();
+        memoryConfig.put("maxHistoryLength", 7);
+        config.setMemoryConfig(memoryConfig);
+        service.updateAssistantConfig(config);
+
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "organization"));
+
+        AppVersionInfo latest = service.getLatestAppVersion(versionQuery(created.getAssistantId()));
+        assertEquals("v1.0.0", latest.getVersion());
+        assertEquals("first release", latest.getDesc());
+        assertEquals("organization", latest.getPublishType());
+        assertEquals("2026-06-29 10:00:00", latest.getCreatedAt());
+
+        ApplicationListResult list = service.listAssistants(
+                new ApplicationListQuery("agent", "PublishAgent", "dev-admin", "default-org"));
+        assertEquals("organization", list.getList().get(0).get("publishType"));
+        assertEquals("v1.0.0", list.getList().get(0).get("version"));
+
+        Map<String, Object> published = service.getPublishedAssistant(
+                new AssistantPublishedQuery(created.getAssistantId(), "v1.0.0", "dev-admin", "default-org"));
+        assertEquals("PublishAgent", published.get("name"));
+        assertEquals("Snapshot prologue", published.get("prologue"));
+        assertEquals("Snapshot instructions", published.get("instructions"));
+        assertEquals(memoryConfig, published.get("memoryConfig"));
+    }
+
+    @Test
+    public void publishAssistantRequiresIncreasingVersion() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("VersionAgent", "version desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "duplicate", "private")));
+        assertEquals("app version must be greater than latest version", error.getMessage());
+    }
+
+    @Test
+    public void updateAppVersionUpdatesLatestSnapshotAndPublishType() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("UpdateVersionAgent", "version desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+
+        AppVersionUpdateCommand update = new AppVersionUpdateCommand();
+        update.setAppId(created.getAssistantId());
+        update.setAppType("agent");
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        update.setDesc("updated release");
+        update.setPublishType("public");
+
+        service.updateAppVersion(update);
+
+        AppVersionInfo latest = service.getLatestAppVersion(versionQuery(created.getAssistantId()));
+        assertEquals("v1.0.0", latest.getVersion());
+        assertEquals("updated release", latest.getDesc());
+        assertEquals("public", latest.getPublishType());
+    }
+
+    @Test
+    public void rollbackAppVersionRestoresDraftFromSnapshot() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("RollbackAgent", "first desc"));
+
+        AssistantConfigUpdateCommand firstConfig = new AssistantConfigUpdateCommand();
+        firstConfig.setAssistantId(created.getAssistantId());
+        firstConfig.setUserId("dev-admin");
+        firstConfig.setOrgId("default-org");
+        firstConfig.setPrologue("first prologue");
+        firstConfig.setInstructions("first instructions");
+        service.updateAssistantConfig(firstConfig);
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+
+        AssistantUpdateCommand update = new AssistantUpdateCommand();
+        update.setAssistantId(created.getAssistantId());
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        update.setName("RollbackAgentChanged");
+        update.setDesc("changed desc");
+        update.setCategory(1);
+        service.updateAssistant(update);
+
+        AssistantConfigUpdateCommand changedConfig = new AssistantConfigUpdateCommand();
+        changedConfig.setAssistantId(created.getAssistantId());
+        changedConfig.setUserId("dev-admin");
+        changedConfig.setOrgId("default-org");
+        changedConfig.setPrologue("changed prologue");
+        changedConfig.setInstructions("changed instructions");
+        service.updateAssistantConfig(changedConfig);
+
+        AppVersionRollbackCommand rollback = new AppVersionRollbackCommand();
+        rollback.setAppId(created.getAssistantId());
+        rollback.setAppType("agent");
+        rollback.setVersion("v1.0.0");
+        rollback.setUserId("dev-admin");
+        rollback.setOrgId("default-org");
+
+        service.rollbackAppVersion(rollback);
+
+        Map<String, Object> draft = service.getAssistantDraft(
+                new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org"));
+        assertEquals("RollbackAgent", draft.get("name"));
+        assertEquals("first desc", draft.get("desc"));
+        assertEquals("first prologue", draft.get("prologue"));
+        assertEquals("first instructions", draft.get("instructions"));
+    }
+
+    @Test
+    public void listAppVersionsReturnsNewestFirst() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("HistoryAgent", "history desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.1", "second release", "private"));
+
+        AppVersionListResult result = service.listAppVersions(versionQuery(created.getAssistantId()));
+
+        assertEquals(2, result.getTotal());
+        assertEquals("v1.0.1", result.getList().get(0).getVersion());
+        assertEquals("v1.0.0", result.getList().get(1).getVersion());
+    }
+
+    @Test
+    public void unpublishAppClearsPublishTypeButKeepsDraft() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("UnpublishAgent", "unpublish desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+
+        service.unpublishApp(publishCommand(created.getAssistantId(), "", "", ""));
+
+        ApplicationListResult list = service.listAssistants(
+                new ApplicationListQuery("agent", "UnpublishAgent", "dev-admin", "default-org"));
+        assertEquals(1, list.getTotal());
+        assertEquals("", list.getList().get(0).get("publishType"));
+        assertEquals("v1.0.0", list.getList().get(0).get("version"));
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -290,6 +446,22 @@ public class AppServiceImplTest {
         return command;
     }
 
+    private AppPublishCommand publishCommand(String assistantId, String version, String desc, String publishType) {
+        AppPublishCommand command = new AppPublishCommand();
+        command.setAppId(assistantId);
+        command.setAppType("agent");
+        command.setVersion(version);
+        command.setDesc(desc);
+        command.setPublishType(publishType);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private AppVersionQuery versionQuery(String assistantId) {
+        return new AppVersionQuery(assistantId, "agent", "dev-admin", "default-org");
+    }
+
     private boolean listContainsName(ApplicationListResult result, String name) {
         for (Map<String, Object> item : result.getList()) {
             if (name.equals(item.get("name"))) {
@@ -308,6 +480,7 @@ public class AppServiceImplTest {
         private final AtomicLong ids = new AtomicLong();
         private final List<AppRecord> records = new ArrayList<>();
         private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
+        private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -396,6 +569,13 @@ public class AppServiceImplTest {
             if (config != null) {
                 configs.remove(config);
             }
+            List<AssistantSnapshotRecord> removed = new ArrayList<>();
+            for (AssistantSnapshotRecord snapshot : snapshots) {
+                if (assistantId.equals(snapshot.getAssistantId())) {
+                    removed.add(snapshot);
+                }
+            }
+            snapshots.removeAll(removed);
             return true;
         }
 
@@ -421,6 +601,95 @@ public class AppServiceImplTest {
                 configs.add(config);
             }
             return record;
+        }
+
+        @Override
+        public AssistantSnapshotRecord saveAssistantSnapshot(AssistantSnapshotRecord snapshot) {
+            snapshot.setId(ids.incrementAndGet());
+            snapshots.add(snapshot);
+            return snapshot;
+        }
+
+        @Override
+        public List<AssistantSnapshotRecord> listAssistantSnapshots(String userId, String orgId, String assistantId) {
+            List<AssistantSnapshotRecord> matches = new ArrayList<>();
+            for (AssistantSnapshotRecord snapshot : snapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && assistantId.equals(snapshot.getAssistantId())) {
+                    matches.add(snapshot);
+                }
+            }
+            matches.sort(Comparator.comparing(AssistantSnapshotRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public AssistantSnapshotRecord findLatestAssistantSnapshot(String userId, String orgId, String assistantId) {
+            List<AssistantSnapshotRecord> matches = listAssistantSnapshots(userId, orgId, assistantId);
+            return matches.isEmpty() ? null : matches.get(0);
+        }
+
+        @Override
+        public AssistantSnapshotRecord findAssistantSnapshotByVersion(String userId,
+                                                                     String orgId,
+                                                                     String assistantId,
+                                                                     String version) {
+            for (AssistantSnapshotRecord snapshot : snapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && assistantId.equals(snapshot.getAssistantId())
+                        && version.equals(snapshot.getVersion())) {
+                    return snapshot;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean updateLatestAssistantSnapshot(String userId,
+                                                     String orgId,
+                                                     String assistantId,
+                                                     String desc,
+                                                     long updatedAt) {
+            AssistantSnapshotRecord latest = findLatestAssistantSnapshot(userId, orgId, assistantId);
+            if (latest == null) {
+                return false;
+            }
+            latest.setDesc(desc);
+            latest.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean updateAssistantPublishType(String userId,
+                                                  String orgId,
+                                                  String assistantId,
+                                                  String publishType,
+                                                  long updatedAt) {
+            AppRecord existing = findAssistant(userId, orgId, assistantId);
+            if (existing == null) {
+                return false;
+            }
+            existing.setPublishType(publishType);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config) {
+            AppRecord existing = findAssistant(record.getUserId(), record.getOrgId(), record.getAppId());
+            if (existing == null) {
+                return false;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDesc(record.getDesc());
+            existing.setAvatarKey(record.getAvatarKey());
+            existing.setAvatarPath(record.getAvatarPath());
+            existing.setCategory(record.getCategory());
+            saveAssistantConfig(config);
+            return true;
         }
 
         private boolean containsApp(String assistantId) {

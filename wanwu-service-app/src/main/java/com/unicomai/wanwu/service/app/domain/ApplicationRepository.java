@@ -21,4 +21,18 @@ public interface ApplicationRepository {
     AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record);
 
     AssistantDraftConfigRecord findAssistantConfig(String userId, String orgId, String assistantId);
+
+    AssistantSnapshotRecord saveAssistantSnapshot(AssistantSnapshotRecord snapshot);
+
+    List<AssistantSnapshotRecord> listAssistantSnapshots(String userId, String orgId, String assistantId);
+
+    AssistantSnapshotRecord findLatestAssistantSnapshot(String userId, String orgId, String assistantId);
+
+    AssistantSnapshotRecord findAssistantSnapshotByVersion(String userId, String orgId, String assistantId, String version);
+
+    boolean updateLatestAssistantSnapshot(String userId, String orgId, String assistantId, String desc, long updatedAt);
+
+    boolean updateAssistantPublishType(String userId, String orgId, String assistantId, String publishType, long updatedAt);
+
+    boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config);
 }
