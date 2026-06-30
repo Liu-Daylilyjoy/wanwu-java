@@ -51,6 +51,20 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                     @Param("assistantId") String assistantId);
 
     @Select({
+            "SELECT a.id, a.created_at, a.updated_at, a.user_id, a.org_id,",
+            "       a.app_id, a.app_type, a.publish_type,",
+            "       d.name, d.description AS `desc`, d.avatar_key, d.avatar_path, d.category",
+            "FROM apps a",
+            "JOIN assistant_drafts d ON d.assistant_id = a.app_id",
+            "WHERE a.org_id = #{orgId}",
+            "  AND a.app_type = 'agent'",
+            "  AND a.app_id = #{assistantId}",
+            "LIMIT 1"
+    })
+    AppRecord selectAssistantRecordByOrg(@Param("orgId") String orgId,
+                                         @Param("assistantId") String assistantId);
+
+    @Select({
             "SELECT d.name",
             "FROM apps a",
             "JOIN assistant_drafts d ON d.assistant_id = a.app_id",

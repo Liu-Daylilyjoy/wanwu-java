@@ -5,14 +5,17 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
@@ -30,6 +33,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantDraftMapper assistantDraftMapper;
     private final AssistantDraftConfigMapper assistantDraftConfigMapper;
     private final AssistantSnapshotMapper assistantSnapshotMapper;
+    private final AppUrlMapper appUrlMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
 
@@ -37,12 +41,14 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantDraftMapper assistantDraftMapper,
                                         AssistantDraftConfigMapper assistantDraftConfigMapper,
                                         AssistantSnapshotMapper assistantSnapshotMapper,
+                                        AppUrlMapper appUrlMapper,
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
         this.assistantSnapshotMapper = assistantSnapshotMapper;
+        this.appUrlMapper = appUrlMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
     }
@@ -97,8 +103,14 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    public AppRecord findAssistantByOrg(String orgId, String assistantId) {
+        return appMapper.selectAssistantRecordByOrg(orgId, assistantId);
+    }
+
+    @Override
     @Transactional
     public boolean deleteAssistant(String userId, String orgId, String assistantId) {
+        appUrlMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMessageMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantSnapshotMapper.deleteByAssistant(userId, orgId, assistantId);
@@ -192,6 +204,50 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         }
         assistantDraftConfigMapper.upsert(toEntity(config));
         return true;
+    }
+
+    @Override
+    public AppUrlRecord saveAppUrl(AppUrlRecord record) {
+        AppUrlEntity entity = toEntity(record);
+        appUrlMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public AppUrlRecord updateAppUrl(AppUrlRecord record) {
+        int updated = appUrlMapper.updateConfig(toEntity(record));
+        return updated > 0 ? record : null;
+    }
+
+    @Override
+    public AppUrlRecord findAppUrlById(String userId, String orgId, Long id) {
+        return toRecord(appUrlMapper.selectByScopedId(userId, orgId, id));
+    }
+
+    @Override
+    public AppUrlRecord findAppUrlBySuffix(String suffix) {
+        return toRecord(appUrlMapper.selectBySuffix(suffix));
+    }
+
+    @Override
+    public AppUrlRecord findAppUrlByName(String userId, String orgId, String appId, String appType, String name) {
+        return toRecord(appUrlMapper.selectByName(userId, orgId, appId, appType, name));
+    }
+
+    @Override
+    public List<AppUrlRecord> listAppUrls(String userId, String orgId, String appId, String appType) {
+        return toAppUrlRecords(appUrlMapper.selectByApp(userId, orgId, appId, appType));
+    }
+
+    @Override
+    public boolean updateAppUrlStatus(String userId, String orgId, Long id, boolean status, long updatedAt) {
+        return appUrlMapper.updateStatus(userId, orgId, id, status, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean deleteAppUrl(String userId, String orgId, Long id) {
+        return appUrlMapper.deleteByScopedId(userId, orgId, id) > 0;
     }
 
     @Override
@@ -370,6 +426,63 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setAssistantInfoJson(entity.getAssistantInfoJson());
         record.setAssistantConfigJson(entity.getAssistantConfigJson());
+        return record;
+    }
+
+    private AppUrlEntity toEntity(AppUrlRecord record) {
+        AppUrlEntity entity = new AppUrlEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAppId(record.getAppId());
+        entity.setAppType(record.getAppType());
+        entity.setName(record.getName());
+        entity.setDescription(record.getDescription());
+        entity.setExpiredAt(record.getExpiredAt());
+        entity.setCopyright(record.getCopyright());
+        entity.setCopyrightEnable(record.getCopyrightEnable());
+        entity.setPrivacyPolicy(record.getPrivacyPolicy());
+        entity.setPrivacyPolicyEnable(record.getPrivacyPolicyEnable());
+        entity.setDisclaimer(record.getDisclaimer());
+        entity.setDisclaimerEnable(record.getDisclaimerEnable());
+        entity.setSuffix(record.getSuffix());
+        entity.setStatus(record.getStatus());
+        return entity;
+    }
+
+    private List<AppUrlRecord> toAppUrlRecords(List<AppUrlEntity> entities) {
+        List<AppUrlRecord> records = new java.util.ArrayList<>();
+        for (AppUrlEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppUrlRecord toRecord(AppUrlEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AppUrlRecord record = new AppUrlRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAppId(entity.getAppId());
+        record.setAppType(entity.getAppType());
+        record.setName(entity.getName());
+        record.setDescription(entity.getDescription());
+        record.setExpiredAt(entity.getExpiredAt());
+        record.setCopyright(entity.getCopyright());
+        record.setCopyrightEnable(entity.getCopyrightEnable());
+        record.setPrivacyPolicy(entity.getPrivacyPolicy());
+        record.setPrivacyPolicyEnable(entity.getPrivacyPolicyEnable());
+        record.setDisclaimer(entity.getDisclaimer());
+        record.setDisclaimerEnable(entity.getDisclaimerEnable());
+        record.setSuffix(entity.getSuffix());
+        record.setStatus(entity.getStatus());
         return record;
     }
 

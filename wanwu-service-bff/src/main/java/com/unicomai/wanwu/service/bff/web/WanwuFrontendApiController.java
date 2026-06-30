@@ -18,6 +18,12 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
+import com.unicomai.wanwu.api.app.dto.AppUrlListQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlStatusCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
 import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
@@ -45,6 +51,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +66,7 @@ public class WanwuFrontendApiController {
     private static final String AGENT_APP_TYPE = "agent";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
+    private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -494,7 +502,89 @@ public class WanwuFrontendApiController {
 
     @GetMapping("/appspace/app/url")
     public FrontendResponse<String> appOpenUrl() {
-        return FrontendResponse.ok("");
+        return FrontendResponse.ok(OPENURL_PUBLIC_PREFIX);
+    }
+
+    @PostMapping("/appspace/app/openurl")
+    public FrontendResponse<Map<String, Object>> createAppUrl(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppUrlCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppUrlCreateCommand command = request == null ? new AppUrlCreateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.createAppUrl(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/appspace/app/openurl")
+    public FrontendResponse<Map<String, Object>> updateAppUrl(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppUrlUpdateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppUrlUpdateCommand command = request == null ? new AppUrlUpdateCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateAppUrl(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/appspace/app/openurl")
+    public FrontendResponse<Map<String, Object>> deleteAppUrl(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppUrlIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppUrlDeleteCommand command = request == null ? new AppUrlDeleteCommand() : request.toDeleteCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.deleteAppUrl(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/app/openurl/list")
+    public FrontendResponse<List<AppUrlInfo>> listAppUrls(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("appId") String appId,
+            @RequestParam("appType") String appType) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppUrlListQuery query = new AppUrlListQuery();
+            query.setAppId(appId);
+            query.setAppType(appType);
+            query.setUserId(userContext.getUserId());
+            query.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(toFrontendAppUrlList(appService.listAppUrls(query)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/appspace/app/openurl/status")
+    public FrontendResponse<Map<String, Object>> updateAppUrlStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppUrlStatusRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AppUrlStatusCommand command = request == null ? new AppUrlStatusCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateAppUrlStatus(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping({
@@ -536,6 +626,10 @@ public class WanwuFrontendApiController {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private String defaultIfBlank(String value, String defaultValue) {
+        return isBlank(value) ? defaultValue : value;
     }
 
     private Map<String, Object> emptyListResult() {
@@ -628,6 +722,54 @@ public class WanwuFrontendApiController {
             return compacted;
         }
         return compacted.substring(0, maxLength);
+    }
+
+    private List<AppUrlInfo> toFrontendAppUrlList(List<AppUrlInfo> source) {
+        List<AppUrlInfo> result = new ArrayList<>();
+        if (source == null) {
+            return result;
+        }
+        for (AppUrlInfo info : source) {
+            AppUrlInfo copy = copyAppUrlInfo(info);
+            copy.setSuffix(openUrlPath(info == null ? "" : info.getSuffix()));
+            result.add(copy);
+        }
+        return result;
+    }
+
+    private AppUrlInfo copyAppUrlInfo(AppUrlInfo source) {
+        AppUrlInfo copy = new AppUrlInfo();
+        if (source == null) {
+            return copy;
+        }
+        copy.setUrlId(source.getUrlId());
+        copy.setAppId(source.getAppId());
+        copy.setAppType(source.getAppType());
+        copy.setName(source.getName());
+        copy.setCreatedAt(source.getCreatedAt());
+        copy.setExpiredAt(source.getExpiredAt());
+        copy.setCopyright(source.getCopyright());
+        copy.setCopyrightEnable(source.isCopyrightEnable());
+        copy.setPrivacyPolicy(source.getPrivacyPolicy());
+        copy.setPrivacyPolicyEnable(source.isPrivacyPolicyEnable());
+        copy.setDisclaimer(source.getDisclaimer());
+        copy.setDisclaimerEnable(source.isDisclaimerEnable());
+        copy.setSuffix(source.getSuffix());
+        copy.setStatus(source.isStatus());
+        copy.setUserId(source.getUserId());
+        copy.setOrgId(source.getOrgId());
+        copy.setDescription(source.getDescription());
+        return copy;
+    }
+
+    private String openUrlPath(String suffix) {
+        String safeSuffix = defaultIfBlank(suffix, "");
+        if (safeSuffix.startsWith("http://")
+                || safeSuffix.startsWith("https://")
+                || safeSuffix.startsWith(OPENURL_PUBLIC_PREFIX + "/")) {
+            return safeSuffix;
+        }
+        return OPENURL_PUBLIC_PREFIX + "/" + safeSuffix;
     }
 
     private String toSseFrame(AssistantConversationStreamResult result) {
@@ -741,6 +883,269 @@ public class WanwuFrontendApiController {
 
         public void setAvatar(AvatarRequest avatar) {
             this.avatar = avatar;
+        }
+    }
+
+    public static class AppUrlCreateRequest {
+        private String appId;
+        private String appType;
+        private String name;
+        private String description;
+        private String expiredAt;
+        private String copyright;
+        private boolean copyrightEnable;
+        private String privacyPolicy;
+        private boolean privacyPolicyEnable;
+        private String disclaimer;
+        private boolean disclaimerEnable;
+
+        public AppUrlCreateCommand toCommand() {
+            AppUrlCreateCommand command = new AppUrlCreateCommand();
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setName(name);
+            command.setDescription(description);
+            command.setExpiredAt(expiredAt);
+            command.setCopyright(copyright);
+            command.setCopyrightEnable(copyrightEnable);
+            command.setPrivacyPolicy(privacyPolicy);
+            command.setPrivacyPolicyEnable(privacyPolicyEnable);
+            command.setDisclaimer(disclaimer);
+            command.setDisclaimerEnable(disclaimerEnable);
+            return command;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public String getExpiredAt() {
+            return expiredAt;
+        }
+
+        public void setExpiredAt(String expiredAt) {
+            this.expiredAt = expiredAt;
+        }
+
+        public String getCopyright() {
+            return copyright;
+        }
+
+        public void setCopyright(String copyright) {
+            this.copyright = copyright;
+        }
+
+        public boolean isCopyrightEnable() {
+            return copyrightEnable;
+        }
+
+        public void setCopyrightEnable(boolean copyrightEnable) {
+            this.copyrightEnable = copyrightEnable;
+        }
+
+        public String getPrivacyPolicy() {
+            return privacyPolicy;
+        }
+
+        public void setPrivacyPolicy(String privacyPolicy) {
+            this.privacyPolicy = privacyPolicy;
+        }
+
+        public boolean isPrivacyPolicyEnable() {
+            return privacyPolicyEnable;
+        }
+
+        public void setPrivacyPolicyEnable(boolean privacyPolicyEnable) {
+            this.privacyPolicyEnable = privacyPolicyEnable;
+        }
+
+        public String getDisclaimer() {
+            return disclaimer;
+        }
+
+        public void setDisclaimer(String disclaimer) {
+            this.disclaimer = disclaimer;
+        }
+
+        public boolean isDisclaimerEnable() {
+            return disclaimerEnable;
+        }
+
+        public void setDisclaimerEnable(boolean disclaimerEnable) {
+            this.disclaimerEnable = disclaimerEnable;
+        }
+    }
+
+    public static class AppUrlUpdateRequest {
+        private String urlId;
+        private String name;
+        private String description;
+        private String expiredAt;
+        private String copyright;
+        private boolean copyrightEnable;
+        private String privacyPolicy;
+        private boolean privacyPolicyEnable;
+        private String disclaimer;
+        private boolean disclaimerEnable;
+
+        public AppUrlUpdateCommand toCommand() {
+            AppUrlUpdateCommand command = new AppUrlUpdateCommand();
+            command.setUrlId(urlId);
+            command.setName(name);
+            command.setDescription(description);
+            command.setExpiredAt(expiredAt);
+            command.setCopyright(copyright);
+            command.setCopyrightEnable(copyrightEnable);
+            command.setPrivacyPolicy(privacyPolicy);
+            command.setPrivacyPolicyEnable(privacyPolicyEnable);
+            command.setDisclaimer(disclaimer);
+            command.setDisclaimerEnable(disclaimerEnable);
+            return command;
+        }
+
+        public String getUrlId() {
+            return urlId;
+        }
+
+        public void setUrlId(String urlId) {
+            this.urlId = urlId;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public String getExpiredAt() {
+            return expiredAt;
+        }
+
+        public void setExpiredAt(String expiredAt) {
+            this.expiredAt = expiredAt;
+        }
+
+        public String getCopyright() {
+            return copyright;
+        }
+
+        public void setCopyright(String copyright) {
+            this.copyright = copyright;
+        }
+
+        public boolean isCopyrightEnable() {
+            return copyrightEnable;
+        }
+
+        public void setCopyrightEnable(boolean copyrightEnable) {
+            this.copyrightEnable = copyrightEnable;
+        }
+
+        public String getPrivacyPolicy() {
+            return privacyPolicy;
+        }
+
+        public void setPrivacyPolicy(String privacyPolicy) {
+            this.privacyPolicy = privacyPolicy;
+        }
+
+        public boolean isPrivacyPolicyEnable() {
+            return privacyPolicyEnable;
+        }
+
+        public void setPrivacyPolicyEnable(boolean privacyPolicyEnable) {
+            this.privacyPolicyEnable = privacyPolicyEnable;
+        }
+
+        public String getDisclaimer() {
+            return disclaimer;
+        }
+
+        public void setDisclaimer(String disclaimer) {
+            this.disclaimer = disclaimer;
+        }
+
+        public boolean isDisclaimerEnable() {
+            return disclaimerEnable;
+        }
+
+        public void setDisclaimerEnable(boolean disclaimerEnable) {
+            this.disclaimerEnable = disclaimerEnable;
+        }
+    }
+
+    public static class AppUrlIdRequest {
+        private String urlId;
+
+        public AppUrlDeleteCommand toDeleteCommand() {
+            AppUrlDeleteCommand command = new AppUrlDeleteCommand();
+            command.setUrlId(urlId);
+            return command;
+        }
+
+        public String getUrlId() {
+            return urlId;
+        }
+
+        public void setUrlId(String urlId) {
+            this.urlId = urlId;
+        }
+    }
+
+    public static class AppUrlStatusRequest extends AppUrlIdRequest {
+        private boolean status;
+
+        public AppUrlStatusCommand toCommand() {
+            AppUrlStatusCommand command = new AppUrlStatusCommand();
+            command.setUrlId(getUrlId());
+            command.setStatus(status);
+            return command;
+        }
+
+        public boolean isStatus() {
+            return status;
+        }
+
+        public void setStatus(boolean status) {
+            this.status = status;
         }
     }
 

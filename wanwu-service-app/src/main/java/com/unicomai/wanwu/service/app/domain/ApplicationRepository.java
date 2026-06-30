@@ -12,6 +12,8 @@ public interface ApplicationRepository {
 
     AppRecord findAssistant(String userId, String orgId, String assistantId);
 
+    AppRecord findAssistantByOrg(String orgId, String assistantId);
+
     boolean deleteAssistant(String userId, String orgId, String assistantId);
 
     List<String> listAssistantNamesByPrefix(String userId, String orgId, String prefix);
@@ -35,6 +37,22 @@ public interface ApplicationRepository {
     boolean updateAssistantPublishType(String userId, String orgId, String assistantId, String publishType, long updatedAt);
 
     boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config);
+
+    AppUrlRecord saveAppUrl(AppUrlRecord record);
+
+    AppUrlRecord updateAppUrl(AppUrlRecord record);
+
+    AppUrlRecord findAppUrlById(String userId, String orgId, Long id);
+
+    AppUrlRecord findAppUrlBySuffix(String suffix);
+
+    AppUrlRecord findAppUrlByName(String userId, String orgId, String appId, String appType, String name);
+
+    List<AppUrlRecord> listAppUrls(String userId, String orgId, String appId, String appType);
+
+    boolean updateAppUrlStatus(String userId, String orgId, Long id, boolean status, long updatedAt);
+
+    boolean deleteAppUrl(String userId, String orgId, Long id);
 
     AssistantConversationRecord saveConversation(AssistantConversationRecord record);
 

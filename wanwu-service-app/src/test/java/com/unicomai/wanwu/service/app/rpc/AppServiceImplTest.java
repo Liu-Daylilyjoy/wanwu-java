@@ -17,6 +17,13 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
+import com.unicomai.wanwu.api.app.dto.AppUrlListQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlStatusCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
 import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
@@ -29,6 +36,7 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.junit.jupiter.api.Test;
 
@@ -563,6 +571,94 @@ public class AppServiceImplTest {
         assertEquals("assistant snapshot not found", error.getMessage());
     }
 
+    @Test
+    public void publicConversationCanUseClientUserWhileResolvingAssistantByOwner() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("PublicClientAgent", "public desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "public"));
+
+        AssistantConversationStreamCommand stream = streamCommand(
+                created.getAssistantId(), "", "public question", false);
+        stream.setUserId("client-001");
+        stream.setOrgId("default-org");
+
+        AssistantConversationStreamResult result = service.streamAssistantConversation(stream);
+
+        assertEquals(created.getAssistantId(), result.getAssistantId());
+        assertEquals("Demo response from PublicClientAgent: public question", result.getResponse());
+        AssistantConversationListQuery query = conversationListQuery(created.getAssistantId(), "published");
+        query.setUserId("client-001");
+        AssistantConversationPageResult conversations = service.listAssistantConversations(query);
+        assertEquals(1, conversations.getTotal());
+        assertEquals(result.getConversationId(), conversations.getList().get(0).get("conversationId"));
+    }
+
+    @Test
+    public void createAppUrlPersistsEnabledUrlForPublishedAssistant() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("OpenUrlAgent", "open desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "public"));
+
+        service.createAppUrl(appUrlCreateCommand(created.getAssistantId(), "Public demo", "2026-07-01 12:30:00"));
+
+        List<AppUrlInfo> urls = service.listAppUrls(appUrlListQuery(created.getAssistantId()));
+        assertEquals(1, urls.size());
+        AppUrlInfo info = urls.get(0);
+        assertEquals(created.getAssistantId(), info.getAppId());
+        assertEquals("agent", info.getAppType());
+        assertEquals("Public demo", info.getName());
+        assertEquals("OpenURL for frontend", info.getDescription());
+        assertEquals("2026-06-29 10:00:00", info.getCreatedAt());
+        assertEquals("2026-07-01 12:30:00", info.getExpiredAt());
+        assertEquals(true, info.isStatus());
+        assertTrue(info.getSuffix().length() >= 16);
+
+        AppUrlInfo publicInfo = service.getAppUrlBySuffix(new AppUrlSuffixQuery(info.getSuffix()));
+        assertEquals(info.getUrlId(), publicInfo.getUrlId());
+        assertEquals(created.getAssistantId(), publicInfo.getAppId());
+        assertEquals("default-org", publicInfo.getOrgId());
+    }
+
+    @Test
+    public void createAppUrlRequiresPublishedAssistantSnapshot() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("NoSnapshotAgent", "draft only"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.createAppUrl(appUrlCreateCommand(created.getAssistantId(), "Public demo", "")));
+
+        assertEquals("assistant snapshot not found", error.getMessage());
+    }
+
+    @Test
+    public void disabledOrExpiredAppUrlCannotBeResolvedBySuffix() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("GuardedOpenUrlAgent", "guarded desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "public"));
+        service.createAppUrl(appUrlCreateCommand(created.getAssistantId(), "Guarded link", "2026-07-01 12:30:00"));
+        AppUrlInfo info = service.listAppUrls(appUrlListQuery(created.getAssistantId())).get(0);
+
+        AppUrlStatusCommand status = new AppUrlStatusCommand();
+        status.setUrlId(info.getUrlId());
+        status.setStatus(false);
+        status.setUserId("dev-admin");
+        status.setOrgId("default-org");
+        service.updateAppUrlStatus(status);
+
+        IllegalArgumentException disabled = assertThrows(IllegalArgumentException.class,
+                () -> service.getAppUrlBySuffix(new AppUrlSuffixQuery(info.getSuffix())));
+        assertEquals("app url disabled", disabled.getMessage());
+
+        AppUrlUpdateCommand update = appUrlUpdateCommand(info.getUrlId(), "Guarded link", "2026-06-28 09:00:00");
+        service.updateAppUrl(update);
+        status.setStatus(true);
+        service.updateAppUrlStatus(status);
+
+        IllegalArgumentException expired = assertThrows(IllegalArgumentException.class,
+                () -> service.getAppUrlBySuffix(new AppUrlSuffixQuery(info.getSuffix())));
+        assertEquals("app url expired", expired.getMessage());
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -597,6 +693,50 @@ public class AppServiceImplTest {
 
     private AppVersionQuery versionQuery(String assistantId) {
         return new AppVersionQuery(assistantId, "agent", "dev-admin", "default-org");
+    }
+
+    private AppUrlCreateCommand appUrlCreateCommand(String assistantId, String name, String expiredAt) {
+        AppUrlCreateCommand command = new AppUrlCreateCommand();
+        command.setAppId(assistantId);
+        command.setAppType("agent");
+        command.setName(name);
+        command.setDescription("OpenURL for frontend");
+        command.setExpiredAt(expiredAt);
+        command.setCopyright("Copyright");
+        command.setCopyrightEnable(true);
+        command.setPrivacyPolicy("Privacy");
+        command.setPrivacyPolicyEnable(true);
+        command.setDisclaimer("Disclaimer");
+        command.setDisclaimerEnable(true);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private AppUrlUpdateCommand appUrlUpdateCommand(String urlId, String name, String expiredAt) {
+        AppUrlUpdateCommand command = new AppUrlUpdateCommand();
+        command.setUrlId(urlId);
+        command.setName(name);
+        command.setDescription("OpenURL for frontend");
+        command.setExpiredAt(expiredAt);
+        command.setCopyright("Copyright");
+        command.setCopyrightEnable(true);
+        command.setPrivacyPolicy("Privacy");
+        command.setPrivacyPolicyEnable(true);
+        command.setDisclaimer("Disclaimer");
+        command.setDisclaimerEnable(true);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private AppUrlListQuery appUrlListQuery(String assistantId) {
+        AppUrlListQuery query = new AppUrlListQuery();
+        query.setAppId(assistantId);
+        query.setAppType("agent");
+        query.setUserId("dev-admin");
+        query.setOrgId("default-org");
+        return query;
     }
 
     private AssistantConversationCreateCommand conversationCreateCommand(String assistantId,
@@ -665,6 +805,7 @@ public class AppServiceImplTest {
         private final List<AppRecord> records = new ArrayList<>();
         private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
+        private final List<AppUrlRecord> appUrls = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
 
@@ -699,6 +840,17 @@ public class AppServiceImplTest {
             for (AppRecord record : records) {
                 if (userId.equals(record.getUserId())
                         && orgId.equals(record.getOrgId())
+                        && assistantId.equals(record.getAppId())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AppRecord findAssistantByOrg(String orgId, String assistantId) {
+            for (AppRecord record : records) {
+                if (orgId.equals(record.getOrgId())
                         && assistantId.equals(record.getAppId())) {
                     return record;
                 }
@@ -762,6 +914,13 @@ public class AppServiceImplTest {
                 }
             }
             snapshots.removeAll(removed);
+            List<AppUrlRecord> removedAppUrls = new ArrayList<>();
+            for (AppUrlRecord appUrl : appUrls) {
+                if (assistantId.equals(appUrl.getAppId())) {
+                    removedAppUrls.add(appUrl);
+                }
+            }
+            appUrls.removeAll(removedAppUrls);
             List<AssistantConversationRecord> removedConversations = new ArrayList<>();
             for (AssistantConversationRecord conversation : conversations) {
                 if (assistantId.equals(conversation.getAssistantId())) {
@@ -889,6 +1048,104 @@ public class AppServiceImplTest {
             existing.setAvatarPath(record.getAvatarPath());
             existing.setCategory(record.getCategory());
             saveAssistantConfig(config);
+            return true;
+        }
+
+        @Override
+        public AppUrlRecord saveAppUrl(AppUrlRecord record) {
+            record.setId(ids.incrementAndGet());
+            appUrls.add(record);
+            return record;
+        }
+
+        @Override
+        public AppUrlRecord updateAppUrl(AppUrlRecord record) {
+            AppUrlRecord existing = findAppUrlById(record.getUserId(), record.getOrgId(), record.getId());
+            if (existing == null) {
+                return null;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDescription(record.getDescription());
+            existing.setExpiredAt(record.getExpiredAt());
+            existing.setCopyright(record.getCopyright());
+            existing.setCopyrightEnable(record.getCopyrightEnable());
+            existing.setPrivacyPolicy(record.getPrivacyPolicy());
+            existing.setPrivacyPolicyEnable(record.getPrivacyPolicyEnable());
+            existing.setDisclaimer(record.getDisclaimer());
+            existing.setDisclaimerEnable(record.getDisclaimerEnable());
+            return existing;
+        }
+
+        @Override
+        public AppUrlRecord findAppUrlById(String userId, String orgId, Long id) {
+            for (AppUrlRecord record : appUrls) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && id.equals(record.getId())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AppUrlRecord findAppUrlBySuffix(String suffix) {
+            for (AppUrlRecord record : appUrls) {
+                if (suffix.equals(record.getSuffix())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AppUrlRecord findAppUrlByName(String userId, String orgId, String appId, String appType, String name) {
+            for (AppUrlRecord record : appUrls) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && appId.equals(record.getAppId())
+                        && appType.equals(record.getAppType())
+                        && name.equals(record.getName())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<AppUrlRecord> listAppUrls(String userId, String orgId, String appId, String appType) {
+            List<AppUrlRecord> matches = new ArrayList<>();
+            for (AppUrlRecord record : appUrls) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && appId.equals(record.getAppId())
+                        && appType.equals(record.getAppType())) {
+                    matches.add(record);
+                }
+            }
+            matches.sort(Comparator.comparing(AppUrlRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public boolean updateAppUrlStatus(String userId, String orgId, Long id, boolean status, long updatedAt) {
+            AppUrlRecord existing = findAppUrlById(userId, orgId, id);
+            if (existing == null) {
+                return false;
+            }
+            existing.setStatus(status);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean deleteAppUrl(String userId, String orgId, Long id) {
+            AppUrlRecord existing = findAppUrlById(userId, orgId, id);
+            if (existing == null) {
+                return false;
+            }
+            appUrls.remove(existing);
             return true;
         }
 

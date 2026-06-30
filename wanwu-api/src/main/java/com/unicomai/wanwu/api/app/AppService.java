@@ -17,6 +17,13 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
+import com.unicomai.wanwu.api.app.dto.AppUrlListQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlStatusCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
 import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
@@ -27,6 +34,7 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 
 import java.util.Map;
+import java.util.List;
 
 public interface AppService {
 
@@ -75,4 +83,16 @@ public interface AppService {
     AssistantConversationPageResult listDraftAssistantConversationDetails(AssistantConversationListQuery query);
 
     AssistantConversationStreamResult streamAssistantConversation(AssistantConversationStreamCommand command);
+
+    void createAppUrl(AppUrlCreateCommand command);
+
+    void updateAppUrl(AppUrlUpdateCommand command);
+
+    void deleteAppUrl(AppUrlDeleteCommand command);
+
+    void updateAppUrlStatus(AppUrlStatusCommand command);
+
+    List<AppUrlInfo> listAppUrls(AppUrlListQuery query);
+
+    AppUrlInfo getAppUrlBySuffix(AppUrlSuffixQuery query);
 }

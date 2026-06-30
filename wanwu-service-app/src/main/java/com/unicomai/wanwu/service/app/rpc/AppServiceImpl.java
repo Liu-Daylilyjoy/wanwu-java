@@ -21,6 +21,13 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
+import com.unicomai.wanwu.api.app.dto.AppUrlListQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlStatusCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
 import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
@@ -36,12 +43,14 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -76,6 +85,9 @@ public class AppServiceImpl implements AppService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.of("Asia/Shanghai"));
+    private static final DateTimeFormatter DATE_TIME_INPUT_FORMATTER = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ApplicationRepository applicationRepository;
     private final Clock clock;
@@ -456,7 +468,7 @@ public class AppServiceImpl implements AppService {
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        ensureAssistantExists(userId, orgId, command.getAssistantId());
+        ensureConversationAssistantExists(userId, orgId, command.getAssistantId());
         String conversationType = normalizeConversationType(command.getConversationType(), CONVERSATION_TYPE_PUBLISHED);
         AssistantConversationRecord record = newConversation(
                 userId, orgId, command.getAssistantId(), conversationType, command.getPrompt());
@@ -575,9 +587,10 @@ public class AppServiceImpl implements AppService {
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        AppRecord assistant = ensureAssistantExists(userId, orgId, command.getAssistantId());
+        AppRecord assistant = ensureConversationAssistantExists(userId, orgId, command.getAssistantId());
         if (!command.isDraft()
-                && applicationRepository.findLatestAssistantSnapshot(userId, orgId, command.getAssistantId()) == null) {
+                && applicationRepository.findLatestAssistantSnapshot(
+                assistant.getUserId(), assistant.getOrgId(), command.getAssistantId()) == null) {
             throw new IllegalArgumentException("assistant snapshot not found");
         }
         AssistantConversationRecord conversation = resolveConversation(command, userId, orgId);
@@ -618,12 +631,194 @@ public class AppServiceImpl implements AppService {
         return result;
     }
 
+    @Override
+    public void createAppUrl(AppUrlCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app url create command is required");
+        }
+        String appType = normalizeAgentAppType(command.getAppType());
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("only agent app url is supported");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("app url name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        ensureAssistantExists(userId, orgId, command.getAppId());
+        if (applicationRepository.findLatestAssistantSnapshot(userId, orgId, command.getAppId()) == null) {
+            throw new IllegalArgumentException("assistant snapshot not found");
+        }
+        String name = command.getName().trim();
+        if (applicationRepository.findAppUrlByName(userId, orgId, command.getAppId(), appType, name) != null) {
+            throw new IllegalArgumentException("app url name already exists");
+        }
+
+        long now = clock.millis();
+        AppUrlRecord record = new AppUrlRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(command.getAppId());
+        record.setAppType(appType);
+        record.setName(name);
+        record.setDescription(defaultIfBlank(command.getDescription(), ""));
+        record.setExpiredAt(parseAppUrlExpiredAt(command.getExpiredAt()));
+        record.setCopyright(defaultIfBlank(command.getCopyright(), ""));
+        record.setCopyrightEnable(command.isCopyrightEnable());
+        record.setPrivacyPolicy(defaultIfBlank(command.getPrivacyPolicy(), ""));
+        record.setPrivacyPolicyEnable(command.isPrivacyPolicyEnable());
+        record.setDisclaimer(defaultIfBlank(command.getDisclaimer(), ""));
+        record.setDisclaimerEnable(command.isDisclaimerEnable());
+        record.setSuffix(newAppUrlSuffix());
+        record.setStatus(true);
+        applicationRepository.saveAppUrl(record);
+    }
+
+    @Override
+    public void updateAppUrl(AppUrlUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app url update command is required");
+        }
+        if (isBlank(command.getUrlId())) {
+            throw new IllegalArgumentException("app url id is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("app url name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseAppUrlId(command.getUrlId());
+        AppUrlRecord existing = applicationRepository.findAppUrlById(userId, orgId, id);
+        if (existing == null) {
+            throw new IllegalArgumentException("app url not found");
+        }
+        String name = command.getName().trim();
+        AppUrlRecord sameName = applicationRepository.findAppUrlByName(
+                userId, orgId, existing.getAppId(), existing.getAppType(), name);
+        if (sameName != null && !id.equals(sameName.getId())) {
+            throw new IllegalArgumentException("app url name already exists");
+        }
+
+        AppUrlRecord record = new AppUrlRecord();
+        record.setId(id);
+        record.setCreatedAt(existing.getCreatedAt());
+        record.setUpdatedAt(clock.millis());
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(existing.getAppId());
+        record.setAppType(existing.getAppType());
+        record.setName(name);
+        record.setDescription(defaultIfBlank(command.getDescription(), ""));
+        record.setExpiredAt(parseAppUrlExpiredAt(command.getExpiredAt()));
+        record.setCopyright(defaultIfBlank(command.getCopyright(), ""));
+        record.setCopyrightEnable(command.isCopyrightEnable());
+        record.setPrivacyPolicy(defaultIfBlank(command.getPrivacyPolicy(), ""));
+        record.setPrivacyPolicyEnable(command.isPrivacyPolicyEnable());
+        record.setDisclaimer(defaultIfBlank(command.getDisclaimer(), ""));
+        record.setDisclaimerEnable(command.isDisclaimerEnable());
+        record.setSuffix(existing.getSuffix());
+        record.setStatus(existing.getStatus());
+        if (applicationRepository.updateAppUrl(record) == null) {
+            throw new IllegalArgumentException("app url not found");
+        }
+    }
+
+    @Override
+    public void deleteAppUrl(AppUrlDeleteCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app url delete command is required");
+        }
+        if (isBlank(command.getUrlId())) {
+            throw new IllegalArgumentException("app url id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseAppUrlId(command.getUrlId());
+        if (!applicationRepository.deleteAppUrl(userId, orgId, id)) {
+            throw new IllegalArgumentException("app url not found");
+        }
+    }
+
+    @Override
+    public void updateAppUrlStatus(AppUrlStatusCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app url status command is required");
+        }
+        if (isBlank(command.getUrlId())) {
+            throw new IllegalArgumentException("app url id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Long id = parseAppUrlId(command.getUrlId());
+        if (!applicationRepository.updateAppUrlStatus(userId, orgId, id, command.isStatus(), clock.millis())) {
+            throw new IllegalArgumentException("app url not found");
+        }
+    }
+
+    @Override
+    public List<AppUrlInfo> listAppUrls(AppUrlListQuery query) {
+        if (query == null) {
+            throw new IllegalArgumentException("app url list query is required");
+        }
+        String appType = normalizeAgentAppType(query.getAppType());
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("only agent app url is supported");
+        }
+        if (isBlank(query.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        ensureAssistantExists(userId, orgId, query.getAppId());
+        List<AppUrlRecord> records = applicationRepository.listAppUrls(userId, orgId, query.getAppId(), appType);
+        List<AppUrlInfo> result = new ArrayList<>(records.size());
+        for (AppUrlRecord record : records) {
+            result.add(toAppUrlInfo(record));
+        }
+        return result;
+    }
+
+    @Override
+    public AppUrlInfo getAppUrlBySuffix(AppUrlSuffixQuery query) {
+        if (query == null || isBlank(query.getSuffix())) {
+            throw new IllegalArgumentException("app url suffix is required");
+        }
+        AppUrlRecord record = applicationRepository.findAppUrlBySuffix(query.getSuffix());
+        if (record == null) {
+            throw new IllegalArgumentException("app url not found");
+        }
+        if (!booleanValue(record.getStatus())) {
+            throw new IllegalArgumentException("app url disabled");
+        }
+        Long expiredAt = record.getExpiredAt();
+        if (expiredAt != null && expiredAt > 0 && clock.millis() > expiredAt) {
+            throw new IllegalArgumentException("app url expired");
+        }
+        return toAppUrlInfo(record);
+    }
+
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.APP, "App Service", "app");
     }
 
     private AppRecord ensureAssistantExists(String userId, String orgId, String assistantId) {
         AppRecord record = applicationRepository.findAssistant(userId, orgId, assistantId);
+        if (record == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        return record;
+    }
+
+    private AppRecord ensureConversationAssistantExists(String userId, String orgId, String assistantId) {
+        AppRecord record = applicationRepository.findAssistant(userId, orgId, assistantId);
+        if (record == null) {
+            record = applicationRepository.findAssistantByOrg(orgId, assistantId);
+        }
         if (record == null) {
             throw new IllegalArgumentException("assistant draft not found");
         }
@@ -682,7 +877,7 @@ public class AppServiceImpl implements AppService {
         }
         String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
-        ensureAssistantExists(userId, orgId, query.getAssistantId());
+        ensureConversationAssistantExists(userId, orgId, query.getAssistantId());
         return new ConversationListContext(
                 query.getAssistantId(),
                 normalizeConversationType(query.getConversationType(), defaultType),
@@ -739,6 +934,54 @@ public class AppServiceImpl implements AppService {
         item.put("subConversationList", listOrDefault(record.getSubConversationListJson()));
         item.put("responseFiles", listOrDefault(record.getResponseFilesJson()));
         return item;
+    }
+
+    private AppUrlInfo toAppUrlInfo(AppUrlRecord record) {
+        AppUrlInfo info = new AppUrlInfo();
+        info.setUrlId(record.getId() == null ? "" : String.valueOf(record.getId()));
+        info.setAppId(record.getAppId());
+        info.setAppType(record.getAppType());
+        info.setName(defaultIfBlank(record.getName(), ""));
+        info.setCreatedAt(formatMillis(record.getCreatedAt()));
+        info.setExpiredAt(formatOptionalMillis(record.getExpiredAt()));
+        info.setCopyright(defaultIfBlank(record.getCopyright(), ""));
+        info.setCopyrightEnable(booleanValue(record.getCopyrightEnable()));
+        info.setPrivacyPolicy(defaultIfBlank(record.getPrivacyPolicy(), ""));
+        info.setPrivacyPolicyEnable(booleanValue(record.getPrivacyPolicyEnable()));
+        info.setDisclaimer(defaultIfBlank(record.getDisclaimer(), ""));
+        info.setDisclaimerEnable(booleanValue(record.getDisclaimerEnable()));
+        info.setSuffix(defaultIfBlank(record.getSuffix(), ""));
+        info.setStatus(booleanValue(record.getStatus()));
+        info.setUserId(defaultIfBlank(record.getUserId(), ""));
+        info.setOrgId(defaultIfBlank(record.getOrgId(), ""));
+        info.setDescription(defaultIfBlank(record.getDescription(), ""));
+        return info;
+    }
+
+    private long parseAppUrlExpiredAt(String value) {
+        if (isBlank(value)) {
+            return 0L;
+        }
+        try {
+            return LocalDateTime.parse(value.trim(), DATE_TIME_INPUT_FORMATTER)
+                    .atZone(APP_ZONE)
+                    .toInstant()
+                    .toEpochMilli();
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("app url expiredAt format is invalid", ex);
+        }
+    }
+
+    private Long parseAppUrlId(String value) {
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("app url id is invalid", ex);
+        }
+    }
+
+    private boolean booleanValue(Boolean value) {
+        return value != null && value;
     }
 
     private String normalizeConversationType(String value, String defaultValue) {
@@ -1087,6 +1330,13 @@ public class AppServiceImpl implements AppService {
         return DATE_TIME_FORMATTER.format(Instant.ofEpochMilli(millis));
     }
 
+    private String formatOptionalMillis(Long millis) {
+        if (millis == null || millis <= 0) {
+            return "";
+        }
+        return formatMillis(millis);
+    }
+
     private String newAssistantId() {
         return "assistant-" + UUID.randomUUID().toString().replace("-", "");
     }
@@ -1097,6 +1347,16 @@ public class AppServiceImpl implements AppService {
 
     private String newDetailId() {
         return "detail-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newAppUrlSuffix() {
+        for (int i = 0; i < 8; i++) {
+            String suffix = UUID.randomUUID().toString().replace("-", "");
+            if (applicationRepository.findAppUrlBySuffix(suffix) == null) {
+                return suffix;
+            }
+        }
+        throw new IllegalStateException("app url suffix generation failed");
     }
 
     private String toJsonOrNull(Object value) {

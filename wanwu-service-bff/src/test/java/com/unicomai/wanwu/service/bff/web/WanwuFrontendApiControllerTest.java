@@ -18,6 +18,12 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
+import com.unicomai.wanwu.api.app.dto.AppUrlListQuery;
+import com.unicomai.wanwu.api.app.dto.AppUrlStatusCommand;
+import com.unicomai.wanwu.api.app.dto.AppUrlUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionInfo;
 import com.unicomai.wanwu.api.app.dto.AppVersionListResult;
 import com.unicomai.wanwu.api.app.dto.AppVersionQuery;
@@ -726,6 +732,62 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void appOpenUrlManagementRoutesMapFrontendPayloads() throws Exception {
+        when(appService.listAppUrls(any(AppUrlListQuery.class)))
+                .thenReturn(Collections.singletonList(appUrlInfo("1", "assistant-001", "suffix-001")));
+
+        mockMvc.perform(post("/user/api/v1/appspace/app/openurl")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"name\":\"Public demo\",\"description\":\"open desc\",\"expiredAt\":\"2026-07-01 12:30:00\",\"copyright\":\"Copyright\",\"copyrightEnable\":true,\"privacyPolicy\":\"Privacy\",\"privacyPolicyEnable\":true,\"disclaimer\":\"Disclaimer\",\"disclaimerEnable\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/appspace/app/openurl/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appId", "assistant-001")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data[0].urlId").value("1"))
+                .andExpect(jsonPath("$.data[0].suffix").value("/service/url/openurl/v1/agent/suffix-001"));
+
+        mockMvc.perform(put("/user/api/v1/appspace/app/openurl")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlId\":\"1\",\"name\":\"Updated demo\",\"description\":\"updated desc\",\"expiredAt\":\"2026-07-02 12:30:00\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(put("/user/api/v1/appspace/app/openurl/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlId\":\"1\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/app/openurl")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlId\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        org.mockito.ArgumentCaptor<AppUrlCreateCommand> createCaptor = forClass(AppUrlCreateCommand.class);
+        verify(appService).createAppUrl(createCaptor.capture());
+        assertEquals("assistant-001", createCaptor.getValue().getAppId());
+        assertEquals("agent", createCaptor.getValue().getAppType());
+        assertEquals("Public demo", createCaptor.getValue().getName());
+        assertEquals("dev-admin", createCaptor.getValue().getUserId());
+        assertEquals("default-org", createCaptor.getValue().getOrgId());
+
+        verify(appService).listAppUrls(any(AppUrlListQuery.class));
+        verify(appService).updateAppUrl(any(AppUrlUpdateCommand.class));
+        verify(appService).updateAppUrlStatus(any(AppUrlStatusCommand.class));
+        verify(appService).deleteAppUrl(any(AppUrlDeleteCommand.class));
+    }
+
+    @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
         mockMvc.perform(get("/user/api/v1/model/select/llm"))
                 .andExpect(status().isOk())
@@ -747,13 +809,13 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
-    public void appOpenUrlReturnsEmptyStringUntilPublishIsImplemented() throws Exception {
+    public void appOpenUrlReturnsOpenUrlPublicPrefix() throws Exception {
         mockMvc.perform(get("/user/api/v1/appspace/app/url")
                         .param("appId", "assistant-001")
                         .param("appType", "agent"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data").value(""));
+                .andExpect(jsonPath("$.data").value("/service/url/openurl/v1/agent"));
     }
 
     private LoginResult devAdminResult() {
@@ -809,6 +871,22 @@ public class WanwuFrontendApiControllerTest {
         info.setDesc(desc);
         info.setCreatedAt(createdAt);
         info.setPublishType(publishType);
+        return info;
+    }
+
+    private AppUrlInfo appUrlInfo(String urlId, String appId, String suffix) {
+        AppUrlInfo info = new AppUrlInfo();
+        info.setUrlId(urlId);
+        info.setAppId(appId);
+        info.setAppType("agent");
+        info.setName("Public demo");
+        info.setCreatedAt("2026-06-29 10:00:00");
+        info.setExpiredAt("2026-07-01 12:30:00");
+        info.setSuffix(suffix);
+        info.setStatus(true);
+        info.setUserId("dev-admin");
+        info.setOrgId("default-org");
+        info.setDescription("open desc");
         return info;
     }
 }
