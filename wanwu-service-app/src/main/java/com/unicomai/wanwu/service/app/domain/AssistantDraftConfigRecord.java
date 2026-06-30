@@ -18,6 +18,11 @@ public class AssistantDraftConfigRecord {
     private String rerankConfigJson;
     private String recommendConfigJson;
     private String recommendQuestionsJson;
+    private String workflowInfosJson;
+    private String mcpInfosJson;
+    private String toolInfosJson;
+    private String skillInfosJson;
+    private String multiAgentInfosJson;
 
     public Long getId() {
         return id;
@@ -145,5 +150,45 @@ public class AssistantDraftConfigRecord {
 
     public void setRecommendQuestionsJson(String recommendQuestionsJson) {
         this.recommendQuestionsJson = recommendQuestionsJson;
+    }
+
+    public String getWorkflowInfosJson() {
+        return workflowInfosJson;
+    }
+
+    public void setWorkflowInfosJson(String workflowInfosJson) {
+        this.workflowInfosJson = workflowInfosJson;
+    }
+
+    public String getMcpInfosJson() {
+        return mcpInfosJson;
+    }
+
+    public void setMcpInfosJson(String mcpInfosJson) {
+        this.mcpInfosJson = mcpInfosJson;
+    }
+
+    public String getToolInfosJson() {
+        return toolInfosJson;
+    }
+
+    public void setToolInfosJson(String toolInfosJson) {
+        this.toolInfosJson = toolInfosJson;
+    }
+
+    public String getSkillInfosJson() {
+        return skillInfosJson;
+    }
+
+    public void setSkillInfosJson(String skillInfosJson) {
+        this.skillInfosJson = skillInfosJson;
+    }
+
+    public String getMultiAgentInfosJson() {
+        return multiAgentInfosJson;
+    }
+
+    public void setMultiAgentInfosJson(String multiAgentInfosJson) {
+        this.multiAgentInfosJson = multiAgentInfosJson;
     }
 }

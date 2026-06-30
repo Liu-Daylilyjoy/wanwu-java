@@ -16,6 +16,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
@@ -1062,6 +1063,123 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void assistantExtensionRoutesMapFrontendConfigRequests() throws Exception {
+        Map<String, Object> assistantSelectItem = new LinkedHashMap<>();
+        assistantSelectItem.put("appId", "assistant-child");
+        assistantSelectItem.put("appType", "agent");
+        assistantSelectItem.put("name", "Child Agent");
+        when(appService.listAssistants(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(assistantSelectItem)));
+        when(appService.listAssistantToolSelect(anyString(), anyString()))
+                .thenReturn(listResult(toolSelect("builtin-weather", "Weather Tool", "builtin")));
+        when(appService.listAssistantToolActions(any(AssistantResourceCommand.class)))
+                .thenReturn(actionList("get_weather"));
+        when(appService.getAssistantToolActionDetail(any(AssistantResourceCommand.class)))
+                .thenReturn(actionDetail("get_weather"));
+        when(appService.listAssistantMcpSelect(anyString(), anyString()))
+                .thenReturn(listResult(mcpSelect("mcp-001", "Search MCP", "mcp")));
+        when(appService.listAssistantMcpActions(any(AssistantResourceCommand.class)))
+                .thenReturn(actionList("search"));
+        when(appService.listAssistantWorkflowSelect(anyString(), anyString(), anyString()))
+                .thenReturn(listResult(workflowSelect("workflow-001", "Workflow One")));
+
+        mockMvc.perform(get("/user/api/v1/assistant/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-child"));
+        mockMvc.perform(get("/user/api/v1/tool/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolId").value("builtin-weather"));
+        mockMvc.perform(get("/user/api/v1/tool/action/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolId", "builtin-weather")
+                        .param("toolType", "builtin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actions[0].name").value("get_weather"));
+        mockMvc.perform(get("/user/api/v1/tool/action/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolId", "builtin-weather")
+                        .param("toolType", "builtin")
+                        .param("actionName", "get_weather"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.action.name").value("get_weather"));
+        mockMvc.perform(get("/user/api/v1/mcp/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].mcpId").value("mcp-001"));
+        mockMvc.perform(get("/user/api/v1/mcp/action/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolId", "mcp-001")
+                        .param("toolType", "mcp"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actions[0].name").value("search"));
+        mockMvc.perform(get("/user/api/v1/workflow/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].workFlowId").value("workflow-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/tool/workflow")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"workFlowId\":\"workflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/assistant/tool/workflow/switch")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"workFlowId\":\"workflow-001\",\"enable\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/assistant/tool/mcp")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"mcpId\":\"mcp-001\",\"mcpType\":\"mcp\",\"actionName\":\"search\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/assistant/tool")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"toolId\":\"builtin-weather\",\"toolType\":\"builtin\",\"actionName\":\"get_weather\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/assistant/tool/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"toolId\":\"builtin-weather\",\"toolConfig\":{\"rerankId\":\"rerank-001\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/assistant/skill")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"skillId\":\"builtin-summary\",\"skillType\":\"builtin\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/user/api/v1/assistant/multi-agent")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"agentId\":\"assistant-child\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        org.mockito.ArgumentCaptor<AssistantResourceCommand> workflowCaptor = forClass(AssistantResourceCommand.class);
+        verify(appService).addAssistantWorkflow(workflowCaptor.capture());
+        assertEquals("assistant-001", workflowCaptor.getValue().getAssistantId());
+        assertEquals("workflow-001", workflowCaptor.getValue().getResourceId());
+
+        verify(appService).switchAssistantWorkflow(any(AssistantResourceCommand.class));
+        verify(appService).addAssistantMcp(any(AssistantResourceCommand.class));
+        verify(appService).addAssistantTool(any(AssistantResourceCommand.class));
+        verify(appService).configureAssistantTool(any(AssistantResourceCommand.class));
+        verify(appService).addAssistantSkill(any(AssistantResourceCommand.class));
+        verify(appService).addAssistantAgent(any(AssistantResourceCommand.class));
+        verify(appService).listAssistantToolSelect("dev-admin", "default-org");
+        verify(appService).listAssistantMcpSelect("dev-admin", "default-org");
+        verify(appService).listAssistantWorkflowSelect("dev-admin", "default-org", "");
+    }
+
+    @Test
     public void createAssistantConversationReturnsConversationIdAndMapsRequest() throws Exception {
         when(appService.createAssistantConversation(any(AssistantConversationCreateCommand.class)))
                 .thenReturn(new AssistantConversationCreateResult("conversation-001"));
@@ -1887,6 +2005,75 @@ public class WanwuFrontendApiControllerTest {
         info.setFunctionCalling("toolCall");
         info.setThinkingSupport("support");
         return info;
+    }
+
+    private Map<String, Object> listResult(Map<String, Object> item) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", Collections.singletonList(item));
+        result.put("total", 1);
+        return result;
+    }
+
+    private Map<String, Object> toolSelect(String toolId, String name, String type) {
+        Map<String, Object> tool = new LinkedHashMap<>();
+        tool.put("uniqueId", type + "_" + toolId);
+        tool.put("toolId", toolId);
+        tool.put("toolName", name);
+        tool.put("toolType", type);
+        tool.put("desc", "Development tool");
+        tool.put("needApiKeyInput", false);
+        tool.put("apiKey", "");
+        tool.put("avatar", Collections.singletonMap("path", ""));
+        return tool;
+    }
+
+    private Map<String, Object> mcpSelect(String mcpId, String name, String type) {
+        Map<String, Object> mcp = new LinkedHashMap<>();
+        mcp.put("uniqueId", type + "_" + mcpId);
+        mcp.put("mcpId", mcpId);
+        mcp.put("name", name);
+        mcp.put("type", type);
+        mcp.put("toolId", mcpId);
+        mcp.put("toolName", name);
+        mcp.put("toolType", type);
+        mcp.put("description", "Development MCP");
+        mcp.put("avatar", Collections.singletonMap("path", ""));
+        return mcp;
+    }
+
+    private Map<String, Object> workflowSelect(String workflowId, String name) {
+        Map<String, Object> workflow = new LinkedHashMap<>();
+        workflow.put("uniqueId", "workflow_" + workflowId);
+        workflow.put("workFlowId", workflowId);
+        workflow.put("appId", workflowId);
+        workflow.put("appType", "workflow");
+        workflow.put("name", name);
+        workflow.put("desc", "Development workflow");
+        workflow.put("avatar", Collections.singletonMap("path", ""));
+        return workflow;
+    }
+
+    private Map<String, Object> actionList(String actionName) {
+        Map<String, Object> action = action(actionName);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("actions", Collections.singletonList(action));
+        return result;
+    }
+
+    private Map<String, Object> actionDetail(String actionName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("needApiKeyInput", false);
+        result.put("apiKey", "");
+        result.put("action", action(actionName));
+        return result;
+    }
+
+    private Map<String, Object> action(String actionName) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("name", actionName);
+        action.put("description", "Development action");
+        action.put("inputSchema", Collections.singletonMap("type", "object"));
+        return action;
     }
 
     private Map<String, Object> platformConfig() {

@@ -19,6 +19,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
@@ -92,6 +93,9 @@ public class AppServiceImpl implements AppService {
     private static final Pattern VERSION_PATTERN = Pattern.compile("^v\\d+\\.\\d+\\.\\d+$");
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
+    private static final TypeReference<List<Map<String, Object>>> MAP_LIST_TYPE =
+            new TypeReference<List<Map<String, Object>>>() {
+            };
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<List<String>>() {
     };
     private static final TypeReference<List<Object>> OBJECT_LIST_TYPE = new TypeReference<List<Object>>() {
@@ -229,6 +233,9 @@ public class AppServiceImpl implements AppService {
         record.setRerankConfigJson(toJsonOrNull(command.getRerankConfig()));
         record.setRecommendConfigJson(toJsonOrNull(command.getRecommendConfig()));
         record.setRecommendQuestionsJson(toJsonOrNull(command.getRecommendQuestion()));
+        preserveAssistantResources(
+                applicationRepository.findAssistantConfig(userId, orgId, command.getAssistantId()),
+                record);
         applicationRepository.saveAssistantConfig(record);
     }
 
@@ -666,6 +673,252 @@ public class AppServiceImpl implements AppService {
         draft.put("newAgent", false);
         draft.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
         return draft;
+    }
+
+    @Override
+    public void addAssistantWorkflow(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getWorkflowInfosJson());
+        upsertResource(list, workflowItem(command), "workFlowId");
+        config.setWorkflowInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void deleteAssistantWorkflow(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getWorkflowInfosJson());
+        removeResource(list, command, "workFlowId");
+        config.setWorkflowInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void switchAssistantWorkflow(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getWorkflowInfosJson());
+        switchResource(list, command, "workFlowId");
+        config.setWorkflowInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void addAssistantMcp(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMcpInfosJson());
+        upsertResource(list, mcpItem(command), "mcpId", "mcpType", "actionName");
+        config.setMcpInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void deleteAssistantMcp(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMcpInfosJson());
+        removeResource(list, command, "mcpId", "mcpType", "actionName");
+        config.setMcpInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void switchAssistantMcp(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMcpInfosJson());
+        switchResource(list, command, "mcpId", "mcpType", "actionName");
+        config.setMcpInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void addAssistantTool(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getToolInfosJson());
+        upsertResource(list, toolItem(command), "toolId", "toolType", "actionName");
+        config.setToolInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void deleteAssistantTool(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getToolInfosJson());
+        removeResource(list, command, "toolId", "toolType", "actionName");
+        config.setToolInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void switchAssistantTool(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getToolInfosJson());
+        switchResource(list, command, "toolId", "toolType", "actionName");
+        config.setToolInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void configureAssistantTool(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getToolInfosJson());
+        String toolId = requireResourceId(command);
+        Map<String, Object> found = null;
+        for (Map<String, Object> item : list) {
+            if (toolId.equals(stringValue(item.get("toolId")))) {
+                found = item;
+                break;
+            }
+        }
+        if (found == null) {
+            found = toolItem(command);
+            list.add(found);
+        }
+        found.put("toolConfig", command.getToolConfig() == null
+                ? Collections.<String, Object>emptyMap()
+                : command.getToolConfig());
+        config.setToolInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void addAssistantSkill(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getSkillInfosJson());
+        upsertResource(list, skillItem(command), "skillId", "skillType");
+        config.setSkillInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void deleteAssistantSkill(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getSkillInfosJson());
+        removeResource(list, command, "skillId", "skillType");
+        config.setSkillInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void switchAssistantSkill(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getSkillInfosJson());
+        switchResource(list, command, "skillId", "skillType");
+        config.setSkillInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void addAssistantAgent(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMultiAgentInfosJson());
+        upsertResource(list, agentItem(command), "agentId");
+        config.setMultiAgentInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void deleteAssistantAgent(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMultiAgentInfosJson());
+        removeResource(list, command, "agentId");
+        config.setMultiAgentInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void switchAssistantAgent(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMultiAgentInfosJson());
+        switchResource(list, command, "agentId");
+        config.setMultiAgentInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public void updateAssistantAgentConfig(AssistantResourceCommand command) {
+        AssistantDraftConfigRecord config = resourceConfig(command);
+        List<Map<String, Object>> list = listMapOrDefault(config.getMultiAgentInfosJson());
+        String agentId = requireResourceId(command);
+        for (Map<String, Object> item : list) {
+            if (agentId.equals(stringValue(item.get("agentId")))) {
+                item.put("desc", defaultIfBlank(command.getDesc(), stringValue(item.get("desc"))));
+            }
+        }
+        config.setMultiAgentInfosJson(toJsonOrNull(list));
+        saveResourceConfig(config);
+    }
+
+    @Override
+    public Map<String, Object> listAssistantToolSelect(String userId, String orgId) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Map<String, Object> weather = new LinkedHashMap<>();
+        weather.put("uniqueId", "builtin_builtin-weather");
+        weather.put("toolId", "builtin-weather");
+        weather.put("toolName", "Weather Tool");
+        weather.put("toolType", "builtin");
+        weather.put("desc", "Development built-in tool for assistant configuration.");
+        weather.put("needApiKeyInput", false);
+        weather.put("apiKey", "");
+        weather.put("avatar", emptyAvatar());
+        list.add(weather);
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> listAssistantToolActions(AssistantResourceCommand command) {
+        return actionList(defaultIfBlank(command == null ? "" : command.getActionName(), "get_weather"));
+    }
+
+    @Override
+    public Map<String, Object> getAssistantToolActionDetail(AssistantResourceCommand command) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("needApiKeyInput", false);
+        result.put("apiKey", "");
+        result.put("action", toolAction(defaultIfBlank(command == null ? "" : command.getActionName(), "get_weather")));
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> listAssistantMcpSelect(String userId, String orgId) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Map<String, Object> search = new LinkedHashMap<>();
+        search.put("uniqueId", "mcp_mcp-search");
+        search.put("mcpId", "mcp-search");
+        search.put("mcpSquareId", "");
+        search.put("name", "Search MCP");
+        search.put("type", "mcp");
+        search.put("toolId", "mcp-search");
+        search.put("toolName", "Search MCP");
+        search.put("toolType", "mcp");
+        search.put("description", "Development MCP entry for assistant configuration.");
+        search.put("serverFrom", "local");
+        search.put("serverUrl", "");
+        search.put("streamableUrl", "");
+        search.put("transport", "streamable");
+        search.put("avatar", emptyAvatar());
+        list.add(search);
+        return listResult(list);
+    }
+
+    @Override
+    public Map<String, Object> listAssistantMcpActions(AssistantResourceCommand command) {
+        return actionList(defaultIfBlank(command == null ? "" : command.getActionName(), "search"));
+    }
+
+    @Override
+    public Map<String, Object> listAssistantWorkflowSelect(String userId, String orgId, String name) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Map<String, Object> workflow = new LinkedHashMap<>();
+        workflow.put("uniqueId", "workflow_workflow-demo");
+        workflow.put("workFlowId", "workflow-demo");
+        workflow.put("appId", "workflow-demo");
+        workflow.put("appType", "workflow");
+        workflow.put("name", "Demo Workflow");
+        workflow.put("desc", "Development workflow entry for assistant configuration.");
+        workflow.put("avatar", emptyAvatar());
+        if (isBlank(name) || "Demo Workflow".contains(name) || "workflow-demo".contains(name)) {
+            list.add(workflow);
+        }
+        return listResult(list);
     }
 
     @Override
@@ -1294,6 +1547,243 @@ public class AppServiceImpl implements AppService {
         return "Demo response from " + defaultIfBlank(assistant.getName(), "Agent") + ": " + prompt;
     }
 
+    private AssistantDraftConfigRecord resourceConfig(AssistantResourceCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant resource command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord assistant = applicationRepository.findAssistant(userId, orgId, command.getAssistantId());
+        if (assistant == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        AssistantDraftConfigRecord config = applicationRepository.findAssistantConfig(
+                userId, orgId, command.getAssistantId());
+        if (config == null) {
+            config = newConfigRecord(assistant, clock.millis());
+        }
+        return config;
+    }
+
+    private AssistantDraftConfigRecord newConfigRecord(AppRecord assistant, long now) {
+        AssistantDraftConfigRecord config = new AssistantDraftConfigRecord();
+        config.setCreatedAt(now);
+        config.setUpdatedAt(now);
+        config.setUserId(assistant.getUserId());
+        config.setOrgId(assistant.getOrgId());
+        config.setAssistantId(assistant.getAppId());
+        config.setPrologue("");
+        config.setInstructions("");
+        config.setWorkflowInfosJson("[]");
+        config.setMcpInfosJson("[]");
+        config.setToolInfosJson("[]");
+        config.setSkillInfosJson("[]");
+        config.setMultiAgentInfosJson("[]");
+        return config;
+    }
+
+    private void saveResourceConfig(AssistantDraftConfigRecord config) {
+        if (config.getCreatedAt() == null) {
+            config.setCreatedAt(clock.millis());
+        }
+        config.setUpdatedAt(clock.millis());
+        applicationRepository.saveAssistantConfig(config);
+    }
+
+    private void preserveAssistantResources(AssistantDraftConfigRecord source, AssistantDraftConfigRecord target) {
+        target.setWorkflowInfosJson(source == null ? "[]" : source.getWorkflowInfosJson());
+        target.setMcpInfosJson(source == null ? "[]" : source.getMcpInfosJson());
+        target.setToolInfosJson(source == null ? "[]" : source.getToolInfosJson());
+        target.setSkillInfosJson(source == null ? "[]" : source.getSkillInfosJson());
+        target.setMultiAgentInfosJson(source == null ? "[]" : source.getMultiAgentInfosJson());
+    }
+
+    private Map<String, Object> workflowItem(AssistantResourceCommand command) {
+        String workflowId = requireResourceId(command);
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("uniqueId", uniqueId("workflow", workflowId));
+        item.put("workFlowId", workflowId);
+        item.put("apiName", workflowId);
+        item.put("enable", true);
+        item.put("avatar", emptyAvatar());
+        item.put("name", workflowId);
+        item.put("workFlowDesc", "");
+        return item;
+    }
+
+    private Map<String, Object> mcpItem(AssistantResourceCommand command) {
+        String mcpId = requireResourceId(command);
+        String mcpType = defaultIfBlank(command.getResourceType(), "mcp");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("uniqueId", uniqueId(mcpType, mcpId));
+        item.put("mcpId", mcpId);
+        item.put("mcpType", mcpType);
+        item.put("mcpName", titleFromId(mcpId));
+        item.put("actionName", defaultIfBlank(command.getActionName(), ""));
+        item.put("enable", true);
+        item.put("valid", true);
+        item.put("avatar", emptyAvatar());
+        return item;
+    }
+
+    private Map<String, Object> toolItem(AssistantResourceCommand command) {
+        String toolId = requireResourceId(command);
+        String toolType = defaultIfBlank(command.getResourceType(), "builtin");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("uniqueId", uniqueId(toolType, toolId));
+        item.put("toolId", toolId);
+        item.put("toolType", toolType);
+        item.put("toolName", titleFromId(toolId));
+        item.put("actionName", defaultIfBlank(command.getActionName(), ""));
+        item.put("enable", true);
+        item.put("valid", true);
+        item.put("toolConfig", command.getToolConfig() == null
+                ? Collections.<String, Object>emptyMap()
+                : command.getToolConfig());
+        item.put("avatar", emptyAvatar());
+        return item;
+    }
+
+    private Map<String, Object> skillItem(AssistantResourceCommand command) {
+        String skillId = requireResourceId(command);
+        String skillType = defaultIfBlank(command.getResourceType(), "builtin");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("skillId", skillId);
+        item.put("skillType", skillType);
+        item.put("skillName", titleFromId(skillId));
+        item.put("author", "admin");
+        item.put("enable", true);
+        item.put("valid", true);
+        item.put("avatar", emptyAvatar());
+        return item;
+    }
+
+    private Map<String, Object> agentItem(AssistantResourceCommand command) {
+        String agentId = requireResourceId(command);
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord child = applicationRepository.findAssistant(userId, orgId, agentId);
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("agentId", agentId);
+        item.put("name", child == null ? agentId : child.getName());
+        item.put("desc", defaultIfBlank(command.getDesc(), child == null ? "" : defaultIfBlank(child.getDesc(), "")));
+        item.put("enable", true);
+        item.put("avatar", child == null ? emptyAvatar() : avatar(child));
+        return item;
+    }
+
+    private String requireResourceId(AssistantResourceCommand command) {
+        if (command == null || isBlank(command.getResourceId())) {
+            throw new IllegalArgumentException("assistant resource id is required");
+        }
+        return command.getResourceId().trim();
+    }
+
+    private void upsertResource(List<Map<String, Object>> list, Map<String, Object> item, String... keys) {
+        for (int i = 0; i < list.size(); i++) {
+            if (matches(list.get(i), item, keys)) {
+                list.set(i, item);
+                return;
+            }
+        }
+        list.add(item);
+    }
+
+    private void removeResource(List<Map<String, Object>> list, AssistantResourceCommand command, String... keys) {
+        Map<String, Object> criteria = criteria(command, keys);
+        for (int i = list.size() - 1; i >= 0; i--) {
+            if (matches(list.get(i), criteria, keys)) {
+                list.remove(i);
+            }
+        }
+    }
+
+    private void switchResource(List<Map<String, Object>> list, AssistantResourceCommand command, String... keys) {
+        Map<String, Object> criteria = criteria(command, keys);
+        for (Map<String, Object> item : list) {
+            if (matches(item, criteria, keys)) {
+                item.put("enable", command.getEnable() == null ? true : command.getEnable());
+            }
+        }
+    }
+
+    private Map<String, Object> criteria(AssistantResourceCommand command, String... keys) {
+        Map<String, Object> criteria = new LinkedHashMap<>();
+        for (String key : keys) {
+            criteria.put(key, commandValue(command, key));
+        }
+        return criteria;
+    }
+
+    private boolean matches(Map<String, Object> item, Map<String, Object> criteria, String... keys) {
+        for (String key : keys) {
+            String expected = stringValue(criteria.get(key));
+            if (!expected.equals(stringValue(item.get(key)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Object commandValue(AssistantResourceCommand command, String key) {
+        if ("mcpType".equals(key) || "toolType".equals(key) || "skillType".equals(key)) {
+            return defaultIfBlank(command.getResourceType(), "builtin");
+        }
+        if ("actionName".equals(key)) {
+            return defaultIfBlank(command.getActionName(), "");
+        }
+        return requireResourceId(command);
+    }
+
+    private Map<String, Object> listResult(List<Map<String, Object>> list) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", list);
+        result.put("total", list.size());
+        return result;
+    }
+
+    private Map<String, Object> actionList(String actionName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("actions", Collections.singletonList(toolAction(actionName)));
+        return result;
+    }
+
+    private Map<String, Object> toolAction(String actionName) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("name", actionName);
+        action.put("description", "Development action");
+        action.put("inputSchema", Collections.singletonMap("type", "object"));
+        return action;
+    }
+
+    private String uniqueId(String type, String id) {
+        if (isBlank(type) || isBlank(id)) {
+            return "";
+        }
+        return type + "_" + id;
+    }
+
+    private String titleFromId(String id) {
+        if (isBlank(id)) {
+            return "";
+        }
+        String normalized = id.replace('-', ' ').replace('_', ' ').trim();
+        if (normalized.isEmpty()) {
+            return id;
+        }
+        return normalized.substring(0, 1).toUpperCase() + normalized.substring(1);
+    }
+
+    private Map<String, Object> emptyAvatar() {
+        Map<String, Object> avatar = new LinkedHashMap<>();
+        avatar.put("key", "");
+        avatar.put("path", "");
+        return avatar;
+    }
+
     private Map<String, Object> toFrontendCard(AppRecord record) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("uniqueId", record.getAppType() + "_" + record.getAppId());
@@ -1337,6 +1827,11 @@ public class AppServiceImpl implements AppService {
                 : stringListOrDefault(config.getRecommendQuestionsJson(), Collections.<String>emptyList()));
         item.put("safetyConfig", config == null ? null : nullableMap(config.getSafetyConfigJson()));
         item.put("recommendConfig", config == null ? null : nullableMap(config.getRecommendConfigJson()));
+        item.put("workFlowInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getWorkflowInfosJson()));
+        item.put("mcpInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getMcpInfosJson()));
+        item.put("toolInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getToolInfosJson()));
+        item.put("skillInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getSkillInfosJson()));
+        item.put("multiAgentInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getMultiAgentInfosJson()));
         return item;
     }
 
@@ -1383,6 +1878,11 @@ public class AppServiceImpl implements AppService {
         copied.setRerankConfigJson(source.getRerankConfigJson());
         copied.setRecommendConfigJson(source.getRecommendConfigJson());
         copied.setRecommendQuestionsJson(source.getRecommendQuestionsJson());
+        copied.setWorkflowInfosJson(source.getWorkflowInfosJson());
+        copied.setMcpInfosJson(source.getMcpInfosJson());
+        copied.setToolInfosJson(source.getToolInfosJson());
+        copied.setSkillInfosJson(source.getSkillInfosJson());
+        copied.setMultiAgentInfosJson(source.getMultiAgentInfosJson());
         return copied;
     }
 
@@ -1526,6 +2026,11 @@ public class AppServiceImpl implements AppService {
         config.setRerankConfigJson(toJsonOrNull(snapshotDraft.get("rerankConfig")));
         config.setRecommendConfigJson(toJsonOrNull(snapshotDraft.get("recommendConfig")));
         config.setRecommendQuestionsJson(toJsonOrNull(snapshotDraft.get("recommendQuestion")));
+        config.setWorkflowInfosJson(toJsonOrNull(snapshotDraft.get("workFlowInfos")));
+        config.setMcpInfosJson(toJsonOrNull(snapshotDraft.get("mcpInfos")));
+        config.setToolInfosJson(toJsonOrNull(snapshotDraft.get("toolInfos")));
+        config.setSkillInfosJson(toJsonOrNull(snapshotDraft.get("skillInfos")));
+        config.setMultiAgentInfosJson(toJsonOrNull(snapshotDraft.get("multiAgentInfos")));
         return config;
     }
 
@@ -1704,6 +2209,22 @@ public class AppServiceImpl implements AppService {
         } catch (Exception ex) {
             throw new IllegalStateException("assistant conversation detail is invalid", ex);
         }
+    }
+
+    private List<Map<String, Object>> listMapOrDefault(String json) {
+        if (isBlank(json)) {
+            return new ArrayList<>();
+        }
+        try {
+            List<Map<String, Object>> list = objectMapper.readValue(json, MAP_LIST_TYPE);
+            return list == null ? new ArrayList<Map<String, Object>>() : list;
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant draft resource config is invalid", ex);
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String defaultIfBlank(String value, String defaultValue) {

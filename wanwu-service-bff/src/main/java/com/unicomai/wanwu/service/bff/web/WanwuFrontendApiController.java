@@ -18,6 +18,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
@@ -1034,14 +1035,229 @@ public class WanwuFrontendApiController {
     @GetMapping({
             "/prompt/custom/list",
             "/prompt/template/list",
-            "/mcp/select",
-            "/workflow/select",
             "/safe/sensitive/table/select",
-            "/tool/select",
             "/agent/skill/select",
     })
     public FrontendResponse<Map<String, Object>> emptySelectResult() {
         return FrontendResponse.ok(emptyListResult());
+    }
+
+    @GetMapping("/assistant/select")
+    public FrontendResponse<ApplicationListResult> selectAssistant(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistants(
+                new ApplicationListQuery(AGENT_APP_TYPE, defaultIfBlank(name, ""),
+                        userContext.getUserId(), userContext.getOrgId())));
+    }
+
+    @GetMapping("/tool/select")
+    public FrontendResponse<Map<String, Object>> selectAssistantTools(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistantToolSelect(
+                userContext.getUserId(), userContext.getOrgId()));
+    }
+
+    @GetMapping("/tool/action/list")
+    public FrontendResponse<Map<String, Object>> listAssistantToolActions(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistantToolActions(
+                resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
+    }
+
+    @GetMapping("/tool/action/detail")
+    public FrontendResponse<Map<String, Object>> getAssistantToolActionDetail(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.getAssistantToolActionDetail(
+                resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
+    }
+
+    @GetMapping("/mcp/select")
+    public FrontendResponse<Map<String, Object>> selectAssistantMcps(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistantMcpSelect(
+                userContext.getUserId(), userContext.getOrgId()));
+    }
+
+    @GetMapping("/mcp/action/list")
+    public FrontendResponse<Map<String, Object>> listAssistantMcpActions(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistantMcpActions(
+                resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
+    }
+
+    @GetMapping("/workflow/select")
+    public FrontendResponse<Map<String, Object>> selectAssistantWorkflows(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistantWorkflowSelect(
+                userContext.getUserId(), userContext.getOrgId(), defaultIfBlank(name, "")));
+    }
+
+    @GetMapping("/assistant/action")
+    public FrontendResponse<Map<String, Object>> assistantActions() {
+        return FrontendResponse.ok(emptyListResult());
+    }
+
+    @PostMapping("/assistant/action")
+    public FrontendResponse<Map<String, Object>> createAssistantAction() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping({"/assistant/action", "/assistant/action/enable"})
+    public FrontendResponse<Map<String, Object>> updateAssistantAction() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping("/assistant/action")
+    public FrontendResponse<Map<String, Object>> deleteAssistantAction() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PostMapping("/assistant/tool/workflow")
+    public FrontendResponse<Map<String, Object>> addAssistantWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "workFlowId", null,
+                command -> appService.addAssistantWorkflow(command));
+    }
+
+    @DeleteMapping("/assistant/tool/workflow")
+    public FrontendResponse<Map<String, Object>> deleteAssistantWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "workFlowId", null,
+                command -> appService.deleteAssistantWorkflow(command));
+    }
+
+    @PutMapping("/assistant/tool/workflow/switch")
+    public FrontendResponse<Map<String, Object>> switchAssistantWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "workFlowId", null,
+                command -> appService.switchAssistantWorkflow(command));
+    }
+
+    @PostMapping("/assistant/tool/mcp")
+    public FrontendResponse<Map<String, Object>> addAssistantMcp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "mcpId", "mcpType",
+                command -> appService.addAssistantMcp(command));
+    }
+
+    @DeleteMapping("/assistant/tool/mcp")
+    public FrontendResponse<Map<String, Object>> deleteAssistantMcp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "mcpId", "mcpType",
+                command -> appService.deleteAssistantMcp(command));
+    }
+
+    @PutMapping("/assistant/tool/mcp/switch")
+    public FrontendResponse<Map<String, Object>> switchAssistantMcp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "mcpId", "mcpType",
+                command -> appService.switchAssistantMcp(command));
+    }
+
+    @PostMapping("/assistant/tool")
+    public FrontendResponse<Map<String, Object>> addAssistantTool(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "toolId", "toolType",
+                command -> appService.addAssistantTool(command));
+    }
+
+    @DeleteMapping("/assistant/tool")
+    public FrontendResponse<Map<String, Object>> deleteAssistantTool(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "toolId", "toolType",
+                command -> appService.deleteAssistantTool(command));
+    }
+
+    @PutMapping("/assistant/tool/switch")
+    public FrontendResponse<Map<String, Object>> switchAssistantTool(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "toolId", "toolType",
+                command -> appService.switchAssistantTool(command));
+    }
+
+    @PutMapping("/assistant/tool/config")
+    public FrontendResponse<Map<String, Object>> configureAssistantTool(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "toolId", "toolType",
+                command -> appService.configureAssistantTool(command));
+    }
+
+    @PostMapping("/assistant/skill")
+    public FrontendResponse<Map<String, Object>> addAssistantSkill(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "skillId", "skillType",
+                command -> appService.addAssistantSkill(command));
+    }
+
+    @DeleteMapping("/assistant/skill")
+    public FrontendResponse<Map<String, Object>> deleteAssistantSkill(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "skillId", "skillType",
+                command -> appService.deleteAssistantSkill(command));
+    }
+
+    @PutMapping("/assistant/skill/switch")
+    public FrontendResponse<Map<String, Object>> switchAssistantSkill(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "skillId", "skillType",
+                command -> appService.switchAssistantSkill(command));
+    }
+
+    @PostMapping("/assistant/multi-agent")
+    public FrontendResponse<Map<String, Object>> addAssistantAgent(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "agentId", null,
+                command -> appService.addAssistantAgent(command));
+    }
+
+    @DeleteMapping("/assistant/multi-agent")
+    public FrontendResponse<Map<String, Object>> deleteAssistantAgent(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "agentId", null,
+                command -> appService.deleteAssistantAgent(command));
+    }
+
+    @PutMapping("/assistant/multi-agent/switch")
+    public FrontendResponse<Map<String, Object>> switchAssistantAgent(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "agentId", null,
+                command -> appService.switchAssistantAgent(command));
+    }
+
+    @PutMapping("/assistant/multi-agent/config")
+    public FrontendResponse<Map<String, Object>> updateAssistantAgentConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return assistantVoidResponse(authorization, request, "agentId", null,
+                command -> appService.updateAssistantAgentConfig(command));
     }
 
     @PostMapping("/knowledge/select")
@@ -1577,6 +1793,17 @@ public class WanwuFrontendApiController {
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
+    private FrontendResponse<Map<String, Object>> assistantVoidResponse(
+            String authorization, Map<String, Object> request, String idKey, String typeKey, AssistantVoidCall call) {
+        try {
+            UserContext userContext = userContext(authorization);
+            call.execute(resourceCommand(userContext, request, idKey, typeKey));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     private FrontendResponse<Map<String, Object>> knowledgeResponse(
             String authorization, Map<?, ?> request, KnowledgeCall call) {
         try {
@@ -1611,10 +1838,41 @@ public class WanwuFrontendApiController {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    private AssistantResourceCommand resourceCommand(
+            UserContext userContext, Map<String, Object> request, String idKey, String typeKey) {
+        Map<String, Object> body = request == null ? Collections.<String, Object>emptyMap() : request;
+        AssistantResourceCommand command = new AssistantResourceCommand();
+        command.setUserId(userContext.getUserId());
+        command.setOrgId(userContext.getOrgId());
+        command.setAssistantId(stringValue(body.get("assistantId")));
+        command.setResourceId(stringValue(body.get(idKey)));
+        if (typeKey != null) {
+            command.setResourceType(stringValue(body.get(typeKey)));
+        }
+        command.setActionName(stringValue(body.get("actionName")));
+        command.setDesc(stringValue(body.get("desc")));
+        Object enable = body.get("enable");
+        if (enable instanceof Boolean) {
+            command.setEnable((Boolean) enable);
+        } else if (enable != null) {
+            command.setEnable(Boolean.parseBoolean(String.valueOf(enable)));
+        }
+        Object toolConfig = body.get("toolConfig");
+        if (toolConfig instanceof Map) {
+            command.setToolConfig((Map<String, Object>) toolConfig);
+        }
+        return command;
+    }
+
     private Map<String, Object> singleton(String key, Object value) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(key, value);
         return result;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private int intParam(Object value, int fallback) {
@@ -1637,6 +1895,10 @@ public class WanwuFrontendApiController {
 
     private interface KnowledgeVoidCall {
         void execute(UserContext userContext, Map<String, Object> request);
+    }
+
+    private interface AssistantVoidCall {
+        void execute(AssistantResourceCommand command);
     }
 
     private String extractToken(String authorization) {

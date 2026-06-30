@@ -15,6 +15,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
@@ -80,6 +81,52 @@ public interface AppService {
     Map<String, Object> getAssistantDraft(AssistantDetailQuery query);
 
     Map<String, Object> getPublishedAssistant(AssistantPublishedQuery query);
+
+    void addAssistantWorkflow(AssistantResourceCommand command);
+
+    void deleteAssistantWorkflow(AssistantResourceCommand command);
+
+    void switchAssistantWorkflow(AssistantResourceCommand command);
+
+    void addAssistantMcp(AssistantResourceCommand command);
+
+    void deleteAssistantMcp(AssistantResourceCommand command);
+
+    void switchAssistantMcp(AssistantResourceCommand command);
+
+    void addAssistantTool(AssistantResourceCommand command);
+
+    void deleteAssistantTool(AssistantResourceCommand command);
+
+    void switchAssistantTool(AssistantResourceCommand command);
+
+    void configureAssistantTool(AssistantResourceCommand command);
+
+    void addAssistantSkill(AssistantResourceCommand command);
+
+    void deleteAssistantSkill(AssistantResourceCommand command);
+
+    void switchAssistantSkill(AssistantResourceCommand command);
+
+    void addAssistantAgent(AssistantResourceCommand command);
+
+    void deleteAssistantAgent(AssistantResourceCommand command);
+
+    void switchAssistantAgent(AssistantResourceCommand command);
+
+    void updateAssistantAgentConfig(AssistantResourceCommand command);
+
+    Map<String, Object> listAssistantToolSelect(String userId, String orgId);
+
+    Map<String, Object> listAssistantToolActions(AssistantResourceCommand command);
+
+    Map<String, Object> getAssistantToolActionDetail(AssistantResourceCommand command);
+
+    Map<String, Object> listAssistantMcpSelect(String userId, String orgId);
+
+    Map<String, Object> listAssistantMcpActions(AssistantResourceCommand command);
+
+    Map<String, Object> listAssistantWorkflowSelect(String userId, String orgId, String name);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

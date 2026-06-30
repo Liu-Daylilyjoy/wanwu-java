@@ -427,6 +427,11 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         entity.setAssistantId(record.getAppId());
         entity.setPrologue("");
         entity.setInstructions("");
+        entity.setWorkflowInfosJson("[]");
+        entity.setMcpInfosJson("[]");
+        entity.setToolInfosJson("[]");
+        entity.setSkillInfosJson("[]");
+        entity.setMultiAgentInfosJson("[]");
         return entity;
     }
 
@@ -448,6 +453,11 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         entity.setRerankConfigJson(record.getRerankConfigJson());
         entity.setRecommendConfigJson(record.getRecommendConfigJson());
         entity.setRecommendQuestionsJson(record.getRecommendQuestionsJson());
+        entity.setWorkflowInfosJson(record.getWorkflowInfosJson());
+        entity.setMcpInfosJson(record.getMcpInfosJson());
+        entity.setToolInfosJson(record.getToolInfosJson());
+        entity.setSkillInfosJson(record.getSkillInfosJson());
+        entity.setMultiAgentInfosJson(record.getMultiAgentInfosJson());
         return entity;
     }
 
@@ -472,6 +482,11 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setRerankConfigJson(entity.getRerankConfigJson());
         record.setRecommendConfigJson(entity.getRecommendConfigJson());
         record.setRecommendQuestionsJson(entity.getRecommendQuestionsJson());
+        record.setWorkflowInfosJson(entity.getWorkflowInfosJson());
+        record.setMcpInfosJson(entity.getMcpInfosJson());
+        record.setToolInfosJson(entity.getToolInfosJson());
+        record.setSkillInfosJson(entity.getSkillInfosJson());
+        record.setMultiAgentInfosJson(entity.getMultiAgentInfosJson());
         return record;
     }
 

@@ -29,7 +29,7 @@ Measured from this Java repo before the full reproduction pass:
 | `openapi/router.go` | 11 | Missing |
 | `openurl/router.go` | 11 | Mostly covered for Agent OpenURL; file upload routes missing |
 | `v1/api_key.go` | 5 | Covered for create/update/delete/list/status |
-| `v1/assistant.go` | 32 | Partially covered; tool/workflow/mcp/skill/multi-agent/template/select missing |
+| `v1/assistant.go` | 32 | Partially covered; assistant CRUD/config/copy/publish/version/conversation/OpenURL plus local tool/workflow/MCP/skill/multi-agent binding/select compatibility covered; template and real assistant-side orchestration still missing |
 | `v1/callback.go` | 5 | Missing |
 | `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; model select endpoints covered; user/file/doc selects still missing |
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
@@ -45,16 +45,16 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/skill.go` | 28 | Missing |
 | `v1/statistic.go` | 14 | Missing |
 | `v1/statistic_client.go` | 1 | Missing |
-| `v1/tool.go` | 39 | Missing |
+| `v1/tool.go` | 39 | Partially covered for assistant configuration select/action-list compatibility; custom tool CRUD, square, builtin detail, and OpenAPI schema parsing still missing |
 | `v1/wga.go` | 31 | Missing |
-| `v1/workflow.go` | 20 | Missing |
+| `v1/workflow.go` | 20 | Partially covered for assistant workflow select compatibility; workflow CRUD/import/export/Coze execution still missing |
 
 ## Proto Service Groups
 
 | Proto service | RPC count | Java status |
 | --- | ---: | --- |
-| `AppService` | 41 | Partially covered for publish/version/OpenURL/app keys/API keys; explore/statistics missing |
-| `AssistantService` | 67 | Partially covered through Java `AppService`; assistant-side tool/skill/workflow/multi-agent/WGA missing |
+| `AppService` | 41 | Partially covered for assistant CRUD/config, publish/version/OpenURL, app keys/API keys, and persisted local assistant resource bindings; explore/statistics/RAG apps missing |
+| `AssistantService` | 67 | Partially covered through Java `AppService`; local workflow/MCP/tool/skill/multi-agent binding state covered, while real assistant-side orchestration, templates, prompt, WGA, and skill conversations remain missing |
 | `IAMService` | 49 | Development login, frontend permission split, and IAM user/role/org read compatibility covered; persisted user/org/role/OAuth writes still missing |
 | `KnowledgeBaseDocService` | 26 | Partially covered with in-memory doc import/list/delete/url-analysis/default segment and segment create/update/delete/status/labels; real file parsing, chunk indexing, export records, reimport, child segment persistence, and async status callbacks missing |
 | `KnowledgeBaseKeywordsService` | 5 | Missing beyond empty metadata/list compatibility shells |
@@ -64,7 +64,7 @@ Measured from this Java repo before the full reproduction pass:
 | `KnowledgeBaseService` | 28 | Partially covered with in-memory CRUD/list/hit shell |
 | `KnowledgeBaseSplitterService` | 4 | Partially covered with preset and custom splitter CRUD |
 | `KnowledgeBaseTagService` | 6 | Partially covered with tag CRUD/bind/count |
-| `MCPService` | 65 | Placeholder-level |
+| `MCPService` | 65 | Placeholder-level, except assistant configuration select/action compatibility served by Java AppService |
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |

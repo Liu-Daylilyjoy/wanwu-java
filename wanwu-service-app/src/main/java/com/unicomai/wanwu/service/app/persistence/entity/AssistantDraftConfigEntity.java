@@ -33,6 +33,16 @@ public class AssistantDraftConfigEntity {
     private String recommendConfigJson;
     @TableField("recommend_questions")
     private String recommendQuestionsJson;
+    @TableField("workflow_infos")
+    private String workflowInfosJson;
+    @TableField("mcp_infos")
+    private String mcpInfosJson;
+    @TableField("tool_infos")
+    private String toolInfosJson;
+    @TableField("skill_infos")
+    private String skillInfosJson;
+    @TableField("multi_agent_infos")
+    private String multiAgentInfosJson;
 
     public Long getId() {
         return id;
@@ -160,5 +170,45 @@ public class AssistantDraftConfigEntity {
 
     public void setRecommendQuestionsJson(String recommendQuestionsJson) {
         this.recommendQuestionsJson = recommendQuestionsJson;
+    }
+
+    public String getWorkflowInfosJson() {
+        return workflowInfosJson;
+    }
+
+    public void setWorkflowInfosJson(String workflowInfosJson) {
+        this.workflowInfosJson = workflowInfosJson;
+    }
+
+    public String getMcpInfosJson() {
+        return mcpInfosJson;
+    }
+
+    public void setMcpInfosJson(String mcpInfosJson) {
+        this.mcpInfosJson = mcpInfosJson;
+    }
+
+    public String getToolInfosJson() {
+        return toolInfosJson;
+    }
+
+    public void setToolInfosJson(String toolInfosJson) {
+        this.toolInfosJson = toolInfosJson;
+    }
+
+    public String getSkillInfosJson() {
+        return skillInfosJson;
+    }
+
+    public void setSkillInfosJson(String skillInfosJson) {
+        this.skillInfosJson = skillInfosJson;
+    }
+
+    public String getMultiAgentInfosJson() {
+        return multiAgentInfosJson;
+    }
+
+    public void setMultiAgentInfosJson(String multiAgentInfosJson) {
+        this.multiAgentInfosJson = multiAgentInfosJson;
     }
 }

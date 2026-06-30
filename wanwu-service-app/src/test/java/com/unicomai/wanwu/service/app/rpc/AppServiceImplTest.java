@@ -15,6 +15,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
@@ -223,6 +224,76 @@ public class AppServiceImplTest {
         assertTrue(draft.containsKey("knowledgeBaseConfig"));
         assertTrue(draft.containsKey("modelConfig"));
         assertTrue(draft.containsKey("rerankConfig"));
+    }
+
+    @Test
+    public void assistantResourceBindingsPersistIntoDraftAndSupportSwitchDelete() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("ToolAgent", "tool desc"));
+        AssistantCreateResult child = service.createAssistant(command("ChildAgent", "child desc"));
+
+        service.addAssistantWorkflow(resource(created.getAssistantId(), "workflow-001", "workflow", null));
+        AssistantResourceCommand workflowSwitch = resource(created.getAssistantId(), "workflow-001", "workflow", null);
+        workflowSwitch.setEnable(false);
+        service.switchAssistantWorkflow(workflowSwitch);
+
+        service.addAssistantMcp(resource(created.getAssistantId(), "mcp-001", "mcp", "search"));
+        AssistantResourceCommand mcpSwitch = resource(created.getAssistantId(), "mcp-001", "mcp", "search");
+        mcpSwitch.setEnable(false);
+        service.switchAssistantMcp(mcpSwitch);
+
+        service.addAssistantTool(resource(created.getAssistantId(), "builtin-weather", "builtin", "get_weather"));
+        AssistantResourceCommand toolConfig = resource(created.getAssistantId(), "builtin-weather", "builtin", "get_weather");
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("rerankId", "rerank-001");
+        toolConfig.setToolConfig(config);
+        service.configureAssistantTool(toolConfig);
+
+        service.addAssistantSkill(resource(created.getAssistantId(), "builtin-summary", "builtin", null));
+        AssistantResourceCommand skillSwitch = resource(created.getAssistantId(), "builtin-summary", "builtin", null);
+        skillSwitch.setEnable(false);
+        service.switchAssistantSkill(skillSwitch);
+
+        AssistantResourceCommand childAgent = resource(created.getAssistantId(), child.getAssistantId(), "agent", null);
+        childAgent.setDesc("Routes child tasks");
+        service.addAssistantAgent(childAgent);
+
+        Map<String, Object> draft = service.getAssistantDraft(
+                new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org"));
+        List<Map<String, Object>> workflows = castList(draft.get("workFlowInfos"));
+        assertEquals(1, workflows.size());
+        assertEquals("workflow-001", workflows.get(0).get("workFlowId"));
+        assertEquals(false, workflows.get(0).get("enable"));
+        assertEquals("workflow_workflow-001", workflows.get(0).get("uniqueId"));
+
+        List<Map<String, Object>> mcps = castList(draft.get("mcpInfos"));
+        assertEquals(1, mcps.size());
+        assertEquals("mcp-001", mcps.get(0).get("mcpId"));
+        assertEquals("search", mcps.get(0).get("actionName"));
+        assertEquals(false, mcps.get(0).get("enable"));
+
+        List<Map<String, Object>> tools = castList(draft.get("toolInfos"));
+        assertEquals(1, tools.size());
+        assertEquals("builtin-weather", tools.get(0).get("toolId"));
+        assertEquals("get_weather", tools.get(0).get("actionName"));
+        assertEquals("rerank-001", ((Map<?, ?>) tools.get(0).get("toolConfig")).get("rerankId"));
+
+        List<Map<String, Object>> skills = castList(draft.get("skillInfos"));
+        assertEquals(1, skills.size());
+        assertEquals("builtin-summary", skills.get(0).get("skillId"));
+        assertEquals(false, skills.get(0).get("enable"));
+
+        List<Map<String, Object>> agents = castList(draft.get("multiAgentInfos"));
+        assertEquals(1, agents.size());
+        assertEquals(child.getAssistantId(), agents.get(0).get("agentId"));
+        assertEquals("ChildAgent", agents.get(0).get("name"));
+        assertEquals("Routes child tasks", agents.get(0).get("desc"));
+
+        service.deleteAssistantTool(resource(created.getAssistantId(), "builtin-weather", "builtin", "get_weather"));
+        Map<String, Object> afterDelete = service.getAssistantDraft(
+                new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org"));
+        assertTrue(castList(afterDelete.get("toolInfos")).isEmpty());
     }
 
     @Test
@@ -911,6 +982,25 @@ public class AppServiceImplTest {
         command.setUserId("dev-admin");
         command.setOrgId("default-org");
         return command;
+    }
+
+    private AssistantResourceCommand resource(String assistantId,
+                                              String resourceId,
+                                              String resourceType,
+                                              String actionName) {
+        AssistantResourceCommand command = new AssistantResourceCommand();
+        command.setAssistantId(assistantId);
+        command.setResourceId(resourceId);
+        command.setResourceType(resourceType);
+        command.setActionName(actionName);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> castList(Object value) {
+        return (List<Map<String, Object>>) value;
     }
 
     private boolean listContainsName(ApplicationListResult result, String name) {
