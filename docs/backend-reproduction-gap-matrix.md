@@ -35,7 +35,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
 | `v1/guest.go` | 13 | Missing |
 | `v1/knowledge.go` | 79 | Partially covered; knowledge CRUD/list, tags, splitters, local doc import/list/delete/url-analysis/segment CRUD, config/import-tip/upload-limit, metadata shell, permissions, QA pair CRUD/list/switch/hit/import-tip/export shell, graph/report/export empty contracts, and external stubs covered for frontend navigation; real file parsing/vector indexing/report/RAG integration/external knowledge missing |
-| `v1/mcp_square.go` | 3 | Missing |
+| `v1/mcp_square.go` | 3 | Partially covered; local MCP square list/detail/recommend contracts return deterministic seed data |
 | `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
 | `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
@@ -45,7 +45,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/skill.go` | 28 | Missing |
 | `v1/statistic.go` | 14 | Missing |
 | `v1/statistic_client.go` | 1 | Missing |
-| `v1/tool.go` | 39 | Partially covered for assistant configuration select/action-list compatibility; custom tool CRUD, square, builtin detail, and OpenAPI schema parsing still missing |
+| `v1/tool.go` | 39 | Partially covered; custom tool CRUD/list/detail/schema parsing, built-in tool square/detail/API-key shell, MCP import/server/tool binding/OpenAPI-tool shell, assistant tool/MCP select/action endpoints, prompt custom/template CRUD/copy and local SSE optimize/reason/evaluate covered; real remote MCP/tool execution and persistent resource storage still missing |
 | `v1/wga.go` | 31 | Missing |
 | `v1/workflow.go` | 20 | Partially covered; Workflow appspace create/list/copy/import/export/delete, generic publish/version integration, local run shell, assistant workflow select, `/workflow/api` parameter/use/openapi-schema compatibility, and avatar upload route covered; full visual workflow editor engine and Coze execution still missing |
 
@@ -64,7 +64,7 @@ Measured from this Java repo before the full reproduction pass:
 | `KnowledgeBaseService` | 28 | Partially covered with in-memory CRUD/list/hit shell |
 | `KnowledgeBaseSplitterService` | 4 | Partially covered with preset and custom splitter CRUD |
 | `KnowledgeBaseTagService` | 6 | Partially covered with tag CRUD/bind/count |
-| `MCPService` | 65 | Placeholder-level, except assistant configuration select/action compatibility served by Java AppService |
+| `MCPService` | 65 | Partially covered with Java RPC contract and Docker in-memory resource repository for custom tools, built-in tools, custom MCP, MCP Server tool binding, MCP square seeds, custom prompts/templates, and local prompt SSE; real MCP protocol runtime, external API invocation, acquired/built-in skills, and MySQL persistence missing |
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
@@ -77,7 +77,7 @@ Measured from this Java repo before the full reproduction pass:
 2. IAM: login, user/org/role/permission, OAuth app management.
 3. Model: model import/list/select/status/delete and model experience dialog.
 4. Knowledge: knowledge base CRUD, docs, QA, tags, splitters, permissions, reports, callback status updates.
-5. MCP/tool/prompt/skill: custom tools, MCP servers/tools, prompt templates, built-in/custom/acquired skills.
+5. MCP/tool/prompt/skill: custom tools, MCP servers/tools, prompt templates, built-in/custom/acquired skills. Tool/MCP/Prompt management now has a local frontend-compatible loop; Skill remains next.
 6. RAG: draft/publish/chat/copy/version and knowledge integration. Management lifecycle, frontend chat shell, and upload response shape are covered; retrieval/search-list generation remains next.
 7. Assistant full surface: Workflow app lifecycle is now covered as a local shell; continue with MCP tools, custom tools, skills, multi-agent, templates, and deeper select endpoints.
 8. Explore/guest/statistics/callback/openapi: marketplace, public API, API usage metrics, callback compatibility.
@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.rag`, `app.workflow`, `app.agent`, `api_key`, `api_key.api_key_management`, `resource.knowledge`.
+- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.rag`, `app.workflow`, `app.agent`, `api_key`, `api_key.api_key_management`, `resource`, `resource.knowledge`, `resource.tool`, `resource.mcp`, `resource.prompt`.
 - `app` / token `dev-token-app`: `app`, `app.rag`, `app.workflow`, and `app.agent` only.
 
-Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. Knowledge is exposed because the frontend can now create/list/update/delete a knowledge base and enter the main empty-state detail views without 404s; document import/indexing, QA, report generation, external knowledge, and real RAG retrieval integration remain later slices. RAG is exposed because management plus draft/published chat shell and upload response shape are now available. Workflow is exposed because appspace lifecycle, import/export, publish/version, local run shell, `/workflow/api` compatibility, and avatar upload compatibility are now available. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model/knowledge persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. Knowledge is exposed because the frontend can now create/list/update/delete a knowledge base and enter the main empty-state detail views without 404s; document import/indexing, QA, report generation, external knowledge, and real RAG retrieval integration remain later slices. Tool, MCP, and Prompt are exposed because the resource center now has a local Java management loop and frontend-compatible select/action contracts. RAG is exposed because management plus draft/published chat shell and upload response shape are now available. Workflow is exposed because appspace lifecycle, import/export, publish/version, local run shell, `/workflow/api` compatibility, and avatar upload compatibility are now available. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model/knowledge/MCP persistence model.
 
 ## Operating Rule
 

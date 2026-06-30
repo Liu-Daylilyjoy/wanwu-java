@@ -67,6 +67,7 @@ import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
@@ -117,8 +118,11 @@ public class WanwuFrontendApiControllerTest {
     private final AppService appService = mock(AppService.class);
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
+    private final McpService mcpService = mock(McpService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService))
+            .standaloneSetup(
+                    new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService),
+                    new WanwuResourceApiController(mcpService))
             .build();
 
     @Test
@@ -160,6 +164,11 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("app.agent"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[10].perm").value("api_key"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[11].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[12].perm").value("resource"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[13].perm").value("resource.knowledge"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[14].perm").value("resource.tool"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[15].perm").value("resource.mcp"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[16].perm").value("resource.prompt"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -314,6 +323,109 @@ public class WanwuFrontendApiControllerTest {
         assertEquals("workflow-001", deleteCaptor.getValue().getWorkflowId());
         assertEquals("dev-admin", deleteCaptor.getValue().getUserId());
         assertEquals("default-org", deleteCaptor.getValue().getOrgId());
+    }
+
+    @Test
+    public void resourceToolMcpPromptRoutesReturnFrontendContracts() throws Exception {
+        Map<String, Object> createdTool = Collections.<String, Object>singletonMap("customToolId", "tool-001");
+        Map<String, Object> customTool = new LinkedHashMap<>();
+        customTool.put("customToolId", "tool-001");
+        customTool.put("name", "WeatherAPI");
+        customTool.put("description", "weather lookup");
+        customTool.put("avatar", Collections.emptyMap());
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("name", "get_weather");
+        action.put("description", "get weather");
+        action.put("inputSchema", Collections.singletonMap("properties", Collections.emptyMap()));
+        Map<String, Object> actions = Collections.<String, Object>singletonMap("actions",
+                Collections.singletonList(action));
+        when(mcpService.createCustomTool(anyString(), anyString(), any(Map.class))).thenReturn(createdTool);
+        when(mcpService.listCustomTools(anyString(), anyString(), anyString()))
+                .thenReturn(listResult(customTool));
+        when(mcpService.listToolSelect(anyString(), anyString(), anyString()))
+                .thenReturn(listResult(customTool));
+        when(mcpService.listToolActions(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(actions);
+        when(mcpService.createMcpServer(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("mcpServerId", "mcpserver-001"));
+        Map<String, Object> mcpServer = new LinkedHashMap<>();
+        mcpServer.put("mcpServerId", "mcpserver-001");
+        mcpServer.put("name", "Local MCP Server");
+        mcpServer.put("toolNum", 0);
+        when(mcpService.listMcpServers(anyString(), anyString(),
+                org.mockito.ArgumentMatchers.<String>nullable(String.class)))
+                .thenReturn(listResult(mcpServer));
+        when(mcpService.createCustomPrompt(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("customPromptId", "prompt-001"));
+        Map<String, Object> prompt = new LinkedHashMap<>();
+        prompt.put("customPromptId", "prompt-001");
+        prompt.put("name", "ReviewPrompt");
+        prompt.put("prompt", "review this");
+        when(mcpService.listCustomPrompts(anyString(), anyString(),
+                org.mockito.ArgumentMatchers.<String>nullable(String.class)))
+                .thenReturn(listResult(prompt));
+        Map<String, Object> optimizePayload = new LinkedHashMap<>();
+        optimizePayload.put("response", "optimized prompt");
+        optimizePayload.put("finish", 1);
+        when(mcpService.optimizePrompt(anyString(), anyString(), any(Map.class))).thenReturn(optimizePayload);
+
+        mockMvc.perform(post("/user/api/v1/tool/custom")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"WeatherAPI\",\"description\":\"weather lookup\",\"schema\":\"{}\",\"apiAuth\":{\"authType\":\"none\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.customToolId").value("tool-001"));
+
+        mockMvc.perform(get("/user/api/v1/tool/custom/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Weather"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].customToolId").value("tool-001"));
+
+        mockMvc.perform(get("/user/api/v1/tool/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].name").value("WeatherAPI"));
+
+        mockMvc.perform(get("/user/api/v1/tool/action/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolId", "tool-001")
+                        .param("toolType", "custom"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actions[0].name").value("get_weather"));
+
+        mockMvc.perform(post("/user/api/v1/mcp/server")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Local MCP Server\",\"desc\":\"local\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mcpServerId").value("mcpserver-001"));
+
+        mockMvc.perform(get("/user/api/v1/mcp/server/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].mcpServerId").value("mcpserver-001"));
+
+        mockMvc.perform(post("/user/api/v1/prompt/custom")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"ReviewPrompt\",\"desc\":\"review\",\"prompt\":\"review this\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.customPromptId").value("prompt-001"));
+
+        mockMvc.perform(get("/user/api/v1/prompt/custom/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].customPromptId").value("prompt-001"));
+
+        mockMvc.perform(post("/user/api/v1/prompt/optimize")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"prompt\":\"review this\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"response\":\"optimized prompt\"")))
+                .andExpect(content().string(containsString("\"finish\":1")));
     }
 
     @Test
@@ -1907,6 +2019,8 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
+        when(mcpService.listPromptTemplates(anyString(), anyString(), org.mockito.ArgumentMatchers.<String>nullable(String.class)))
+                .thenReturn(emptyListResult());
         when(knowledgeService.selectKnowledge(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("knowledgeList", Collections.emptyList()));
 
@@ -2289,7 +2403,12 @@ public class WanwuFrontendApiControllerTest {
                 permission("app.workflow"),
                 permission("app.agent"),
                 permission("api_key"),
-                permission("api_key.api_key_management")
+                permission("api_key.api_key_management"),
+                permission("resource"),
+                permission("resource.knowledge"),
+                permission("resource.tool"),
+                permission("resource.mcp"),
+                permission("resource.prompt")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);
@@ -2367,6 +2486,13 @@ public class WanwuFrontendApiControllerTest {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", Collections.singletonList(item));
         result.put("total", 1);
+        return result;
+    }
+
+    private Map<String, Object> emptyListResult() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", Collections.emptyList());
+        result.put("total", 0);
         return result;
     }
 

@@ -70,6 +70,7 @@ import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
@@ -140,6 +141,9 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private KnowledgeService knowledgeService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private McpService mcpService;
+
     public WanwuFrontendApiController() {
     }
 
@@ -153,10 +157,16 @@ public class WanwuFrontendApiController {
 
     public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
                                       KnowledgeService knowledgeService) {
+        this(iamService, appService, modelService, knowledgeService, null);
+    }
+
+    public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
+                                      KnowledgeService knowledgeService, McpService mcpService) {
         this.iamService = iamService;
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
+        this.mcpService = mcpService;
     }
 
     @GetMapping("/base/captcha")
@@ -1361,8 +1371,6 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping({
-            "/prompt/custom/list",
-            "/prompt/template/list",
             "/safe/sensitive/table/select",
             "/agent/skill/select",
     })
@@ -1382,8 +1390,16 @@ public class WanwuFrontendApiController {
 
     @GetMapping("/tool/select")
     public FrontendResponse<Map<String, Object>> selectAssistantTools(
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
         UserContext userContext = userContext(authorization);
+        if (mcpService != null) {
+            Map<String, Object> result = mcpService.listToolSelect(
+                    userContext.getUserId(), userContext.getOrgId(), defaultIfBlank(name, ""));
+            if (result != null && !result.isEmpty()) {
+                return FrontendResponse.ok(result);
+            }
+        }
         return FrontendResponse.ok(appService.listAssistantToolSelect(
                 userContext.getUserId(), userContext.getOrgId()));
     }
@@ -1393,6 +1409,15 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         UserContext userContext = userContext(authorization);
+        if (mcpService != null) {
+            Map<String, Object> result = mcpService.listToolActions(
+                    userContext.getUserId(), userContext.getOrgId(),
+                    defaultIfBlank(request.get("toolId"), ""),
+                    defaultIfBlank(request.get("toolType"), "builtin"));
+            if (result != null && !result.isEmpty()) {
+                return FrontendResponse.ok(result);
+            }
+        }
         return FrontendResponse.ok(appService.listAssistantToolActions(
                 resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
     }
@@ -1402,14 +1427,32 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         UserContext userContext = userContext(authorization);
+        if (mcpService != null) {
+            Map<String, Object> result = mcpService.getToolActionDetail(
+                    userContext.getUserId(), userContext.getOrgId(),
+                    defaultIfBlank(request.get("toolId"), ""),
+                    defaultIfBlank(request.get("toolType"), "builtin"),
+                    defaultIfBlank(request.get("actionName"), ""));
+            if (result != null && !result.isEmpty()) {
+                return FrontendResponse.ok(result);
+            }
+        }
         return FrontendResponse.ok(appService.getAssistantToolActionDetail(
                 resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
     }
 
     @GetMapping("/mcp/select")
     public FrontendResponse<Map<String, Object>> selectAssistantMcps(
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
         UserContext userContext = userContext(authorization);
+        if (mcpService != null) {
+            Map<String, Object> result = mcpService.listMcpSelect(
+                    userContext.getUserId(), userContext.getOrgId(), defaultIfBlank(name, ""));
+            if (result != null && !result.isEmpty()) {
+                return FrontendResponse.ok(result);
+            }
+        }
         return FrontendResponse.ok(appService.listAssistantMcpSelect(
                 userContext.getUserId(), userContext.getOrgId()));
     }
@@ -1419,6 +1462,15 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         UserContext userContext = userContext(authorization);
+        if (mcpService != null) {
+            Map<String, Object> result = mcpService.listMcpActions(
+                    userContext.getUserId(), userContext.getOrgId(),
+                    defaultIfBlank(request.get("toolId"), ""),
+                    defaultIfBlank(request.get("toolType"), "mcp"));
+            if (result != null && !result.isEmpty()) {
+                return FrontendResponse.ok(result);
+            }
+        }
         return FrontendResponse.ok(appService.listAssistantMcpActions(
                 resourceCommand(userContext, objectMap(request), "toolId", "toolType")));
     }

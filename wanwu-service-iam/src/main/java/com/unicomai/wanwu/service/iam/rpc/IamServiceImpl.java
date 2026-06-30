@@ -36,7 +36,11 @@ public class IamServiceImpl implements IamService {
             "app.agent",
             "api_key",
             "api_key.api_key_management",
-            "resource.knowledge"
+            "resource",
+            "resource.knowledge",
+            "resource.tool",
+            "resource.mcp",
+            "resource.prompt"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -202,6 +206,10 @@ public class IamServiceImpl implements IamService {
         defaultIcon.put("ragIcon", "");
         defaultIcon.put("workflowIcon", "");
         defaultIcon.put("modelIcon", "");
+        defaultIcon.put("knowledgeIcon", "");
+        defaultIcon.put("toolIcon", "");
+        defaultIcon.put("mcpIcon", "");
+        defaultIcon.put("promptIcon", "");
 
         config.put("login", login);
         config.put("home", home);
@@ -327,7 +335,12 @@ public class IamServiceImpl implements IamService {
                 route("API Key", "api_key", Collections.singletonList(
                         route("API Key Management", "api_key.api_key_management", Collections.<Map<String, Object>>emptyList())
                 )),
-                route("Knowledge", "resource.knowledge", Collections.<Map<String, Object>>emptyList())
+                route("Resource", "resource", Arrays.asList(
+                        route("Knowledge", "resource.knowledge", Collections.<Map<String, Object>>emptyList()),
+                        route("Tool", "resource.tool", Collections.<Map<String, Object>>emptyList()),
+                        route("MCP", "resource.mcp", Collections.<Map<String, Object>>emptyList()),
+                        route("Prompt", "resource.prompt", Collections.<Map<String, Object>>emptyList())
+                ))
         );
     }
 
@@ -376,8 +389,20 @@ public class IamServiceImpl implements IamService {
         if ("api_key.api_key_management".equals(perm)) {
             return "API Key Management";
         }
+        if ("resource".equals(perm)) {
+            return "Resource";
+        }
         if ("resource.knowledge".equals(perm)) {
             return "Knowledge";
+        }
+        if ("resource.tool".equals(perm)) {
+            return "Tool";
+        }
+        if ("resource.mcp".equals(perm)) {
+            return "MCP";
+        }
+        if ("resource.prompt".equals(perm)) {
+            return "Prompt";
         }
         return perm;
     }

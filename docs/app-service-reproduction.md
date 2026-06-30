@@ -29,7 +29,7 @@ The binding state is stored with the assistant draft config in JSON columns:
 - `skill_infos`
 - `multi_agent_infos`
 
-These fields are returned through `GET /assistant/draft` as `workFlowInfos`, `mcpInfos`, `toolInfos`, `skillInfos`, and `multiAgentInfos`, matching the original Go BFF response shape.
+These fields are returned through `GET /assistant/draft` as `workFlowInfos`, `mcpInfos`, `toolInfos`, `skillInfos`, and `multiAgentInfos`, matching the original Go BFF response shape. Tool and MCP select/action endpoints now read from `wanwu-service-mcp` when available, with the previous AppService local compatibility data kept only as a test fallback.
 
 RAG draft state is stored in the RAG-specific tables:
 
@@ -55,8 +55,8 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflo
 
 ## Known Gaps
 
-- No real MCP server execution, OpenAPI schema parsing, or external tool invocation yet.
+- No real MCP server execution or external tool invocation yet. Local OpenAPI schema parsing and MCP Server resource binding are covered by `wanwu-service-mcp`, but runtime protocol handling is still a later slice.
 - Workflow now has a persisted local app lifecycle and frontend-compatible import/export/run shell. The actual visual editor engine, graph execution, Coze-compatible runtime, node validation, and advanced Workflow marketplace/template flows are still missing.
 - Skill marketplace/custom/acquired skill flows are not implemented in this slice.
-- Prompt templates and assistant templates remain separate future slices.
+- Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant templates remain a future slice.
 - RAG chat currently returns a deterministic local answer after validating draft/published RAG existence. Real retrieval, QA hit handling, knowledge search lists, reasoning frames, and model generation remain future slices.
