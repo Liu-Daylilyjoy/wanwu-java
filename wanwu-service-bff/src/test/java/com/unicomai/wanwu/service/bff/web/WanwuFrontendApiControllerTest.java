@@ -683,6 +683,49 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void assistantQuestionRecommendReturnsOpenAiStyleSseAndUsesDraftLookup() throws Exception {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("assistantId", "assistant-001");
+        draft.put("name", "DemoAgent");
+        when(appService.getAssistantDraft(any(AssistantDetailQuery.class))).thenReturn(draft);
+
+        mockMvc.perform(post("/user/api/v1/assistant/question/recommend")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"conversationId\":\"conversation-001\",\"query\":\"how to deploy\",\"trial\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"object\":\"chat.completion.chunk\"")))
+                .andExpect(content().string(containsString("\"contentType\":\"answer\"")))
+                .andExpect(content().string(containsString("how to deploy")))
+                .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
+
+        org.mockito.ArgumentCaptor<AssistantDetailQuery> captor = forClass(AssistantDetailQuery.class);
+        verify(appService).getAssistantDraft(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+    }
+
+    @Test
+    public void assistantQuestionRecommendUsesPublishedLookupWhenNotTrial() throws Exception {
+        Map<String, Object> published = new LinkedHashMap<>();
+        published.put("assistantId", "assistant-001");
+        published.put("name", "PublishedAgent");
+        when(appService.getPublishedAssistant(any(AssistantPublishedQuery.class))).thenReturn(published);
+
+        mockMvc.perform(post("/user/api/v1/assistant/question/recommend")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"conversationId\":\"conversation-001\",\"query\":\"how to operate\",\"trial\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"model\":\"local-recommend\"")));
+
+        org.mockito.ArgumentCaptor<AssistantPublishedQuery> captor = forClass(AssistantPublishedQuery.class);
+        verify(appService).getPublishedAssistant(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+    }
+
+    @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
         mockMvc.perform(get("/user/api/v1/model/select/llm"))
                 .andExpect(status().isOk())

@@ -466,6 +466,32 @@ public class WanwuFrontendApiController {
         return streamAssistantConversation(authorization, request, true);
     }
 
+    @PostMapping(value = "/assistant/question/recommend", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> assistantQuestionRecommend(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody QuestionRecommendRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            QuestionRecommendRequest effectiveRequest = request == null
+                    ? new QuestionRecommendRequest()
+                    : request;
+            if (isBlank(effectiveRequest.getAssistantId())) {
+                throw new IllegalArgumentException("assistantId is required");
+            }
+            if (isBlank(effectiveRequest.getQuery())) {
+                throw new IllegalArgumentException("query is required");
+            }
+            Map<String, Object> assistantInfo = resolveRecommendAssistant(userContext, effectiveRequest);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body(toRecommendSseFrames(effectiveRequest, assistantInfo));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()));
+        }
+    }
+
     @GetMapping("/appspace/app/url")
     public FrontendResponse<String> appOpenUrl() {
         return FrontendResponse.ok("");
@@ -538,6 +564,70 @@ public class WanwuFrontendApiController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
         }
+    }
+
+    private Map<String, Object> resolveRecommendAssistant(UserContext userContext,
+                                                          QuestionRecommendRequest request) {
+        if (request.isTrial()) {
+            return appService.getAssistantDraft(
+                    new AssistantDetailQuery(request.getAssistantId(), userContext.getUserId(), userContext.getOrgId()));
+        }
+        return appService.getPublishedAssistant(
+                new AssistantPublishedQuery(request.getAssistantId(), null, userContext.getUserId(), userContext.getOrgId()));
+    }
+
+    private String toRecommendSseFrames(QuestionRecommendRequest request, Map<String, Object> assistantInfo) {
+        String id = "recommend-" + compactText(request.getAssistantId(), 48);
+        String content = recommendContent(request.getQuery(), mapString(assistantInfo, "name"));
+        return "data: " + recommendChunk(id, content, "", "answer") + "\n\n"
+                + "data: " + recommendChunk(id, "", "stop", "answer") + "\n\n";
+    }
+
+    private String recommendContent(String query, String assistantName) {
+        String topic = compactText(query, 80);
+        String name = compactText(assistantName, 40);
+        String subject = isBlank(name) ? "this assistant" : name;
+        return "Can " + subject + " explain " + topic + " in more detail?\n"
+                + "What is the next step for " + topic + "?\n"
+                + "Can you give a practical example about " + topic + "?";
+    }
+
+    private String recommendChunk(String id, String content, String finishReason, String contentType) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        json.append("\"id\":\"").append(jsonEscape(id)).append("\",");
+        json.append("\"object\":\"chat.completion.chunk\",");
+        json.append("\"created\":0,");
+        json.append("\"model\":\"local-recommend\",");
+        json.append("\"choices\":[{");
+        json.append("\"index\":0,");
+        json.append("\"delta\":{\"role\":\"assistant\",\"content\":\"").append(jsonEscape(content)).append("\"},");
+        json.append("\"finish_reason\":\"").append(jsonEscape(finishReason)).append("\",");
+        json.append("\"logprobs\":null,");
+        json.append("\"contentType\":\"").append(jsonEscape(contentType)).append("\"");
+        json.append("}],");
+        json.append("\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}");
+        json.append("}");
+        return json.toString();
+    }
+
+    private String mapString(Map<String, Object> map, String key) {
+        if (map == null || key == null) {
+            return "";
+        }
+        Object value = map.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String compactText(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String compacted = value.trim().replaceAll("\\s+", " ");
+        if (compacted.length() <= maxLength) {
+            return compacted;
+        }
+        return compacted.substring(0, maxLength);
     }
 
     private String toSseFrame(AssistantConversationStreamResult result) {
@@ -920,6 +1010,45 @@ public class WanwuFrontendApiController {
 
         public void setFileInfo(List<Map<String, Object>> fileInfo) {
             this.fileInfo = fileInfo;
+        }
+    }
+
+    public static class QuestionRecommendRequest {
+        private String query;
+        private String assistantId;
+        private String conversationId;
+        private boolean trial;
+
+        public String getQuery() {
+            return query;
+        }
+
+        public void setQuery(String query) {
+            this.query = query;
+        }
+
+        public String getAssistantId() {
+            return assistantId;
+        }
+
+        public void setAssistantId(String assistantId) {
+            this.assistantId = assistantId;
+        }
+
+        public String getConversationId() {
+            return conversationId;
+        }
+
+        public void setConversationId(String conversationId) {
+            this.conversationId = conversationId;
+        }
+
+        public boolean isTrial() {
+            return trial;
+        }
+
+        public void setTrial(boolean trial) {
+            this.trial = trial;
         }
     }
 
