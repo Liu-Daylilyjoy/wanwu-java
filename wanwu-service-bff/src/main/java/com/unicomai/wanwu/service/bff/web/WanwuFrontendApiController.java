@@ -4,6 +4,7 @@ import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -16,6 +17,7 @@ import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -136,13 +138,42 @@ public class WanwuFrontendApiController {
         }
     }
 
+    @DeleteMapping("/appspace/app")
+    public FrontendResponse<Map<String, Object>> deleteAppspaceApp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AppspaceAppDeleteRequest request) {
+        try {
+            if (request == null || !AGENT_APP_TYPE.equals(request.getAppType())) {
+                return FrontendResponse.failure(1001, "unsupported app type");
+            }
+            return deleteAssistant(userContext(authorization), request.getAppId());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/assistant")
+    public FrontendResponse<Map<String, Object>> deleteAssistant(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AssistantDeleteRequest request) {
+        try {
+            return deleteAssistant(userContext(authorization), request == null ? null : request.getAssistantId());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     @GetMapping("/assistant/draft")
     public FrontendResponse<Map<String, Object>> assistantDraft(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam("assistantId") String assistantId) {
-        UserContext userContext = userContext(authorization);
-        return FrontendResponse.ok(appService.getAssistantDraft(
-                new AssistantDetailQuery(assistantId, userContext.getUserId(), userContext.getOrgId())));
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.getAssistantDraft(
+                    new AssistantDetailQuery(assistantId, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping("/appspace/app/url")
@@ -198,6 +229,15 @@ public class WanwuFrontendApiController {
         result.put("list", Collections.emptyList());
         result.put("total", 0);
         return result;
+    }
+
+    private FrontendResponse<Map<String, Object>> deleteAssistant(UserContext userContext, String assistantId) {
+        AssistantDeleteCommand command = new AssistantDeleteCommand();
+        command.setAssistantId(assistantId);
+        command.setUserId(userContext.getUserId());
+        command.setOrgId(userContext.getOrgId());
+        appService.deleteAssistant(command);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     public static class AssistantCreateRequest {
@@ -391,6 +431,39 @@ public class WanwuFrontendApiController {
 
         public void setRecommendQuestion(List<String> recommendQuestion) {
             this.recommendQuestion = recommendQuestion;
+        }
+    }
+
+    public static class AppspaceAppDeleteRequest {
+        private String appId;
+        private String appType;
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        public String getAppType() {
+            return appType;
+        }
+
+        public void setAppType(String appType) {
+            this.appType = appType;
+        }
+    }
+
+    public static class AssistantDeleteRequest {
+        private String assistantId;
+
+        public String getAssistantId() {
+            return assistantId;
+        }
+
+        public void setAssistantId(String assistantId) {
+            this.assistantId = assistantId;
         }
     }
 

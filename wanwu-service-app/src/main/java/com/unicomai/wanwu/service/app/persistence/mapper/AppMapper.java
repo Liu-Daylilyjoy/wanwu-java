@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.app.persistence.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -61,4 +62,15 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                  @Param("orgId") String orgId,
                                  @Param("assistantId") String assistantId,
                                  @Param("updatedAt") Long updatedAt);
+
+    @Delete({
+            "DELETE FROM apps",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'agent'",
+            "  AND app_id = #{assistantId}"
+    })
+    int deleteAssistantApp(@Param("userId") String userId,
+                           @Param("orgId") String orgId,
+                           @Param("assistantId") String assistantId);
 }

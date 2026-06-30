@@ -3,6 +3,7 @@ package com.unicomai.wanwu.api.app;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -20,6 +21,8 @@ public interface AppService {
     void updateAssistant(AssistantUpdateCommand command);
 
     void updateAssistantConfig(AssistantConfigUpdateCommand command);
+
+    void deleteAssistant(AssistantDeleteCommand command);
 
     ApplicationListResult listAssistants(ApplicationListQuery query);
 

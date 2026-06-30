@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.app.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -53,4 +54,14 @@ public interface AssistantDraftConfigMapper extends BaseMapper<AssistantDraftCon
     AssistantDraftConfigEntity selectByAssistant(@Param("userId") String userId,
                                                  @Param("orgId") String orgId,
                                                  @Param("assistantId") String assistantId);
+
+    @Delete({
+            "DELETE FROM assistant_draft_configs",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND assistant_id = #{assistantId}"
+    })
+    int deleteByAssistant(@Param("userId") String userId,
+                          @Param("orgId") String orgId,
+                          @Param("assistantId") String assistantId);
 }

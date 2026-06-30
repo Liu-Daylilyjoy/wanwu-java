@@ -7,6 +7,7 @@ import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -171,6 +172,25 @@ public class AppServiceImpl implements AppService {
         record.setRecommendConfigJson(toJsonOrNull(command.getRecommendConfig()));
         record.setRecommendQuestionsJson(toJsonOrNull(command.getRecommendQuestion()));
         applicationRepository.saveAssistantConfig(record);
+    }
+
+    @Override
+    public void deleteAssistant(AssistantDeleteCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant delete command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord existing = applicationRepository.findAssistant(userId, orgId, command.getAssistantId());
+        if (existing == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        if (!applicationRepository.deleteAssistant(userId, orgId, command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
     }
 
     @Override

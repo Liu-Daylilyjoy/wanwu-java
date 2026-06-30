@@ -80,6 +80,15 @@ public class MybatisApplicationRepository implements ApplicationRepository {
 
     @Override
     @Transactional
+    public boolean deleteAssistant(String userId, String orgId, String assistantId) {
+        assistantDraftConfigMapper.deleteByAssistant(userId, orgId, assistantId);
+        int draftDeleted = assistantDraftMapper.deleteDraft(userId, orgId, assistantId);
+        int appDeleted = appMapper.deleteAssistantApp(userId, orgId, assistantId);
+        return draftDeleted > 0 && appDeleted > 0;
+    }
+
+    @Override
+    @Transactional
     public AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record) {
         assistantDraftConfigMapper.upsert(toEntity(record));
         appMapper.updateAssistantUpdatedAt(record.getUserId(), record.getOrgId(), record.getAssistantId(), record.getUpdatedAt());

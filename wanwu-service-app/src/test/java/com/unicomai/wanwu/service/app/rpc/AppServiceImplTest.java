@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.app.rpc;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -168,6 +169,52 @@ public class AppServiceImplTest {
         assertEquals("assistant draft not found", error.getMessage());
     }
 
+    @Test
+    public void deleteAssistantRemovesAssistantFromListAndDraftLookup() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("DeleteAgent", "delete desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setInstructions("To be removed.");
+        service.updateAssistantConfig(config);
+
+        AssistantDeleteCommand delete = new AssistantDeleteCommand();
+        delete.setAssistantId(created.getAssistantId());
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+
+        service.deleteAssistant(delete);
+
+        ApplicationListResult result = service.listAssistants(
+                new ApplicationListQuery("agent", "Delete", "dev-admin", "default-org"));
+        assertEquals(0, result.getTotal());
+        assertTrue(result.getList().isEmpty());
+        assertTrue(!repository.containsApp(created.getAssistantId()));
+        assertTrue(!repository.containsConfig(created.getAssistantId()));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.getAssistantDraft(
+                        new AssistantDetailQuery(created.getAssistantId(), "dev-admin", "default-org")));
+        assertEquals("assistant draft not found", error.getMessage());
+    }
+
+    @Test
+    public void deleteAssistantRequiresExistingAssistant() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantDeleteCommand delete = new AssistantDeleteCommand();
+        delete.setAssistantId("assistant-missing");
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.deleteAssistant(delete));
+        assertEquals("assistant draft not found", error.getMessage());
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -266,9 +313,32 @@ public class AppServiceImplTest {
             return null;
         }
 
+        @Override
+        public boolean deleteAssistant(String userId, String orgId, String assistantId) {
+            AppRecord existing = findAssistant(userId, orgId, assistantId);
+            if (existing == null) {
+                return false;
+            }
+            records.remove(existing);
+            AssistantDraftConfigRecord config = findAssistantConfig(userId, orgId, assistantId);
+            if (config != null) {
+                configs.remove(config);
+            }
+            return true;
+        }
+
         private boolean containsApp(String assistantId) {
             for (AppRecord record : records) {
                 if (assistantId.equals(record.getAppId())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean containsConfig(String assistantId) {
+            for (AssistantDraftConfigRecord config : configs) {
+                if (assistantId.equals(config.getAssistantId())) {
                     return true;
                 }
             }

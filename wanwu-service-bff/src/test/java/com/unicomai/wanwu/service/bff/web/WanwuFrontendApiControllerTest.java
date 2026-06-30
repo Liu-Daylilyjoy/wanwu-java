@@ -4,6 +4,7 @@ import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -178,6 +180,37 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void deleteAppspaceAgentReturnsFrontendSuccessAndMapsRequest() throws Exception {
+        mockMvc.perform(delete("/user/api/v1/appspace/app")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"));
+
+        org.mockito.ArgumentCaptor<AssistantDeleteCommand> captor = forClass(AssistantDeleteCommand.class);
+        verify(appService).deleteAssistant(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void deleteAppspaceAgentReturnsFrontendFailureWhenAssistantIsMissing() throws Exception {
+        doThrow(new IllegalArgumentException("assistant draft not found"))
+                .when(appService).deleteAssistant(any(AssistantDeleteCommand.class));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/app")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-missing\",\"appType\":\"agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("assistant draft not found"));
+    }
+
+    @Test
     public void assistantListReturnsFrontendCardShape() throws Exception {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("key", "avatars/demo.png");
@@ -243,6 +276,19 @@ public class WanwuFrontendApiControllerTest {
         assertEquals("assistant-001", captor.getValue().getAssistantId());
         assertEquals("dev-admin", captor.getValue().getUserId());
         assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void assistantDraftReturnsFrontendFailureWhenAssistantIsMissing() throws Exception {
+        when(appService.getAssistantDraft(any(AssistantDetailQuery.class)))
+                .thenThrow(new IllegalArgumentException("assistant draft not found"));
+
+        mockMvc.perform(get("/user/api/v1/assistant/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-missing"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("assistant draft not found"));
     }
 
     @Test

@@ -12,6 +12,8 @@ public interface ApplicationRepository {
 
     AppRecord findAssistant(String userId, String orgId, String assistantId);
 
+    boolean deleteAssistant(String userId, String orgId, String assistantId);
+
     AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record);
 
     AssistantDraftConfigRecord findAssistantConfig(String userId, String orgId, String assistantId);
