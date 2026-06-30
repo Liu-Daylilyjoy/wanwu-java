@@ -88,6 +88,19 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    public List<String> listAssistantNamesByPrefix(String userId, String orgId, String prefix) {
+        return appMapper.selectAssistantNamesByPrefix(userId, orgId, prefix);
+    }
+
+    @Override
+    @Transactional
+    public AppRecord copyAssistant(AppRecord record, AssistantDraftConfigRecord config) {
+        saveAssistant(record);
+        assistantDraftConfigMapper.upsert(toEntity(config));
+        return record;
+    }
+
+    @Override
     @Transactional
     public AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record) {
         assistantDraftConfigMapper.upsert(toEntity(record));

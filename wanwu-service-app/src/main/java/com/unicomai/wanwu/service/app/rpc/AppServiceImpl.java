@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
@@ -194,6 +195,34 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public AssistantCreateResult copyAssistant(AssistantCopyCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant copy command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord source = applicationRepository.findAssistant(userId, orgId, command.getAssistantId());
+        if (source == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+
+        long now = clock.millis();
+        String newAssistantId = newAssistantId();
+        AppRecord copied = copyBaseRecord(source, newAssistantId, nextCopyName(userId, orgId, source.getName()), now);
+        AssistantDraftConfigRecord copiedConfig = copyConfig(
+                applicationRepository.findAssistantConfig(userId, orgId, command.getAssistantId()),
+                userId,
+                orgId,
+                newAssistantId,
+                now);
+        applicationRepository.copyAssistant(copied, copiedConfig);
+        return new AssistantCreateResult(newAssistantId);
+    }
+
+    @Override
     public ApplicationListResult listAssistants(ApplicationListQuery query) {
         String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
         String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
@@ -267,6 +296,68 @@ public class AppServiceImpl implements AppService {
         item.put("safetyConfig", config == null ? null : nullableMap(config.getSafetyConfigJson()));
         item.put("recommendConfig", config == null ? null : nullableMap(config.getRecommendConfigJson()));
         return item;
+    }
+
+    private AppRecord copyBaseRecord(AppRecord source, String newAssistantId, String newName, long now) {
+        AppRecord copied = new AppRecord();
+        copied.setCreatedAt(now);
+        copied.setUpdatedAt(now);
+        copied.setUserId(source.getUserId());
+        copied.setOrgId(source.getOrgId());
+        copied.setAppId(newAssistantId);
+        copied.setAppType(source.getAppType());
+        copied.setPublishType(source.getPublishType());
+        copied.setName(newName);
+        copied.setDesc(defaultIfBlank(source.getDesc(), ""));
+        copied.setAvatarKey(defaultIfBlank(source.getAvatarKey(), ""));
+        copied.setAvatarPath(defaultIfBlank(source.getAvatarPath(), ""));
+        copied.setCategory(source.getCategory());
+        return copied;
+    }
+
+    private AssistantDraftConfigRecord copyConfig(AssistantDraftConfigRecord source,
+                                                  String userId,
+                                                  String orgId,
+                                                  String newAssistantId,
+                                                  long now) {
+        AssistantDraftConfigRecord copied = new AssistantDraftConfigRecord();
+        copied.setCreatedAt(now);
+        copied.setUpdatedAt(now);
+        copied.setUserId(userId);
+        copied.setOrgId(orgId);
+        copied.setAssistantId(newAssistantId);
+        if (source == null) {
+            copied.setPrologue("");
+            copied.setInstructions("");
+            return copied;
+        }
+        copied.setPrologue(source.getPrologue());
+        copied.setInstructions(source.getInstructions());
+        copied.setMemoryConfigJson(source.getMemoryConfigJson());
+        copied.setKnowledgeBaseConfigJson(source.getKnowledgeBaseConfigJson());
+        copied.setModelConfigJson(source.getModelConfigJson());
+        copied.setSafetyConfigJson(source.getSafetyConfigJson());
+        copied.setVisionConfigJson(source.getVisionConfigJson());
+        copied.setRerankConfigJson(source.getRerankConfigJson());
+        copied.setRecommendConfigJson(source.getRecommendConfigJson());
+        copied.setRecommendQuestionsJson(source.getRecommendQuestionsJson());
+        return copied;
+    }
+
+    private String nextCopyName(String userId, String orgId, String sourceName) {
+        String prefix = sourceName + "_";
+        int max = 0;
+        for (String name : applicationRepository.listAssistantNamesByPrefix(userId, orgId, prefix)) {
+            if (name == null || !name.startsWith(prefix)) {
+                continue;
+            }
+            String suffix = name.substring(prefix.length());
+            try {
+                max = Math.max(max, Integer.parseInt(suffix));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return prefix + (max + 1);
     }
 
     private Map<String, Object> memoryConfig() {

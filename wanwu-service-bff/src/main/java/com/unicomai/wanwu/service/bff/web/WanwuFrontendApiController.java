@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
@@ -158,6 +159,22 @@ public class WanwuFrontendApiController {
             @RequestBody AssistantDeleteRequest request) {
         try {
             return deleteAssistant(userContext(authorization), request == null ? null : request.getAssistantId());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/assistant/copy")
+    public FrontendResponse<AssistantCreateResult> copyAssistant(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody AssistantCopyRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            AssistantCopyCommand command = new AssistantCopyCommand();
+            command.setAssistantId(request == null ? null : request.getAssistantId());
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.copyAssistant(command));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -456,6 +473,18 @@ public class WanwuFrontendApiController {
     }
 
     public static class AssistantDeleteRequest {
+        private String assistantId;
+
+        public String getAssistantId() {
+            return assistantId;
+        }
+
+        public void setAssistantId(String assistantId) {
+            this.assistantId = assistantId;
+        }
+    }
+
+    public static class AssistantCopyRequest {
         private String assistantId;
 
         public String getAssistantId() {

@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
@@ -205,6 +206,41 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"appId\":\"assistant-missing\",\"appType\":\"agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("assistant draft not found"));
+    }
+
+    @Test
+    public void copyAssistantReturnsFrontendAssistantIdAndMapsRequest() throws Exception {
+        when(appService.copyAssistant(any(AssistantCopyCommand.class)))
+                .thenReturn(new AssistantCreateResult("assistant-copy-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/copy")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.msg").value("success"))
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-copy-001"));
+
+        org.mockito.ArgumentCaptor<AssistantCopyCommand> captor = forClass(AssistantCopyCommand.class);
+        verify(appService).copyAssistant(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void copyAssistantReturnsFrontendFailureWhenAssistantIsMissing() throws Exception {
+        when(appService.copyAssistant(any(AssistantCopyCommand.class)))
+                .thenThrow(new IllegalArgumentException("assistant draft not found"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/copy")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-missing\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1001))
                 .andExpect(jsonPath("$.msg").value("assistant draft not found"));

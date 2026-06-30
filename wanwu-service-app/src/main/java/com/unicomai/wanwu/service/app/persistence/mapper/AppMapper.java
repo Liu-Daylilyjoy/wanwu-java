@@ -50,6 +50,19 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                     @Param("orgId") String orgId,
                                     @Param("assistantId") String assistantId);
 
+    @Select({
+            "SELECT d.name",
+            "FROM apps a",
+            "JOIN assistant_drafts d ON d.assistant_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'agent'",
+            "  AND d.name LIKE CONCAT(#{prefix}, '%')"
+    })
+    List<String> selectAssistantNamesByPrefix(@Param("userId") String userId,
+                                              @Param("orgId") String orgId,
+                                              @Param("prefix") String prefix);
+
     @Update({
             "UPDATE apps",
             "SET updated_at = #{updatedAt}",

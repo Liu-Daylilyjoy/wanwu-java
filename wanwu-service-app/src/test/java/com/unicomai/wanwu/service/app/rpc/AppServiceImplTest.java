@@ -1,6 +1,7 @@
 package com.unicomai.wanwu.service.app.rpc;
 
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -215,6 +217,59 @@ public class AppServiceImplTest {
         assertEquals("assistant draft not found", error.getMessage());
     }
 
+    @Test
+    public void copyAssistantDuplicatesBaseFieldsAndConfigWithNextName() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult original = service.createAssistant(command("CopyAgent", "copy desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(original.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setPrologue("Hello copied agent");
+        config.setInstructions("Copied instructions");
+        Map<String, Object> memoryConfig = new LinkedHashMap<>();
+        memoryConfig.put("maxHistoryLength", 11);
+        config.setMemoryConfig(memoryConfig);
+        service.updateAssistantConfig(config);
+
+        AssistantCreateResult firstCopy = service.copyAssistant(copyCommand(original.getAssistantId()));
+        AssistantCreateResult secondCopy = service.copyAssistant(copyCommand(original.getAssistantId()));
+
+        assertNotEquals(original.getAssistantId(), firstCopy.getAssistantId());
+        assertNotEquals(firstCopy.getAssistantId(), secondCopy.getAssistantId());
+
+        ApplicationListResult result = service.listAssistants(
+                new ApplicationListQuery("agent", "CopyAgent", "dev-admin", "default-org"));
+        assertEquals(3, result.getTotal());
+        assertTrue(listContainsName(result, "CopyAgent"));
+        assertTrue(listContainsName(result, "CopyAgent_1"));
+        assertTrue(listContainsName(result, "CopyAgent_2"));
+
+        Map<String, Object> copiedDraft = service.getAssistantDraft(
+                new AssistantDetailQuery(firstCopy.getAssistantId(), "dev-admin", "default-org"));
+        assertEquals("CopyAgent_1", copiedDraft.get("name"));
+        assertEquals("copy desc", copiedDraft.get("desc"));
+        assertEquals("Hello copied agent", copiedDraft.get("prologue"));
+        assertEquals("Copied instructions", copiedDraft.get("instructions"));
+        assertEquals(memoryConfig, copiedDraft.get("memoryConfig"));
+
+        Map<String, Object> originalDraft = service.getAssistantDraft(
+                new AssistantDetailQuery(original.getAssistantId(), "dev-admin", "default-org"));
+        assertEquals("CopyAgent", originalDraft.get("name"));
+        assertEquals("Copied instructions", originalDraft.get("instructions"));
+    }
+
+    @Test
+    public void copyAssistantRequiresExistingAssistant() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.copyAssistant(copyCommand("assistant-missing")));
+        assertEquals("assistant draft not found", error.getMessage());
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -225,6 +280,23 @@ public class AppServiceImplTest {
         command.setAvatarKey("avatars/" + name + ".png");
         command.setAvatarPath("/static/" + name + ".png");
         return command;
+    }
+
+    private AssistantCopyCommand copyCommand(String assistantId) {
+        AssistantCopyCommand command = new AssistantCopyCommand();
+        command.setAssistantId(assistantId);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private boolean listContainsName(ApplicationListResult result, String name) {
+        for (Map<String, Object> item : result.getList()) {
+            if (name.equals(item.get("name"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Clock fixedClock() {
@@ -325,6 +397,30 @@ public class AppServiceImplTest {
                 configs.remove(config);
             }
             return true;
+        }
+
+        @Override
+        public List<String> listAssistantNamesByPrefix(String userId, String orgId, String prefix) {
+            List<String> names = new ArrayList<>();
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && record.getName() != null
+                        && record.getName().startsWith(prefix)) {
+                    names.add(record.getName());
+                }
+            }
+            return names;
+        }
+
+        @Override
+        public AppRecord copyAssistant(AppRecord record, AssistantDraftConfigRecord config) {
+            record.setId(ids.incrementAndGet());
+            records.add(record);
+            if (config != null) {
+                configs.add(config);
+            }
+            return record;
         }
 
         private boolean containsApp(String assistantId) {

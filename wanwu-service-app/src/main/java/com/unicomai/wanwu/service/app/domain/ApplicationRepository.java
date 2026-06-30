@@ -14,6 +14,10 @@ public interface ApplicationRepository {
 
     boolean deleteAssistant(String userId, String orgId, String assistantId);
 
+    List<String> listAssistantNamesByPrefix(String userId, String orgId, String prefix);
+
+    AppRecord copyAssistant(AppRecord record, AssistantDraftConfigRecord config);
+
     AssistantDraftConfigRecord saveAssistantConfig(AssistantDraftConfigRecord record);
 
     AssistantDraftConfigRecord findAssistantConfig(String userId, String orgId, String assistantId);
