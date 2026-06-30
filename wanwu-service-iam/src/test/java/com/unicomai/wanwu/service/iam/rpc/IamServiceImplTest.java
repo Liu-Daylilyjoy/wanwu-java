@@ -57,10 +57,13 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("resource.prompt"));
         assertTrue(permissions.contains("resource.skill"));
         assertTrue(permissions.contains("resource.safety"));
+        assertTrue(permissions.contains("operation"));
+        assertTrue(permissions.contains("operation.oauth"));
+        assertTrue(permissions.contains("operation.statistic_client"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(20, permissions.size());
+        assertEquals(23, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -89,7 +92,8 @@ public class IamServiceImplTest {
                 "model", "model.model_management",
                 "app", "app.rag", "app.workflow", "app.agent", "api_key", "api_key.api_key_management",
                 "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt",
-                "resource.skill", "resource.safety"),
+                "resource.skill", "resource.safety",
+                "operation", "operation.oauth", "operation.statistic_client"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
@@ -142,6 +146,11 @@ public class IamServiceImplTest {
         assertEquals("resource.safety", ((Map) ((List) resourceRoute.get("children")).get(5)).get("perm"));
         Map settingRoute = (Map) ((List) template.get("routes")).get(5);
         assertEquals("setting", settingRoute.get("perm"));
+        Map operationRoute = (Map) ((List) template.get("routes")).get(6);
+        assertEquals("operation", operationRoute.get("perm"));
+        assertEquals(2, ((List) operationRoute.get("children")).size());
+        assertEquals("operation.oauth", ((Map) ((List) operationRoute.get("children")).get(0)).get("perm"));
+        assertEquals("operation.statistic_client", ((Map) ((List) operationRoute.get("children")).get(1)).get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));
@@ -167,6 +176,34 @@ public class IamServiceImplTest {
         assertEquals("/logo.png", ((Map) ((Map) config.get("login")).get("logo")).get("path"));
         assertEquals("Smoke Home", ((Map) config.get("home")).get("title"));
         assertEquals("#ffffff", ((Map) config.get("home")).get("backgroundColor"));
+    }
+
+    @Test
+    public void oauthAppsCanBeCreatedListedUpdatedDisabledAndDeleted() {
+        Map<String, Object> created = service.createOauthApp("dev-admin",
+                map("name", "Console", "desc", "dev oauth", "redirectUri", "http://localhost/callback"));
+        String clientId = (String) created.get("clientId");
+
+        Map<String, Object> page = service.listOauthApps("dev-admin", "Console", 1, 10);
+        assertEquals(1L, page.get("total"));
+        Map first = (Map) ((List) page.get("list")).get(0);
+        assertEquals(clientId, first.get("clientId"));
+        assertEquals("oauth-secret-1", first.get("clientSecret"));
+        assertEquals(true, first.get("status"));
+
+        service.updateOauthApp(map("clientId", clientId,
+                "name", "Console 2",
+                "desc", "updated",
+                "redirectUri", "http://localhost/callback2"));
+        service.updateOauthAppStatus(map("clientId", clientId, "status", false));
+        Map updatedPage = service.listOauthApps("dev-admin", "Console 2", 1, 10);
+        Map updated = (Map) ((List) updatedPage.get("list")).get(0);
+        assertEquals("Console 2", updated.get("name"));
+        assertEquals("http://localhost/callback2", updated.get("redirectUri"));
+        assertEquals(false, updated.get("status"));
+
+        service.deleteOauthApp(map("clientId", clientId));
+        assertEquals(0L, service.listOauthApps("dev-admin", "", 1, 10).get("total"));
     }
 
     private List<String> permissions(Map<String, Object> orgPermission) {

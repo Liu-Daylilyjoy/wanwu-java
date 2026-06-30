@@ -128,7 +128,8 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuResourceApiController(mcpService),
                     new WanwuSkillApiController(mcpService),
                     new WanwuSafetyApiController(safetyService),
-                    new WanwuSettingApiController(iamService))
+                    new WanwuSettingApiController(iamService),
+                    new WanwuOperationApiController(iamService))
             .build();
 
     @Test
@@ -178,6 +179,9 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[17].perm").value("resource.prompt"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[18].perm").value("resource.skill"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[19].perm").value("resource.safety"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[20].perm").value("operation"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[21].perm").value("operation.oauth"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[22].perm").value("operation.statistic_client"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -219,6 +223,61 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).updateCustomTab(any(Map.class));
         verify(iamService).updateCustomLogin(any(Map.class));
         verify(iamService).updateCustomHome(any(Map.class));
+    }
+
+    @Test
+    public void operationRoutesManageOauthAppsAndClientStatistic() throws Exception {
+        Map<String, Object> oauthApp = map("clientId", "oauth-client-1",
+                "name", "Console",
+                "desc", "dev oauth",
+                "clientSecret", "oauth-secret-1",
+                "redirectUri", "http://localhost/callback",
+                "status", true);
+        when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(listResult(oauthApp));
+
+        mockMvc.perform(post("/user/api/v1/oauth/app")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Console\",\"desc\":\"dev oauth\",\"redirectUri\":\"http://localhost/callback\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/oauth/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Console")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].clientId").value("oauth-client-1"))
+                .andExpect(jsonPath("$.data.list[0].clientSecret").value("oauth-secret-1"));
+        mockMvc.perform(put("/user/api/v1/oauth/app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"oauth-client-1\",\"name\":\"Console 2\",\"desc\":\"dev oauth\",\"redirectUri\":\"http://localhost/callback2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/oauth/app/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"oauth-client-1\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/user/api/v1/oauth/app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"oauth-client-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/statistic/client")
+                        .param("startDate", "2026-06-01")
+                        .param("endDate", "2026-06-30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.overview.cumulativeClient.value").value(0.0))
+                .andExpect(jsonPath("$.data.trend.client.lines[0].items[0].key").value("2026-06-01"));
+
+        verify(iamService).createOauthApp(anyString(), any(Map.class));
+        verify(iamService).listOauthApps(anyString(), anyString(), anyInt(), anyInt());
+        verify(iamService).updateOauthApp(any(Map.class));
+        verify(iamService).updateOauthAppStatus(any(Map.class));
+        verify(iamService).deleteOauthApp(any(Map.class));
     }
 
     @Test
@@ -2669,7 +2728,10 @@ public class WanwuFrontendApiControllerTest {
                 permission("resource.mcp"),
                 permission("resource.prompt"),
                 permission("resource.skill"),
-                permission("resource.safety")
+                permission("resource.safety"),
+                permission("operation"),
+                permission("operation.oauth"),
+                permission("operation.statistic_client")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);

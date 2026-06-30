@@ -35,6 +35,16 @@ public interface IamService {
 
     Map<String, Object> organizationInfo(String orgId);
 
+    Map<String, Object> createOauthApp(String userId, Map<String, Object> request);
+
+    void updateOauthApp(Map<String, Object> request);
+
+    void deleteOauthApp(Map<String, Object> request);
+
+    void updateOauthAppStatus(Map<String, Object> request);
+
+    Map<String, Object> listOauthApps(String userId, String name, int pageNo, int pageSize);
+
     void updateCustomTab(Map<String, Object> request);
 
     void updateCustomLogin(Map<String, Object> request);

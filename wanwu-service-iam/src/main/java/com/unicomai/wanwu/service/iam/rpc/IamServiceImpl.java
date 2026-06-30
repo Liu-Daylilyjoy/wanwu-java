@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class IamServiceImpl implements IamService {
@@ -43,7 +44,10 @@ public class IamServiceImpl implements IamService {
             "resource.mcp",
             "resource.prompt",
             "resource.skill",
-            "resource.safety"
+            "resource.safety",
+            "operation",
+            "operation.oauth",
+            "operation.statistic_client"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -60,6 +64,8 @@ public class IamServiceImpl implements IamService {
     private volatile Map<String, Object> customTab = Collections.emptyMap();
     private volatile Map<String, Object> customLogin = Collections.emptyMap();
     private volatile Map<String, Object> customHome = Collections.emptyMap();
+    private final Map<String, Map<String, Object>> oauthApps = new LinkedHashMap<>();
+    private final AtomicLong oauthSequence = new AtomicLong(0);
 
     @Override
     public ServiceDescriptor describe() {
@@ -186,6 +192,66 @@ public class IamServiceImpl implements IamService {
         org.put("creator", idName("system", "System"));
         org.put("status", true);
         return org;
+    }
+
+    @Override
+    public synchronized Map<String, Object> createOauthApp(String userId, Map<String, Object> request) {
+        long seq = oauthSequence.incrementAndGet();
+        String clientId = "oauth-client-" + seq;
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("clientId", clientId);
+        app.put("name", defaultText(request, "name", "OAuth App " + seq));
+        app.put("desc", defaultText(request, "desc", ""));
+        app.put("redirectUri", defaultText(request, "redirectUri", ""));
+        app.put("clientSecret", "oauth-secret-" + seq);
+        app.put("status", true);
+        app.put("createdAt", CREATED_AT);
+        app.put("updatedAt", CREATED_AT);
+        app.put("userId", Strings.hasText(userId) ? userId : ADMIN_ACCOUNT.uid);
+        oauthApps.put(clientId, app);
+        return oauthAppView(app);
+    }
+
+    @Override
+    public synchronized void updateOauthApp(Map<String, Object> request) {
+        Map<String, Object> app = oauthApps.get(defaultText(request, "clientId", ""));
+        if (app == null) {
+            return;
+        }
+        app.put("name", defaultText(request, "name", String.valueOf(app.get("name"))));
+        app.put("desc", defaultText(request, "desc", ""));
+        app.put("redirectUri", defaultText(request, "redirectUri", String.valueOf(app.get("redirectUri"))));
+        app.put("updatedAt", CREATED_AT);
+    }
+
+    @Override
+    public synchronized void deleteOauthApp(Map<String, Object> request) {
+        oauthApps.remove(defaultText(request, "clientId", ""));
+    }
+
+    @Override
+    public synchronized void updateOauthAppStatus(Map<String, Object> request) {
+        Map<String, Object> app = oauthApps.get(defaultText(request, "clientId", ""));
+        if (app != null) {
+            app.put("status", booleanValue(request, "status", false));
+            app.put("updatedAt", CREATED_AT);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> listOauthApps(String userId, String name, int pageNo, int pageSize) {
+        java.util.ArrayList<Map<String, Object>> apps = new java.util.ArrayList<>();
+        for (Map<String, Object> app : oauthApps.values()) {
+            String owner = String.valueOf(app.get("userId"));
+            if (Strings.hasText(userId) && Strings.hasText(owner) && !userId.equals(owner)) {
+                continue;
+            }
+            if (Strings.hasText(name) && !String.valueOf(app.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
+                continue;
+            }
+            apps.add(oauthAppView(app));
+        }
+        return page(apps, pageNo, pageSize);
     }
 
     @Override
@@ -385,7 +451,11 @@ public class IamServiceImpl implements IamService {
                         route("Skill", "resource.skill", Collections.<Map<String, Object>>emptyList()),
                         route("Safety", "resource.safety", Collections.<Map<String, Object>>emptyList())
                 )),
-                route("Setting", "setting", Collections.<Map<String, Object>>emptyList())
+                route("Setting", "setting", Collections.<Map<String, Object>>emptyList()),
+                route("Operation", "operation", Arrays.asList(
+                        route("OAuth", "operation.oauth", Collections.<Map<String, Object>>emptyList()),
+                        route("Client Statistic", "operation.statistic_client", Collections.<Map<String, Object>>emptyList())
+                ))
         );
     }
 
@@ -458,6 +528,15 @@ public class IamServiceImpl implements IamService {
         if ("resource.safety".equals(perm)) {
             return "Safety";
         }
+        if ("operation".equals(perm)) {
+            return "Operation";
+        }
+        if ("operation.oauth".equals(perm)) {
+            return "OAuth";
+        }
+        if ("operation.statistic_client".equals(perm)) {
+            return "Client Statistic";
+        }
         return perm;
     }
 
@@ -499,6 +578,30 @@ public class IamServiceImpl implements IamService {
             return fallback;
         }
         return String.valueOf(value);
+    }
+
+    private boolean booleanValue(Map<String, Object> request, String key, boolean fallback) {
+        if (request == null || request.get(key) == null) {
+            return fallback;
+        }
+        Object value = request.get(key);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private Map<String, Object> oauthAppView(Map<String, Object> app) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("clientId", app.get("clientId"));
+        result.put("name", app.get("name"));
+        result.put("desc", app.get("desc"));
+        result.put("clientSecret", app.get("clientSecret"));
+        result.put("redirectUri", app.get("redirectUri"));
+        result.put("status", app.get("status"));
+        result.put("createdAt", app.get("createdAt"));
+        result.put("updatedAt", app.get("updatedAt"));
+        return result;
     }
 
     private static DevAccount accountByUsername(String username) {
