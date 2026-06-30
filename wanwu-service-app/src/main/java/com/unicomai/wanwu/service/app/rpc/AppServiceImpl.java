@@ -8,6 +8,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
@@ -23,6 +31,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
@@ -51,6 +61,8 @@ public class AppServiceImpl implements AppService {
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
     private static final String PUBLISH_TYPE_PUBLIC = "public";
+    private static final String CONVERSATION_TYPE_PUBLISHED = "published";
+    private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -58,6 +70,8 @@ public class AppServiceImpl implements AppService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<List<String>>() {
+    };
+    private static final TypeReference<List<Object>> OBJECT_LIST_TYPE = new TypeReference<List<Object>>() {
     };
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -429,8 +443,331 @@ public class AppServiceImpl implements AppService {
         return draft;
     }
 
+    @Override
+    public AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("conversation create command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        if (isBlank(command.getPrompt())) {
+            throw new IllegalArgumentException("conversation prompt is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        ensureAssistantExists(userId, orgId, command.getAssistantId());
+        String conversationType = normalizeConversationType(command.getConversationType(), CONVERSATION_TYPE_PUBLISHED);
+        AssistantConversationRecord record = newConversation(
+                userId, orgId, command.getAssistantId(), conversationType, command.getPrompt());
+        applicationRepository.saveConversation(record);
+        return new AssistantConversationCreateResult(record.getConversationId());
+    }
+
+    @Override
+    public void deleteAssistantConversation(AssistantConversationDeleteCommand command) {
+        ConversationDeleteContext context = conversationDeleteContext(command, true);
+        if (!applicationRepository.deleteConversation(context.userId, context.orgId, context.conversation.getConversationId())) {
+            throw new IllegalArgumentException("assistant conversation not found");
+        }
+    }
+
+    @Override
+    public void clearAssistantConversation(AssistantConversationDeleteCommand command) {
+        ConversationDeleteContext context = conversationDeleteContext(command, true);
+        if (isBlank(command.getDetailId())) {
+            applicationRepository.deleteConversationMessages(context.userId, context.orgId, context.conversation.getConversationId());
+            return;
+        }
+        applicationRepository.deleteConversationMessage(
+                context.userId, context.orgId, context.conversation.getConversationId(), command.getDetailId());
+    }
+
+    @Override
+    public void deleteDraftAssistantConversation(AssistantConversationDeleteCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("conversation delete command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = applicationRepository.findDraftConversation(
+                userId, orgId, command.getAssistantId());
+        if (conversation == null) {
+            return;
+        }
+        if (isBlank(command.getDetailId())) {
+            applicationRepository.deleteConversation(userId, orgId, conversation.getConversationId());
+            return;
+        }
+        applicationRepository.deleteConversationMessage(
+                userId, orgId, conversation.getConversationId(), command.getDetailId());
+    }
+
+    @Override
+    public AssistantConversationPageResult listAssistantConversations(AssistantConversationListQuery query) {
+        ConversationListContext context = conversationListContext(query, CONVERSATION_TYPE_PUBLISHED);
+        int offset = offset(context.pageNo, context.pageSize);
+        List<AssistantConversationRecord> records = applicationRepository.listConversations(
+                context.userId, context.orgId, context.assistantId, context.conversationType, offset, context.pageSize);
+        long total = applicationRepository.countConversations(
+                context.userId, context.orgId, context.assistantId, context.conversationType);
+        List<Map<String, Object>> items = new ArrayList<>(records.size());
+        for (AssistantConversationRecord record : records) {
+            items.add(toConversationItem(record));
+        }
+        return new AssistantConversationPageResult(items, total, context.pageNo, context.pageSize);
+    }
+
+    @Override
+    public AssistantConversationPageResult listAssistantConversationDetails(AssistantConversationDetailQuery query) {
+        if (query == null) {
+            throw new IllegalArgumentException("conversation detail query is required");
+        }
+        if (isBlank(query.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        int pageNo = normalizePageNo(query.getPageNo());
+        int pageSize = normalizePageSize(query.getPageSize());
+        int offset = offset(pageNo, pageSize);
+        List<AssistantConversationMessageRecord> records = applicationRepository.listConversationMessages(
+                userId, orgId, query.getConversationId(), offset, pageSize);
+        long total = applicationRepository.countConversationMessages(userId, orgId, query.getConversationId());
+        List<Map<String, Object>> items = new ArrayList<>(records.size());
+        for (AssistantConversationMessageRecord record : records) {
+            items.add(toConversationDetailItem(record));
+        }
+        return new AssistantConversationPageResult(items, total, pageNo, pageSize);
+    }
+
+    @Override
+    public AssistantConversationPageResult listDraftAssistantConversationDetails(AssistantConversationListQuery query) {
+        ConversationListContext context = conversationListContext(query, CONVERSATION_TYPE_DRAFT);
+        AssistantConversationRecord conversation = applicationRepository.findDraftConversation(
+                context.userId, context.orgId, context.assistantId);
+        if (conversation == null) {
+            return new AssistantConversationPageResult(Collections.<Map<String, Object>>emptyList(),
+                    0, context.pageNo, context.pageSize);
+        }
+        AssistantConversationDetailQuery detailQuery = new AssistantConversationDetailQuery();
+        detailQuery.setConversationId(conversation.getConversationId());
+        detailQuery.setPageNo(context.pageNo);
+        detailQuery.setPageSize(context.pageSize);
+        detailQuery.setUserId(context.userId);
+        detailQuery.setOrgId(context.orgId);
+        return listAssistantConversationDetails(detailQuery);
+    }
+
+    @Override
+    public AssistantConversationStreamResult streamAssistantConversation(AssistantConversationStreamCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("conversation stream command is required");
+        }
+        if (isBlank(command.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        if (isBlank(command.getPrompt())) {
+            throw new IllegalArgumentException("conversation prompt is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord assistant = ensureAssistantExists(userId, orgId, command.getAssistantId());
+        if (!command.isDraft()
+                && applicationRepository.findLatestAssistantSnapshot(userId, orgId, command.getAssistantId()) == null) {
+            throw new IllegalArgumentException("assistant snapshot not found");
+        }
+        AssistantConversationRecord conversation = resolveConversation(command, userId, orgId);
+        String response = deterministicResponse(assistant, command.getPrompt());
+        long now = clock.millis();
+        String detailId = newDetailId();
+        AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
+        message.setCreatedAt(now);
+        message.setUpdatedAt(now);
+        message.setUserId(userId);
+        message.setOrgId(orgId);
+        message.setAssistantId(command.getAssistantId());
+        message.setConversationId(conversation.getConversationId());
+        message.setDetailId(detailId);
+        message.setPrompt(command.getPrompt());
+        message.setSysPrompt(defaultIfBlank(command.getSystemPrompt(), ""));
+        message.setResponse(response);
+        message.setResponseListJson(toJsonOrNull(Collections.emptyList()));
+        message.setSearchListJson(toJsonOrNull(Collections.emptyList()));
+        message.setRequestFilesJson(toJsonOrNull(command.getFileInfo() == null
+                ? Collections.emptyList()
+                : command.getFileInfo()));
+        message.setResponseFilesJson(toJsonOrNull(Collections.emptyList()));
+        message.setSubConversationListJson(toJsonOrNull(Collections.emptyList()));
+        message.setFileSize(0L);
+        message.setFileName("");
+        message.setQaType(0);
+        applicationRepository.saveConversationMessage(message);
+        applicationRepository.touchConversation(userId, orgId, conversation.getConversationId(), now);
+
+        AssistantConversationStreamResult result = new AssistantConversationStreamResult();
+        result.setAssistantId(command.getAssistantId());
+        result.setConversationId(conversation.getConversationId());
+        result.setDetailId(detailId);
+        result.setPrompt(command.getPrompt());
+        result.setResponse(response);
+        result.setCreatedAt(now);
+        return result;
+    }
+
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.APP, "App Service", "app");
+    }
+
+    private AppRecord ensureAssistantExists(String userId, String orgId, String assistantId) {
+        AppRecord record = applicationRepository.findAssistant(userId, orgId, assistantId);
+        if (record == null) {
+            throw new IllegalArgumentException("assistant draft not found");
+        }
+        return record;
+    }
+
+    private AssistantConversationRecord newConversation(String userId,
+                                                        String orgId,
+                                                        String assistantId,
+                                                        String conversationType,
+                                                        String prompt) {
+        long now = clock.millis();
+        AssistantConversationRecord record = new AssistantConversationRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAssistantId(assistantId);
+        record.setConversationId(newConversationId());
+        record.setConversationType(conversationType);
+        record.setTitle(conversationTitle(prompt));
+        return record;
+    }
+
+    private AssistantConversationRecord resolveConversation(AssistantConversationStreamCommand command,
+                                                           String userId,
+                                                           String orgId) {
+        if (!isBlank(command.getConversationId())) {
+            AssistantConversationRecord conversation = applicationRepository.findConversation(
+                    userId, orgId, command.getConversationId());
+            if (conversation == null) {
+                throw new IllegalArgumentException("assistant conversation not found");
+            }
+            return conversation;
+        }
+        String conversationType = command.isDraft() ? CONVERSATION_TYPE_DRAFT : CONVERSATION_TYPE_PUBLISHED;
+        if (command.isDraft()) {
+            AssistantConversationRecord draft = applicationRepository.findDraftConversation(
+                    userId, orgId, command.getAssistantId());
+            if (draft != null) {
+                return draft;
+            }
+        }
+        AssistantConversationRecord created = newConversation(
+                userId, orgId, command.getAssistantId(), conversationType, command.getPrompt());
+        applicationRepository.saveConversation(created);
+        return created;
+    }
+
+    private ConversationListContext conversationListContext(AssistantConversationListQuery query, String defaultType) {
+        if (query == null) {
+            throw new IllegalArgumentException("conversation list query is required");
+        }
+        if (isBlank(query.getAssistantId())) {
+            throw new IllegalArgumentException("assistant id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        ensureAssistantExists(userId, orgId, query.getAssistantId());
+        return new ConversationListContext(
+                query.getAssistantId(),
+                normalizeConversationType(query.getConversationType(), defaultType),
+                normalizePageNo(query.getPageNo()),
+                normalizePageSize(query.getPageSize()),
+                userId,
+                orgId);
+    }
+
+    private ConversationDeleteContext conversationDeleteContext(AssistantConversationDeleteCommand command,
+                                                               boolean requireConversationId) {
+        if (command == null) {
+            throw new IllegalArgumentException("conversation delete command is required");
+        }
+        if (requireConversationId && isBlank(command.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = applicationRepository.findConversation(
+                userId, orgId, command.getConversationId());
+        if (conversation == null) {
+            throw new IllegalArgumentException("assistant conversation not found");
+        }
+        return new ConversationDeleteContext(userId, orgId, conversation);
+    }
+
+    private Map<String, Object> toConversationItem(AssistantConversationRecord record) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("conversationId", record.getConversationId());
+        item.put("assistantId", record.getAssistantId());
+        item.put("title", defaultIfBlank(record.getTitle(), ""));
+        item.put("createdAt", formatMillis(record.getCreatedAt()));
+        return item;
+    }
+
+    private Map<String, Object> toConversationDetailItem(AssistantConversationMessageRecord record) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", record.getDetailId());
+        item.put("assistantId", record.getAssistantId());
+        item.put("conversationId", record.getConversationId());
+        item.put("prompt", defaultIfBlank(record.getPrompt(), ""));
+        item.put("sysPrompt", defaultIfBlank(record.getSysPrompt(), ""));
+        item.put("response", defaultIfBlank(record.getResponse(), ""));
+        item.put("responseList", listOrDefault(record.getResponseListJson()));
+        item.put("searchList", listOrDefault(record.getSearchListJson()));
+        item.put("qa_type", record.getQaType() == null ? 0 : record.getQaType());
+        item.put("createdBy", record.getUserId());
+        item.put("createdAt", record.getCreatedAt() == null ? 0L : record.getCreatedAt());
+        item.put("updatedAt", record.getUpdatedAt() == null ? 0L : record.getUpdatedAt());
+        item.put("requestFiles", listOrDefault(record.getRequestFilesJson()));
+        item.put("fileSize", record.getFileSize() == null ? 0L : record.getFileSize());
+        item.put("fileName", defaultIfBlank(record.getFileName(), ""));
+        item.put("subConversationList", listOrDefault(record.getSubConversationListJson()));
+        item.put("responseFiles", listOrDefault(record.getResponseFilesJson()));
+        return item;
+    }
+
+    private String normalizeConversationType(String value, String defaultValue) {
+        String normalized = defaultIfBlank(value, defaultValue);
+        if (CONVERSATION_TYPE_PUBLISHED.equals(normalized) || CONVERSATION_TYPE_DRAFT.equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException("conversation type is invalid");
+    }
+
+    private int normalizePageNo(int pageNo) {
+        return pageNo <= 0 ? 1 : pageNo;
+    }
+
+    private int normalizePageSize(int pageSize) {
+        return pageSize <= 0 ? 20 : pageSize;
+    }
+
+    private int offset(int pageNo, int pageSize) {
+        return (normalizePageNo(pageNo) - 1) * normalizePageSize(pageSize);
+    }
+
+    private String conversationTitle(String prompt) {
+        String title = defaultIfBlank(prompt, "").trim();
+        return title.length() > 60 ? title.substring(0, 60) : title;
+    }
+
+    private String deterministicResponse(AppRecord assistant, String prompt) {
+        return "Demo response from " + defaultIfBlank(assistant.getName(), "Agent") + ": " + prompt;
     }
 
     private Map<String, Object> toFrontendCard(AppRecord record) {
@@ -754,6 +1091,14 @@ public class AppServiceImpl implements AppService {
         return "assistant-" + UUID.randomUUID().toString().replace("-", "");
     }
 
+    private String newConversationId() {
+        return "conversation-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newDetailId() {
+        return "detail-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
     private String toJsonOrNull(Object value) {
         if (value == null) {
             return null;
@@ -798,6 +1143,17 @@ public class AppServiceImpl implements AppService {
         }
     }
 
+    private List<Object> listOrDefault(String json) {
+        if (isBlank(json)) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(json, OBJECT_LIST_TYPE);
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant conversation detail is invalid", ex);
+        }
+    }
+
     private String defaultIfBlank(String value, String defaultValue) {
         if (isBlank(value)) {
             return defaultValue;
@@ -820,6 +1176,41 @@ public class AppServiceImpl implements AppService {
             this.appType = appType;
             this.userId = userId;
             this.orgId = orgId;
+        }
+    }
+
+    private static class ConversationListContext {
+        private final String assistantId;
+        private final String conversationType;
+        private final int pageNo;
+        private final int pageSize;
+        private final String userId;
+        private final String orgId;
+
+        private ConversationListContext(String assistantId,
+                                        String conversationType,
+                                        int pageNo,
+                                        int pageSize,
+                                        String userId,
+                                        String orgId) {
+            this.assistantId = assistantId;
+            this.conversationType = conversationType;
+            this.pageNo = pageNo;
+            this.pageSize = pageSize;
+            this.userId = userId;
+            this.orgId = orgId;
+        }
+    }
+
+    private static class ConversationDeleteContext {
+        private final String userId;
+        private final String orgId;
+        private final AssistantConversationRecord conversation;
+
+        private ConversationDeleteContext(String userId, String orgId, AssistantConversationRecord conversation) {
+            this.userId = userId;
+            this.orgId = orgId;
+            this.conversation = conversation;
         }
     }
 }

@@ -5,6 +5,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
@@ -32,6 +40,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.doThrow;
@@ -43,6 +52,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -495,6 +505,184 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void createAssistantConversationReturnsConversationIdAndMapsRequest() throws Exception {
+        when(appService.createAssistantConversation(any(AssistantConversationCreateCommand.class)))
+                .thenReturn(new AssistantConversationCreateResult("conversation-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/conversation")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"hello agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.conversationId").value("conversation-001"));
+
+        org.mockito.ArgumentCaptor<AssistantConversationCreateCommand> captor =
+                forClass(AssistantConversationCreateCommand.class);
+        verify(appService).createAssistantConversation(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("hello agent", captor.getValue().getPrompt());
+        assertEquals("published", captor.getValue().getConversationType());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void assistantConversationListReturnsFrontendPageShape() throws Exception {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("conversationId", "conversation-001");
+        item.put("assistantId", "assistant-001");
+        item.put("title", "hello agent");
+        item.put("createdAt", "2026-06-29 10:00:00");
+        when(appService.listAssistantConversations(any(AssistantConversationListQuery.class)))
+                .thenReturn(new AssistantConversationPageResult(Collections.singletonList(item), 1, 1, 20));
+
+        mockMvc.perform(get("/user/api/v1/assistant/conversation/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-001")
+                        .param("pageNo", "1")
+                        .param("pageSize", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].conversationId").value("conversation-001"))
+                .andExpect(jsonPath("$.data.list[0].title").value("hello agent"));
+
+        org.mockito.ArgumentCaptor<AssistantConversationListQuery> captor =
+                forClass(AssistantConversationListQuery.class);
+        verify(appService).listAssistantConversations(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("published", captor.getValue().getConversationType());
+        assertEquals(1, captor.getValue().getPageNo());
+        assertEquals(20, captor.getValue().getPageSize());
+    }
+
+    @Test
+    public void assistantConversationDetailReturnsFrontendHistoryShape() throws Exception {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("id", "detail-001");
+        detail.put("assistantId", "assistant-001");
+        detail.put("conversationId", "conversation-001");
+        detail.put("prompt", "hello agent");
+        detail.put("response", "Hello from DemoAgent.");
+        detail.put("responseList", Collections.emptyList());
+        when(appService.listAssistantConversationDetails(any(AssistantConversationDetailQuery.class)))
+                .thenReturn(new AssistantConversationPageResult(Collections.singletonList(detail), 1, 1, 1000));
+
+        mockMvc.perform(get("/user/api/v1/assistant/conversation/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("conversationId", "conversation-001")
+                        .param("pageNo", "1")
+                        .param("pageSize", "1000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].id").value("detail-001"))
+                .andExpect(jsonPath("$.data.list[0].prompt").value("hello agent"))
+                .andExpect(jsonPath("$.data.list[0].response").value("Hello from DemoAgent."));
+
+        verify(appService).listAssistantConversationDetails(any(AssistantConversationDetailQuery.class));
+    }
+
+    @Test
+    public void deleteAndClearConversationRoutesReturnFrontendSuccess() throws Exception {
+        mockMvc.perform(delete("/user/api/v1/assistant/conversation")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"conversation-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/assistant/conversation/clear")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"conversation-001\",\"detailId\":\"detail-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        org.mockito.ArgumentCaptor<AssistantConversationDeleteCommand> captor =
+                forClass(AssistantConversationDeleteCommand.class);
+        verify(appService).deleteAssistantConversation(captor.capture());
+        assertEquals("conversation-001", captor.getValue().getConversationId());
+        verify(appService).clearAssistantConversation(any(AssistantConversationDeleteCommand.class));
+    }
+
+    @Test
+    public void draftConversationHistoryAndDeleteUseAssistantId() throws Exception {
+        when(appService.listDraftAssistantConversationDetails(any(AssistantConversationListQuery.class)))
+                .thenReturn(new AssistantConversationPageResult(Collections.emptyList(), 0, 1, 30));
+
+        mockMvc.perform(get("/user/api/v1/assistant/conversation/draft/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-001")
+                        .param("pageNo", "1")
+                        .param("pageSize", "30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        mockMvc.perform(delete("/user/api/v1/assistant/conversation/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"detailId\":\"detail-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(appService).listDraftAssistantConversationDetails(any(AssistantConversationListQuery.class));
+        verify(appService).deleteDraftAssistantConversation(any(AssistantConversationDeleteCommand.class));
+    }
+
+    @Test
+    public void assistantStreamDraftReturnsSseFramesAndMapsCommand() throws Exception {
+        AssistantConversationStreamResult result = new AssistantConversationStreamResult();
+        result.setAssistantId("assistant-001");
+        result.setConversationId("conversation-001");
+        result.setDetailId("detail-001");
+        result.setResponse("Hello from DemoAgent.");
+        when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class))).thenReturn(result);
+
+        mockMvc.perform(post("/user/api/v1/assistant/stream/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"hello agent\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"detailId\":\"detail-001\"")))
+                .andExpect(content().string(containsString("\"finish\":1")));
+
+        org.mockito.ArgumentCaptor<AssistantConversationStreamCommand> captor =
+                forClass(AssistantConversationStreamCommand.class);
+        verify(appService).streamAssistantConversation(captor.capture());
+        assertEquals("assistant-001", captor.getValue().getAssistantId());
+        assertEquals("hello agent", captor.getValue().getPrompt());
+        assertEquals(true, captor.getValue().isDraft());
+    }
+
+    @Test
+    public void assistantPublishedStreamAndTestStreamShareSseContract() throws Exception {
+        AssistantConversationStreamResult result = new AssistantConversationStreamResult();
+        result.setAssistantId("assistant-001");
+        result.setConversationId("conversation-001");
+        result.setDetailId("detail-002");
+        result.setResponse("Published answer.");
+        when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class))).thenReturn(result);
+
+        mockMvc.perform(post("/user/api/v1/assistant/stream")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"conversationId\":\"conversation-001\",\"prompt\":\"published\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("Published answer.")));
+
+        mockMvc.perform(post("/user/api/v1/assistant/test/stream")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"test\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM));
+    }
+
+    @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
         mockMvc.perform(get("/user/api/v1/model/select/llm"))
                 .andExpect(status().isOk())
@@ -503,12 +691,6 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.total").value(0));
 
         mockMvc.perform(get("/user/api/v1/prompt/template/list"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.list", hasSize(0)));
-
-        mockMvc.perform(get("/user/api/v1/assistant/conversation/draft/detail")
-                        .param("assistantId", "assistant-001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.list", hasSize(0)));

@@ -4,6 +4,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
@@ -51,4 +59,20 @@ public interface AppService {
     Map<String, Object> getAssistantDraft(AssistantDetailQuery query);
 
     Map<String, Object> getPublishedAssistant(AssistantPublishedQuery query);
+
+    AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
+
+    void deleteAssistantConversation(AssistantConversationDeleteCommand command);
+
+    void clearAssistantConversation(AssistantConversationDeleteCommand command);
+
+    void deleteDraftAssistantConversation(AssistantConversationDeleteCommand command);
+
+    AssistantConversationPageResult listAssistantConversations(AssistantConversationListQuery query);
+
+    AssistantConversationPageResult listAssistantConversationDetails(AssistantConversationDetailQuery query);
+
+    AssistantConversationPageResult listDraftAssistantConversationDetails(AssistantConversationListQuery query);
+
+    AssistantConversationStreamResult streamAssistantConversation(AssistantConversationStreamCommand command);
 }

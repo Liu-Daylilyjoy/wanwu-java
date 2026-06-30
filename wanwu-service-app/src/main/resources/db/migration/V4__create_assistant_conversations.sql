@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS assistant_conversations (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  assistant_id VARCHAR(64) NOT NULL,
+  conversation_id VARCHAR(64) NOT NULL,
+  conversation_type VARCHAR(32) NOT NULL,
+  title VARCHAR(512) NOT NULL DEFAULT '',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_assistant_conversation_id (user_id, org_id, conversation_id),
+  KEY idx_assistant_conversation_assistant (user_id, org_id, assistant_id, conversation_type),
+  KEY idx_assistant_conversation_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS assistant_conversation_messages (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  assistant_id VARCHAR(64) NOT NULL,
+  conversation_id VARCHAR(64) NOT NULL,
+  detail_id VARCHAR(64) NOT NULL,
+  prompt TEXT NOT NULL,
+  sys_prompt TEXT NOT NULL,
+  response MEDIUMTEXT NOT NULL,
+  response_list JSON NULL,
+  search_list JSON NULL,
+  request_files JSON NULL,
+  response_files JSON NULL,
+  sub_conversation_list JSON NULL,
+  file_size BIGINT NOT NULL DEFAULT 0,
+  file_name VARCHAR(512) NOT NULL DEFAULT '',
+  qa_type INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_assistant_message_detail (user_id, org_id, detail_id),
+  KEY idx_assistant_message_conversation (user_id, org_id, conversation_id),
+  KEY idx_assistant_message_assistant (user_id, org_id, assistant_id),
+  KEY idx_assistant_message_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

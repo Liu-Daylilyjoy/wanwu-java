@@ -1,14 +1,20 @@
 package com.unicomai.wanwu.service.app.persistence;
 
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
@@ -24,15 +30,21 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantDraftMapper assistantDraftMapper;
     private final AssistantDraftConfigMapper assistantDraftConfigMapper;
     private final AssistantSnapshotMapper assistantSnapshotMapper;
+    private final AssistantConversationMapper assistantConversationMapper;
+    private final AssistantConversationMessageMapper assistantConversationMessageMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
                                         AssistantDraftMapper assistantDraftMapper,
                                         AssistantDraftConfigMapper assistantDraftConfigMapper,
-                                        AssistantSnapshotMapper assistantSnapshotMapper) {
+                                        AssistantSnapshotMapper assistantSnapshotMapper,
+                                        AssistantConversationMapper assistantConversationMapper,
+                                        AssistantConversationMessageMapper assistantConversationMessageMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
         this.assistantSnapshotMapper = assistantSnapshotMapper;
+        this.assistantConversationMapper = assistantConversationMapper;
+        this.assistantConversationMessageMapper = assistantConversationMessageMapper;
     }
 
     @Override
@@ -87,6 +99,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     @Transactional
     public boolean deleteAssistant(String userId, String orgId, String assistantId) {
+        assistantConversationMessageMapper.deleteByAssistant(userId, orgId, assistantId);
+        assistantConversationMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantSnapshotMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantDraftConfigMapper.deleteByAssistant(userId, orgId, assistantId);
         int draftDeleted = assistantDraftMapper.deleteDraft(userId, orgId, assistantId);
@@ -178,6 +192,85 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         }
         assistantDraftConfigMapper.upsert(toEntity(config));
         return true;
+    }
+
+    @Override
+    public AssistantConversationRecord saveConversation(AssistantConversationRecord record) {
+        AssistantConversationEntity entity = toEntity(record);
+        assistantConversationMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public AssistantConversationRecord findConversation(String userId, String orgId, String conversationId) {
+        return toRecord(assistantConversationMapper.selectByConversationId(userId, orgId, conversationId));
+    }
+
+    @Override
+    public AssistantConversationRecord findDraftConversation(String userId, String orgId, String assistantId) {
+        return toRecord(assistantConversationMapper.selectDraftByAssistant(userId, orgId, assistantId));
+    }
+
+    @Override
+    public List<AssistantConversationRecord> listConversations(String userId,
+                                                               String orgId,
+                                                               String assistantId,
+                                                               String conversationType,
+                                                               int offset,
+                                                               int limit) {
+        return toConversationRecords(assistantConversationMapper.selectPage(
+                userId, orgId, assistantId, conversationType, offset, limit));
+    }
+
+    @Override
+    public long countConversations(String userId, String orgId, String assistantId, String conversationType) {
+        return assistantConversationMapper.countByAssistant(userId, orgId, assistantId, conversationType);
+    }
+
+    @Override
+    public boolean touchConversation(String userId, String orgId, String conversationId, long updatedAt) {
+        return assistantConversationMapper.touch(userId, orgId, conversationId, updatedAt) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteConversation(String userId, String orgId, String conversationId) {
+        assistantConversationMessageMapper.deleteByConversation(userId, orgId, conversationId);
+        return assistantConversationMapper.deleteByConversationId(userId, orgId, conversationId) > 0;
+    }
+
+    @Override
+    public AssistantConversationMessageRecord saveConversationMessage(AssistantConversationMessageRecord record) {
+        AssistantConversationMessageEntity entity = toEntity(record);
+        assistantConversationMessageMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<AssistantConversationMessageRecord> listConversationMessages(String userId,
+                                                                             String orgId,
+                                                                             String conversationId,
+                                                                             int offset,
+                                                                             int limit) {
+        return toMessageRecords(assistantConversationMessageMapper.selectPage(
+                userId, orgId, conversationId, offset, limit));
+    }
+
+    @Override
+    public long countConversationMessages(String userId, String orgId, String conversationId) {
+        return assistantConversationMessageMapper.countByConversation(userId, orgId, conversationId);
+    }
+
+    @Override
+    public boolean deleteConversationMessage(String userId, String orgId, String conversationId, String detailId) {
+        return assistantConversationMessageMapper.deleteDetail(userId, orgId, conversationId, detailId) > 0;
+    }
+
+    @Override
+    public boolean deleteConversationMessages(String userId, String orgId, String conversationId) {
+        return assistantConversationMessageMapper.deleteByConversation(userId, orgId, conversationId) > 0;
     }
 
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
@@ -277,6 +370,104 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setAssistantInfoJson(entity.getAssistantInfoJson());
         record.setAssistantConfigJson(entity.getAssistantConfigJson());
+        return record;
+    }
+
+    private AssistantConversationEntity toEntity(AssistantConversationRecord record) {
+        AssistantConversationEntity entity = new AssistantConversationEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAssistantId(record.getAssistantId());
+        entity.setConversationId(record.getConversationId());
+        entity.setConversationType(record.getConversationType());
+        entity.setTitle(record.getTitle());
+        return entity;
+    }
+
+    private List<AssistantConversationRecord> toConversationRecords(List<AssistantConversationEntity> entities) {
+        List<AssistantConversationRecord> records = new java.util.ArrayList<>();
+        for (AssistantConversationEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AssistantConversationRecord toRecord(AssistantConversationEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AssistantConversationRecord record = new AssistantConversationRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAssistantId(entity.getAssistantId());
+        record.setConversationId(entity.getConversationId());
+        record.setConversationType(entity.getConversationType());
+        record.setTitle(entity.getTitle());
+        return record;
+    }
+
+    private AssistantConversationMessageEntity toEntity(AssistantConversationMessageRecord record) {
+        AssistantConversationMessageEntity entity = new AssistantConversationMessageEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAssistantId(record.getAssistantId());
+        entity.setConversationId(record.getConversationId());
+        entity.setDetailId(record.getDetailId());
+        entity.setPrompt(record.getPrompt());
+        entity.setSysPrompt(record.getSysPrompt());
+        entity.setResponse(record.getResponse());
+        entity.setResponseListJson(record.getResponseListJson());
+        entity.setSearchListJson(record.getSearchListJson());
+        entity.setRequestFilesJson(record.getRequestFilesJson());
+        entity.setResponseFilesJson(record.getResponseFilesJson());
+        entity.setSubConversationListJson(record.getSubConversationListJson());
+        entity.setFileSize(record.getFileSize());
+        entity.setFileName(record.getFileName());
+        entity.setQaType(record.getQaType());
+        return entity;
+    }
+
+    private List<AssistantConversationMessageRecord> toMessageRecords(List<AssistantConversationMessageEntity> entities) {
+        List<AssistantConversationMessageRecord> records = new java.util.ArrayList<>();
+        for (AssistantConversationMessageEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AssistantConversationMessageRecord toRecord(AssistantConversationMessageEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AssistantConversationMessageRecord record = new AssistantConversationMessageRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAssistantId(entity.getAssistantId());
+        record.setConversationId(entity.getConversationId());
+        record.setDetailId(entity.getDetailId());
+        record.setPrompt(entity.getPrompt());
+        record.setSysPrompt(entity.getSysPrompt());
+        record.setResponse(entity.getResponse());
+        record.setResponseListJson(entity.getResponseListJson());
+        record.setSearchListJson(entity.getSearchListJson());
+        record.setRequestFilesJson(entity.getRequestFilesJson());
+        record.setResponseFilesJson(entity.getResponseFilesJson());
+        record.setSubConversationListJson(entity.getSubConversationListJson());
+        record.setFileSize(entity.getFileSize());
+        record.setFileName(entity.getFileName());
+        record.setQaType(entity.getQaType());
         return record;
     }
 }

@@ -35,4 +35,37 @@ public interface ApplicationRepository {
     boolean updateAssistantPublishType(String userId, String orgId, String assistantId, String publishType, long updatedAt);
 
     boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config);
+
+    AssistantConversationRecord saveConversation(AssistantConversationRecord record);
+
+    AssistantConversationRecord findConversation(String userId, String orgId, String conversationId);
+
+    AssistantConversationRecord findDraftConversation(String userId, String orgId, String assistantId);
+
+    List<AssistantConversationRecord> listConversations(String userId,
+                                                        String orgId,
+                                                        String assistantId,
+                                                        String conversationType,
+                                                        int offset,
+                                                        int limit);
+
+    long countConversations(String userId, String orgId, String assistantId, String conversationType);
+
+    boolean touchConversation(String userId, String orgId, String conversationId, long updatedAt);
+
+    boolean deleteConversation(String userId, String orgId, String conversationId);
+
+    AssistantConversationMessageRecord saveConversationMessage(AssistantConversationMessageRecord record);
+
+    List<AssistantConversationMessageRecord> listConversationMessages(String userId,
+                                                                     String orgId,
+                                                                     String conversationId,
+                                                                     int offset,
+                                                                     int limit);
+
+    long countConversationMessages(String userId, String orgId, String conversationId);
+
+    boolean deleteConversationMessage(String userId, String orgId, String conversationId, String detailId);
+
+    boolean deleteConversationMessages(String userId, String orgId, String conversationId);
 }

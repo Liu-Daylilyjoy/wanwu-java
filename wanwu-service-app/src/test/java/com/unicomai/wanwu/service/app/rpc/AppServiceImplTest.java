@@ -4,6 +4,14 @@ import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
@@ -16,6 +24,8 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
@@ -426,6 +436,133 @@ public class AppServiceImplTest {
         assertEquals("v1.0.0", list.getList().get(0).get("version"));
     }
 
+    @Test
+    public void createPublishedConversationPersistsConversationList() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("ChatAgent", "chat desc"));
+
+        AssistantConversationCreateResult conversation = service.createAssistantConversation(
+                conversationCreateCommand(created.getAssistantId(), "hello agent", "published"));
+
+        AssistantConversationPageResult result = service.listAssistantConversations(
+                conversationListQuery(created.getAssistantId(), "published"));
+
+        assertEquals(1, result.getTotal());
+        assertEquals(conversation.getConversationId(), result.getList().get(0).get("conversationId"));
+        assertEquals(created.getAssistantId(), result.getList().get(0).get("assistantId"));
+        assertEquals("hello agent", result.getList().get(0).get("title"));
+        assertEquals("2026-06-29 10:00:00", result.getList().get(0).get("createdAt"));
+    }
+
+    @Test
+    public void draftStreamCreatesConversationAndPersistsMessageDetail() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));
+
+        AssistantConversationStreamCommand stream = streamCommand(created.getAssistantId(), "", "How are you?", true);
+        AssistantConversationStreamResult result = service.streamAssistantConversation(stream);
+
+        assertEquals(created.getAssistantId(), result.getAssistantId());
+        assertTrue(result.getConversationId().startsWith("conversation-"));
+        assertTrue(result.getDetailId().startsWith("detail-"));
+        assertTrue(result.getResponse().contains("DraftChatAgent"));
+        assertTrue(result.getResponse().contains("How are you?"));
+
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(result.getConversationId()));
+        assertEquals(1, details.getTotal());
+        Map<String, Object> detail = details.getList().get(0);
+        assertEquals(result.getDetailId(), detail.get("id"));
+        assertEquals("How are you?", detail.get("prompt"));
+        assertEquals(result.getResponse(), detail.get("response"));
+        assertEquals(created.getAssistantId(), detail.get("assistantId"));
+        assertEquals(result.getConversationId(), detail.get("conversationId"));
+        assertTrue(((List<?>) detail.get("responseList")).isEmpty());
+        assertTrue(((List<?>) detail.get("requestFiles")).isEmpty());
+    }
+
+    @Test
+    public void draftConversationHistoryReusesOneConversationPerAssistant() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("DraftReuseAgent", "draft reuse desc"));
+
+        AssistantConversationStreamResult first = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), "", "first question", true));
+        AssistantConversationStreamResult second = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), "", "second question", true));
+
+        assertEquals(first.getConversationId(), second.getConversationId());
+
+        AssistantConversationPageResult draftHistory = service.listDraftAssistantConversationDetails(
+                conversationListQuery(created.getAssistantId(), "draft"));
+        assertEquals(2, draftHistory.getTotal());
+        assertEquals("first question", draftHistory.getList().get(0).get("prompt"));
+        assertEquals("second question", draftHistory.getList().get(1).get("prompt"));
+    }
+
+    @Test
+    public void clearConversationDeletesSingleDetailButKeepsConversation() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("ClearChatAgent", "clear desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+        AssistantConversationCreateResult conversation = service.createAssistantConversation(
+                conversationCreateCommand(created.getAssistantId(), "start", "published"));
+        AssistantConversationStreamResult first = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), conversation.getConversationId(), "first", false));
+        AssistantConversationStreamResult second = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), conversation.getConversationId(), "second", false));
+
+        AssistantConversationDeleteCommand clear = new AssistantConversationDeleteCommand();
+        clear.setConversationId(conversation.getConversationId());
+        clear.setDetailId(first.getDetailId());
+        clear.setUserId("dev-admin");
+        clear.setOrgId("default-org");
+        service.clearAssistantConversation(clear);
+
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(conversation.getConversationId()));
+        assertEquals(1, details.getTotal());
+        assertEquals(second.getDetailId(), details.getList().get(0).get("id"));
+
+        AssistantConversationPageResult conversations = service.listAssistantConversations(
+                conversationListQuery(created.getAssistantId(), "published"));
+        assertEquals(1, conversations.getTotal());
+    }
+
+    @Test
+    public void deleteConversationRemovesConversationAndDetails() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("DeleteChatAgent", "delete chat desc"));
+        service.publishApp(publishCommand(created.getAssistantId(), "v1.0.0", "first release", "private"));
+        AssistantConversationCreateResult conversation = service.createAssistantConversation(
+                conversationCreateCommand(created.getAssistantId(), "start", "published"));
+        service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), conversation.getConversationId(), "hello", false));
+
+        AssistantConversationDeleteCommand delete = new AssistantConversationDeleteCommand();
+        delete.setConversationId(conversation.getConversationId());
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        service.deleteAssistantConversation(delete);
+
+        assertEquals(0, service.listAssistantConversations(
+                conversationListQuery(created.getAssistantId(), "published")).getTotal());
+        assertEquals(0, service.listAssistantConversationDetails(
+                conversationDetailQuery(conversation.getConversationId())).getTotal());
+    }
+
+    @Test
+    public void publishedStreamRequiresSnapshot() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("UnpublishedChatAgent", "unpublished desc"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.streamAssistantConversation(
+                        streamCommand(created.getAssistantId(), "", "published question", false)));
+
+        assertEquals("assistant snapshot not found", error.getMessage());
+    }
+
     private AssistantCreateCommand command(String name, String desc) {
         AssistantCreateCommand command = new AssistantCreateCommand();
         command.setUserId("dev-admin");
@@ -462,6 +599,53 @@ public class AppServiceImplTest {
         return new AppVersionQuery(assistantId, "agent", "dev-admin", "default-org");
     }
 
+    private AssistantConversationCreateCommand conversationCreateCommand(String assistantId,
+                                                                         String prompt,
+                                                                         String conversationType) {
+        AssistantConversationCreateCommand command = new AssistantConversationCreateCommand();
+        command.setAssistantId(assistantId);
+        command.setPrompt(prompt);
+        command.setConversationType(conversationType);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private AssistantConversationListQuery conversationListQuery(String assistantId, String conversationType) {
+        AssistantConversationListQuery query = new AssistantConversationListQuery();
+        query.setAssistantId(assistantId);
+        query.setConversationType(conversationType);
+        query.setPageNo(1);
+        query.setPageSize(20);
+        query.setUserId("dev-admin");
+        query.setOrgId("default-org");
+        return query;
+    }
+
+    private AssistantConversationDetailQuery conversationDetailQuery(String conversationId) {
+        AssistantConversationDetailQuery query = new AssistantConversationDetailQuery();
+        query.setConversationId(conversationId);
+        query.setPageNo(1);
+        query.setPageSize(1000);
+        query.setUserId("dev-admin");
+        query.setOrgId("default-org");
+        return query;
+    }
+
+    private AssistantConversationStreamCommand streamCommand(String assistantId,
+                                                             String conversationId,
+                                                             String prompt,
+                                                             boolean draft) {
+        AssistantConversationStreamCommand command = new AssistantConversationStreamCommand();
+        command.setAssistantId(assistantId);
+        command.setConversationId(conversationId);
+        command.setPrompt(prompt);
+        command.setDraft(draft);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
     private boolean listContainsName(ApplicationListResult result, String name) {
         for (Map<String, Object> item : result.getList()) {
             if (name.equals(item.get("name"))) {
@@ -481,6 +665,8 @@ public class AppServiceImplTest {
         private final List<AppRecord> records = new ArrayList<>();
         private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
+        private final List<AssistantConversationRecord> conversations = new ArrayList<>();
+        private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -576,6 +762,20 @@ public class AppServiceImplTest {
                 }
             }
             snapshots.removeAll(removed);
+            List<AssistantConversationRecord> removedConversations = new ArrayList<>();
+            for (AssistantConversationRecord conversation : conversations) {
+                if (assistantId.equals(conversation.getAssistantId())) {
+                    removedConversations.add(conversation);
+                }
+            }
+            conversations.removeAll(removedConversations);
+            List<AssistantConversationMessageRecord> removedMessages = new ArrayList<>();
+            for (AssistantConversationMessageRecord message : messages) {
+                if (assistantId.equals(message.getAssistantId())) {
+                    removedMessages.add(message);
+                }
+            }
+            messages.removeAll(removedMessages);
             return true;
         }
 
@@ -690,6 +890,155 @@ public class AppServiceImplTest {
             existing.setCategory(record.getCategory());
             saveAssistantConfig(config);
             return true;
+        }
+
+        @Override
+        public AssistantConversationRecord saveConversation(AssistantConversationRecord record) {
+            record.setId(ids.incrementAndGet());
+            conversations.add(record);
+            return record;
+        }
+
+        @Override
+        public AssistantConversationRecord findConversation(String userId, String orgId, String conversationId) {
+            for (AssistantConversationRecord conversation : conversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())
+                        && conversationId.equals(conversation.getConversationId())) {
+                    return conversation;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public AssistantConversationRecord findDraftConversation(String userId, String orgId, String assistantId) {
+            for (AssistantConversationRecord conversation : conversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())
+                        && assistantId.equals(conversation.getAssistantId())
+                        && "draft".equals(conversation.getConversationType())) {
+                    return conversation;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<AssistantConversationRecord> listConversations(String userId,
+                                                                   String orgId,
+                                                                   String assistantId,
+                                                                   String conversationType,
+                                                                   int offset,
+                                                                   int limit) {
+            List<AssistantConversationRecord> matches = new ArrayList<>();
+            for (AssistantConversationRecord conversation : conversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())
+                        && assistantId.equals(conversation.getAssistantId())
+                        && conversationType.equals(conversation.getConversationType())) {
+                    matches.add(conversation);
+                }
+            }
+            matches.sort(Comparator.comparing(AssistantConversationRecord::getId).reversed());
+            return slice(matches, offset, limit);
+        }
+
+        @Override
+        public long countConversations(String userId, String orgId, String assistantId, String conversationType) {
+            return listConversations(userId, orgId, assistantId, conversationType, 0, Integer.MAX_VALUE).size();
+        }
+
+        @Override
+        public boolean touchConversation(String userId, String orgId, String conversationId, long updatedAt) {
+            AssistantConversationRecord conversation = findConversation(userId, orgId, conversationId);
+            if (conversation == null) {
+                return false;
+            }
+            conversation.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean deleteConversation(String userId, String orgId, String conversationId) {
+            AssistantConversationRecord conversation = findConversation(userId, orgId, conversationId);
+            if (conversation == null) {
+                return false;
+            }
+            conversations.remove(conversation);
+            deleteConversationMessages(userId, orgId, conversationId);
+            return true;
+        }
+
+        @Override
+        public AssistantConversationMessageRecord saveConversationMessage(AssistantConversationMessageRecord record) {
+            record.setId(ids.incrementAndGet());
+            messages.add(record);
+            return record;
+        }
+
+        @Override
+        public List<AssistantConversationMessageRecord> listConversationMessages(String userId,
+                                                                                 String orgId,
+                                                                                 String conversationId,
+                                                                                 int offset,
+                                                                                 int limit) {
+            List<AssistantConversationMessageRecord> matches = new ArrayList<>();
+            for (AssistantConversationMessageRecord message : messages) {
+                if (userId.equals(message.getUserId())
+                        && orgId.equals(message.getOrgId())
+                        && conversationId.equals(message.getConversationId())) {
+                    matches.add(message);
+                }
+            }
+            matches.sort(Comparator.comparing(AssistantConversationMessageRecord::getId));
+            return slice(matches, offset, limit);
+        }
+
+        @Override
+        public long countConversationMessages(String userId, String orgId, String conversationId) {
+            return listConversationMessages(userId, orgId, conversationId, 0, Integer.MAX_VALUE).size();
+        }
+
+        @Override
+        public boolean deleteConversationMessage(String userId, String orgId, String conversationId, String detailId) {
+            AssistantConversationMessageRecord found = null;
+            for (AssistantConversationMessageRecord message : messages) {
+                if (userId.equals(message.getUserId())
+                        && orgId.equals(message.getOrgId())
+                        && conversationId.equals(message.getConversationId())
+                        && detailId.equals(message.getDetailId())) {
+                    found = message;
+                    break;
+                }
+            }
+            if (found == null) {
+                return false;
+            }
+            messages.remove(found);
+            return true;
+        }
+
+        @Override
+        public boolean deleteConversationMessages(String userId, String orgId, String conversationId) {
+            List<AssistantConversationMessageRecord> removed = new ArrayList<>();
+            for (AssistantConversationMessageRecord message : messages) {
+                if (userId.equals(message.getUserId())
+                        && orgId.equals(message.getOrgId())
+                        && conversationId.equals(message.getConversationId())) {
+                    removed.add(message);
+                }
+            }
+            messages.removeAll(removed);
+            return !removed.isEmpty();
+        }
+
+        private <T> List<T> slice(List<T> source, int offset, int limit) {
+            if (offset >= source.size()) {
+                return new ArrayList<>();
+            }
+            int toIndex = Math.min(source.size(), offset + limit);
+            return new ArrayList<>(source.subList(offset, toIndex));
         }
 
         private boolean containsApp(String assistantId) {
