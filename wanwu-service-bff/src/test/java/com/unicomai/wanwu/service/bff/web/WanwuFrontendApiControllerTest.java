@@ -1874,7 +1874,13 @@ public class WanwuFrontendApiControllerTest {
         when(knowledgeService.getQaImportTip(anyString(), anyString(), any(Map.class)))
                 .thenReturn(docImportTip("knowledge-qa-001", "Dev QA"));
         when(knowledgeService.exportQaPairs(anyString(), anyString(), any(Map.class)))
-                .thenReturn(singleton("recordCreated", true));
+                .thenReturn(exportCreated("export-001", "/user/api/v1/knowledge/export/file/export-001/dev.csv"));
+        when(knowledgeService.exportDocs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(exportCreated("export-002", "/user/api/v1/knowledge/export/file/export-002/dev.zip"));
+        when(knowledgeService.listExportRecords(anyString(), anyString(), any(Map.class)))
+                .thenReturn(exportRecordPage(exportRecord("export-001", "/user/api/v1/knowledge/export/file/export-001/dev.csv")));
+        when(knowledgeService.getExportRecordFile(anyString(), anyString(), any(Map.class)))
+                .thenReturn(exportFile("dev.csv", "text/csv;charset=UTF-8", "knowledgeName,question\nDev QA,Wanwu"));
         when(knowledgeService.hitQaPairs(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("searchList", Collections.singletonList(
                         qaHitResult("qa-001", "knowledge-qa-001", "Dev QA", "What is Wanwu?", "An AI platform."))));
@@ -1935,7 +1941,39 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .param("knowledgeId", "knowledge-qa-001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.recordCreated").value(true));
+                .andExpect(jsonPath("$.data.recordCreated").value(true))
+                .andExpect(jsonPath("$.data.exportRecordId").value("export-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"docIdList\":[\"doc-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recordCreated").value(true))
+                .andExpect(jsonPath("$.data.exportRecordId").value("export-002"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/export/record/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-qa-001")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].exportRecordId").value("export-001"))
+                .andExpect(jsonPath("$.data.list[0].status").value(2));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/export/file/export-001/dev.csv")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv;charset=UTF-8"))
+                .andExpect(content().string(containsString("Dev QA,Wanwu")));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/export/record")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\",\"exportRecordId\":\"export-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
 
         mockMvc.perform(delete("/user/api/v1/knowledge/qa/pair")
                         .header("Authorization", "Bearer dev-token")
@@ -1952,6 +1990,10 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).getQaImportTip(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).importQaPairs(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).exportQaPairs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).exportDocs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listExportRecords(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).getExportRecordFile(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteExportRecord(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).deleteQaPairs(anyString(), anyString(), any(Map.class));
     }
 
@@ -3227,6 +3269,45 @@ public class WanwuFrontendApiControllerTest {
         info.put("knowledgeName", knowledgeName);
         page.put("qaKnowledgeInfo", info);
         return page;
+    }
+
+    private Map<String, Object> exportCreated(String exportRecordId, String filePath) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("recordCreated", true);
+        result.put("exportRecordId", exportRecordId);
+        result.put("fileUrl", filePath);
+        result.put("downloadUrl", filePath);
+        return result;
+    }
+
+    private Map<String, Object> exportRecordPage(Map<String, Object> record) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(record));
+        page.put("total", 1);
+        page.put("pageNo", 1);
+        page.put("pageSize", 10);
+        return page;
+    }
+
+    private Map<String, Object> exportRecord(String exportRecordId, String filePath) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("exportRecordId", exportRecordId);
+        record.put("author", "admin");
+        record.put("status", 2);
+        record.put("filePath", filePath);
+        record.put("errorMsg", "");
+        record.put("exportTime", "2026-06-30 00:00:00");
+        record.put("knowledgeName", "Dev QA");
+        return record;
+    }
+
+    private Map<String, Object> exportFile(String fileName, String contentType, String content) {
+        Map<String, Object> file = new LinkedHashMap<>();
+        file.put("fileName", fileName);
+        file.put("contentType", contentType);
+        file.put("content", content);
+        file.put("contentBase64", "");
+        return file;
     }
 
     private Map<String, Object> qaPair(String qaPairId, String knowledgeId, String question, String answer, boolean enabled) {

@@ -144,6 +144,10 @@ public interface KnowledgeService {
 
     void deleteExportRecord(String userId, String orgId, Map<String, Object> request);
 
+    Map<String, Object> exportDocs(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> getExportRecordFile(String userId, String orgId, Map<String, Object> request);
+
     Map<String, Object> getDocByName(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> createQaPair(String userId, String orgId, Map<String, Object> request);

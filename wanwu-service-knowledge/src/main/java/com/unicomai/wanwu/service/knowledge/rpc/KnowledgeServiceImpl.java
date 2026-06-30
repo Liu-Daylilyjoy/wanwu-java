@@ -13,8 +13,12 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.annotation.PostConstruct;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,6 +27,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class KnowledgeServiceImpl implements KnowledgeService {
@@ -45,6 +51,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int EXTERNAL_KNOWLEDGE = 1;
     private static final String EXTERNAL_PROVIDER_DIFY = "dify";
     private static final int DOC_STATUS_FINISHED = 1;
+    private static final int EXPORT_STATUS_SUCCESS = 2;
+    private static final String EXPORT_TYPE_QA = "qa";
+    private static final String EXPORT_TYPE_DOC = "doc";
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -62,6 +71,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
     private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
     private final Map<String, List<ReportState>> reportsByKnowledgeId = new LinkedHashMap<String, List<ReportState>>();
+    private final Map<String, List<ExportRecordState>> exportRecordsByKnowledgeId =
+            new LinkedHashMap<String, List<ExportRecordState>>();
+    private final Map<String, ExportRecordState> exportRecordsById = new LinkedHashMap<String, ExportRecordState>();
     private final Map<String, ExternalApiState> externalApis = new LinkedHashMap<String, ExternalApiState>();
     private final Map<String, List<ExternalKnowledgeState>> externalKnowledgeByApiId =
             new LinkedHashMap<String, List<ExternalKnowledgeState>>();
@@ -76,6 +88,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
     private final AtomicLong nextReportId = new AtomicLong(1000);
+    private final AtomicLong nextExportRecordId = new AtomicLong(1000);
     private final AtomicLong nextExternalApiId = new AtomicLong(1000);
     private final AtomicLong nextExternalKnowledgeId = new AtomicLong(1000);
     private final AtomicLong nextKeywordId = new AtomicLong(1000);
@@ -179,6 +192,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         docsByKnowledgeId.put(knowledgeId, new ArrayList<DocState>());
         qaPairsByKnowledgeId.put(knowledgeId, new ArrayList<QaPairState>());
         reportsByKnowledgeId.put(knowledgeId, new ArrayList<ReportState>());
+        exportRecordsByKnowledgeId.put(knowledgeId, new ArrayList<ExportRecordState>());
         metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
         permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
         addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
@@ -221,6 +235,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         qaPairsByKnowledgeId.remove(knowledgeId);
         reportsByKnowledgeId.remove(knowledgeId);
+        for (ExportRecordState record : exportRecords(knowledgeId)) {
+            exportRecordsById.remove(record.exportRecordId);
+        }
+        exportRecordsByKnowledgeId.remove(knowledgeId);
         for (KeywordState keyword : keywords.values()) {
             keyword.knowledgeBaseIds.remove(knowledgeId);
         }
@@ -1125,6 +1143,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         docsByKnowledgeId.put(knowledgeId, new ArrayList<DocState>());
         qaPairsByKnowledgeId.put(knowledgeId, new ArrayList<QaPairState>());
         reportsByKnowledgeId.put(knowledgeId, new ArrayList<ReportState>());
+        exportRecordsByKnowledgeId.put(knowledgeId, new ArrayList<ExportRecordState>());
         metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
         permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
         addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
@@ -1170,15 +1189,71 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public Map<String, Object> listExportRecords(String userId, String orgId, Map<String, Object> request) {
-        Map<String, Object> result = page(Collections.<Map<String, Object>>emptyList(),
-                intValue(safe(request).get("pageNo"), 1),
-                intValue(safe(request).get("pageSize"), 10));
+    public synchronized Map<String, Object> listExportRecords(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (ExportRecordState record : exportRecords(knowledgeId)) {
+            if (!matchesOwner(orgId, record)) {
+                continue;
+            }
+            rows.add(toExportRecordInfo(record));
+        }
+        return page(rows,
+                intValue(safe.get("pageNo"), 1),
+                intValue(safe.get("pageSize"), 10));
+    }
+
+    @Override
+    public synchronized void deleteExportRecord(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String exportRecordId = string(safe.get("exportRecordId"));
+        ExportRecordState record = exportRecordsById.remove(exportRecordId);
+        if (record == null) {
+            return;
+        }
+        List<ExportRecordState> records = exportRecords(record.knowledgeId);
+        for (int i = records.size() - 1; i >= 0; i--) {
+            if (exportRecordId.equals(records.get(i).exportRecordId)) {
+                records.remove(i);
+            }
+        }
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized Map<String, Object> exportDocs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        KnowledgeState knowledge = existingKnowledge(string(safe.get("knowledgeId")));
+        List<String> docIds = stringList(safe.get("docIdList"));
+        ExportRecordState record = createExportRecord(
+                knowledge,
+                defaultIfBlank(userId, DEFAULT_USER_ID),
+                defaultIfBlank(orgId, DEFAULT_ORG_ID),
+                EXPORT_TYPE_DOC,
+                "",
+                buildDocExportZipBase64(knowledge, docIds),
+                "zip",
+                "application/zip");
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("recordCreated", true);
+        result.put("exportRecordId", record.exportRecordId);
+        result.put("fileUrl", record.filePath);
+        result.put("downloadUrl", record.filePath);
         return result;
     }
 
     @Override
-    public void deleteExportRecord(String userId, String orgId, Map<String, Object> request) {
+    public synchronized Map<String, Object> getExportRecordFile(String userId, String orgId, Map<String, Object> request) {
+        ExportRecordState record = existingExportRecord(string(safe(request).get("exportRecordId")));
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("exportRecordId", record.exportRecordId);
+        result.put("fileName", record.fileName);
+        result.put("contentType", record.contentType);
+        result.put("content", record.content);
+        result.put("contentBase64", record.contentBase64);
+        return result;
     }
 
     @Override
@@ -1331,12 +1406,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Override
     public synchronized Map<String, Object> exportQaPairs(String userId, String orgId, Map<String, Object> request) {
         KnowledgeState knowledge = existingKnowledge(string(safe(request).get("knowledgeId")));
+        ExportRecordState record = createExportRecord(
+                knowledge,
+                defaultIfBlank(userId, DEFAULT_USER_ID),
+                defaultIfBlank(orgId, DEFAULT_ORG_ID),
+                EXPORT_TYPE_QA,
+                buildQaExportContent(knowledge),
+                "",
+                "csv",
+                "text/csv;charset=UTF-8");
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("knowledgeId", knowledge.knowledgeId);
         result.put("knowledgeName", knowledge.name);
         result.put("recordCreated", true);
-        result.put("fileUrl", "");
-        result.put("downloadUrl", "");
+        result.put("exportRecordId", record.exportRecordId);
+        result.put("fileUrl", record.filePath);
+        result.put("downloadUrl", record.filePath);
         return result;
     }
 
@@ -1590,6 +1675,110 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private Map<String, Object> toExportRecordInfo(ExportRecordState record) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("exportRecordId", record.exportRecordId);
+        result.put("author", record.author);
+        result.put("status", record.status);
+        result.put("filePath", record.filePath);
+        result.put("errorMsg", record.errorMsg);
+        result.put("exportTime", record.exportTime);
+        result.put("userId", record.userId);
+        result.put("knowledgeName", record.knowledgeName);
+        return result;
+    }
+
+    private ExportRecordState createExportRecord(KnowledgeState knowledge, String userId, String orgId,
+                                                 String exportType, String content, String contentBase64,
+                                                 String extension, String contentType) {
+        ExportRecordState record = new ExportRecordState();
+        record.exportRecordId = "export-" + nextExportRecordId.incrementAndGet();
+        record.knowledgeId = knowledge.knowledgeId;
+        record.knowledgeName = knowledge.name;
+        record.exportType = exportType;
+        record.userId = userId;
+        record.orgId = orgId;
+        record.author = displayUserName(userId);
+        record.status = EXPORT_STATUS_SUCCESS;
+        record.errorMsg = "";
+        record.exportTime = CREATED_AT;
+        record.fileName = exportFileName(knowledge.name, exportType, record.exportRecordId, extension);
+        record.filePath = "/user/api/v1/knowledge/export/file/" + record.exportRecordId + "/" + record.fileName;
+        record.content = content;
+        record.contentBase64 = contentBase64;
+        record.contentType = contentType;
+        exportRecords(knowledge.knowledgeId).add(0, record);
+        exportRecordsById.put(record.exportRecordId, record);
+        saveSnapshot();
+        return record;
+    }
+
+    private String buildQaExportContent(KnowledgeState knowledge) {
+        StringBuilder csv = new StringBuilder();
+        csv.append("knowledgeName,question,answer,status\n");
+        for (QaPairState pair : qaPairs(knowledge.knowledgeId)) {
+            csv.append(csvCell(knowledge.name)).append(',')
+                    .append(csvCell(pair.question)).append(',')
+                    .append(csvCell(pair.answer)).append(',')
+                    .append(pair.status).append('\n');
+        }
+        if (qaPairs(knowledge.knowledgeId).isEmpty()) {
+            csv.append(csvCell(knowledge.name)).append(",,,").append(QA_STATUS_FINISHED).append('\n');
+        }
+        return csv.toString();
+    }
+
+    private String buildDocExportZipBase64(KnowledgeState knowledge, List<String> docIds) {
+        Set<String> selectedDocIds = new LinkedHashSet<String>(docIds);
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ZipOutputStream zip = new ZipOutputStream(out);
+            try {
+                int written = 0;
+                for (DocState doc : docs(knowledge.knowledgeId)) {
+                    if (!selectedDocIds.isEmpty() && !selectedDocIds.contains(doc.docId)) {
+                        continue;
+                    }
+                    zip.putNextEntry(new ZipEntry(exportEntryName(doc.docName)));
+                    String body = "knowledgeId: " + knowledge.knowledgeId + "\n"
+                            + "knowledgeName: " + knowledge.name + "\n"
+                            + "docId: " + doc.docId + "\n"
+                            + "docName: " + doc.docName + "\n";
+                    zip.write(body.getBytes(StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                    written++;
+                }
+                if (written == 0) {
+                    zip.putNextEntry(new ZipEntry("README.txt"));
+                    zip.write(("knowledgeId: " + knowledge.knowledgeId + "\n"
+                            + "knowledgeName: " + knowledge.name + "\n").getBytes(StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            } finally {
+                zip.close();
+            }
+            return Base64.getEncoder().encodeToString(out.toByteArray());
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to build knowledge doc export", ex);
+        }
+    }
+
+    private String csvCell(String value) {
+        String safeValue = string(value).replace("\"", "\"\"");
+        return "\"" + safeValue + "\"";
+    }
+
+    private String exportFileName(String knowledgeName, String exportType, String exportRecordId, String extension) {
+        String safeName = defaultIfBlank(knowledgeName, "knowledge").replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
+        String safeExtension = defaultIfBlank(extension, "txt").replace(".", "");
+        return safeName + "_" + exportType + "_" + exportRecordId + "." + safeExtension;
+    }
+
+    private String exportEntryName(String docName) {
+        String safeName = defaultIfBlank(docName, "document.txt").replace('\\', '_').replace('/', '_');
+        return safeName.isEmpty() ? "document.txt" : safeName;
+    }
+
     private Map<String, Object> toQaHitInfo(QaPairState pair, KnowledgeState knowledge) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("title", pair.question);
@@ -1725,6 +1914,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         throw new IllegalArgumentException("report not found: " + contentId);
     }
 
+    private ExportRecordState existingExportRecord(String exportRecordId) {
+        ExportRecordState record = exportRecordsById.get(exportRecordId);
+        if (record == null) {
+            throw new IllegalArgumentException("export record not found: " + exportRecordId);
+        }
+        return record;
+    }
+
     private ExternalApiState existingExternalApi(String externalApiId) {
         if (isBlank(externalApiId) || !externalApis.containsKey(externalApiId)) {
             throw new IllegalArgumentException("external api not found");
@@ -1778,6 +1975,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return isBlank(orgId) || orgId.equals(api.orgId);
     }
 
+    private boolean matchesOwner(String orgId, ExportRecordState record) {
+        return isBlank(orgId) || orgId.equals(record.orgId);
+    }
+
     private List<String> tagIds(String knowledgeId) {
         List<String> tags = tagIdsByKnowledgeId.get(knowledgeId);
         if (tags == null) {
@@ -1821,6 +2022,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             reportsByKnowledgeId.put(knowledgeId, reports);
         }
         return reports;
+    }
+
+    private List<ExportRecordState> exportRecords(String knowledgeId) {
+        List<ExportRecordState> records = exportRecordsByKnowledgeId.get(knowledgeId);
+        if (records == null) {
+            records = new ArrayList<ExportRecordState>();
+            exportRecordsByKnowledgeId.put(knowledgeId, records);
+        }
+        return records;
     }
 
     private List<ExternalKnowledgeState> externalKnowledge(String externalApiId) {
@@ -2260,6 +2470,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.qaPairsByKnowledgeId.putAll(qaPairsByKnowledgeId);
         snapshot.qaPairsById.putAll(qaPairsById);
         snapshot.reportsByKnowledgeId.putAll(reportsByKnowledgeId);
+        snapshot.exportRecordsByKnowledgeId.putAll(exportRecordsByKnowledgeId);
+        snapshot.exportRecordsById.putAll(exportRecordsById);
         snapshot.externalApis.putAll(externalApis);
         snapshot.externalKnowledgeByApiId.putAll(externalKnowledgeByApiId);
         snapshot.keywords.putAll(keywords);
@@ -2272,6 +2484,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.nextSegmentId = nextSegmentId.get();
         snapshot.nextQaPairId = nextQaPairId.get();
         snapshot.nextReportId = nextReportId.get();
+        snapshot.nextExportRecordId = nextExportRecordId.get();
         snapshot.nextExternalApiId = nextExternalApiId.get();
         snapshot.nextExternalKnowledgeId = nextExternalKnowledgeId.get();
         snapshot.nextKeywordId = nextKeywordId.get();
@@ -2306,6 +2519,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         rebuildQaPairIndex();
         reportsByKnowledgeId.clear();
         reportsByKnowledgeId.putAll(safeMap(snapshot.reportsByKnowledgeId));
+        exportRecordsByKnowledgeId.clear();
+        exportRecordsByKnowledgeId.putAll(safeMap(snapshot.exportRecordsByKnowledgeId));
+        exportRecordsById.clear();
+        exportRecordsById.putAll(safeMap(snapshot.exportRecordsById));
+        rebuildExportRecordIndex();
         externalApis.clear();
         externalApis.putAll(safeMap(snapshot.externalApis));
         externalKnowledgeByApiId.clear();
@@ -2324,6 +2542,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         restoreSequence(nextSegmentId, snapshot.nextSegmentId);
         restoreSequence(nextQaPairId, snapshot.nextQaPairId);
         restoreSequence(nextReportId, snapshot.nextReportId);
+        restoreSequence(nextExportRecordId, snapshot.nextExportRecordId);
         restoreSequence(nextExternalApiId, snapshot.nextExternalApiId);
         restoreSequence(nextExternalKnowledgeId, snapshot.nextExternalKnowledgeId);
         restoreSequence(nextKeywordId, snapshot.nextKeywordId);
@@ -2356,6 +2575,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 bumpSequence(nextReportId, report.contentId, "report-");
             }
         }
+        for (ExportRecordState record : exportRecordsById.values()) {
+            bumpSequence(nextExportRecordId, record.exportRecordId, "export-");
+        }
         for (ExternalApiState api : externalApis.values()) {
             bumpSequence(nextExternalApiId, api.externalApiId, "external-api-");
         }
@@ -2386,6 +2608,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             for (QaPairState pair : safeList(pairs)) {
                 if (pair != null && !isBlank(pair.qaPairId)) {
                     qaPairsById.put(pair.qaPairId, pair);
+                }
+            }
+        }
+    }
+
+    private void rebuildExportRecordIndex() {
+        for (List<ExportRecordState> records : exportRecordsByKnowledgeId.values()) {
+            for (ExportRecordState record : safeList(records)) {
+                if (record != null && !isBlank(record.exportRecordId)) {
+                    exportRecordsById.put(record.exportRecordId, record);
                 }
             }
         }
@@ -2427,6 +2659,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
         private Map<String, List<ReportState>> reportsByKnowledgeId =
                 new LinkedHashMap<String, List<ReportState>>();
+        private Map<String, List<ExportRecordState>> exportRecordsByKnowledgeId =
+                new LinkedHashMap<String, List<ExportRecordState>>();
+        private Map<String, ExportRecordState> exportRecordsById =
+                new LinkedHashMap<String, ExportRecordState>();
         private Map<String, ExternalApiState> externalApis = new LinkedHashMap<String, ExternalApiState>();
         private Map<String, List<ExternalKnowledgeState>> externalKnowledgeByApiId =
                 new LinkedHashMap<String, List<ExternalKnowledgeState>>();
@@ -2442,6 +2678,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private long nextSegmentId;
         private long nextQaPairId;
         private long nextReportId;
+        private long nextExportRecordId;
         private long nextExternalApiId;
         private long nextExternalKnowledgeId;
         private long nextKeywordId;
@@ -2538,6 +2775,24 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String createdAt;
         private boolean imported;
         private boolean generated;
+    }
+
+    private static final class ExportRecordState {
+        private String exportRecordId;
+        private String knowledgeId;
+        private String knowledgeName;
+        private String exportType;
+        private String userId;
+        private String orgId;
+        private String author;
+        private int status;
+        private String fileName;
+        private String filePath;
+        private String contentType;
+        private String content;
+        private String contentBase64;
+        private String errorMsg;
+        private String exportTime;
     }
 
     private static final class ExternalApiState {

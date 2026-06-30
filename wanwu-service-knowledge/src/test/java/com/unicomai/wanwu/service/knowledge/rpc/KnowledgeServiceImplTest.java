@@ -157,6 +157,51 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void exportRecordsFollowQaAndDocFrontendContract() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Export KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-export", "Guide.txt"));
+        service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "What is exported?", "QA pairs and docs."));
+
+        Map<String, Object> qaExport = service.exportQaPairs("dev-admin", "default-org",
+                singleton("knowledgeId", knowledgeId));
+        assertEquals(true, qaExport.get("recordCreated"));
+        assertTrue(((String) qaExport.get("downloadUrl")).endsWith(".csv"));
+
+        Map<String, Object> docExportRequest = new LinkedHashMap<String, Object>();
+        docExportRequest.put("knowledgeId", knowledgeId);
+        docExportRequest.put("docIdList", Collections.singletonList("doc-export"));
+        Map<String, Object> docExport = service.exportDocs("dev-admin", "default-org", docExportRequest);
+        assertEquals(true, docExport.get("recordCreated"));
+        assertTrue(((String) docExport.get("downloadUrl")).endsWith(".zip"));
+
+        Map<String, Object> records = service.listExportRecords("dev-admin", "default-org",
+                exportRecordList(knowledgeId, 1, 10));
+        assertEquals(2, records.get("total"));
+        Map<String, Object> latest = listOfMaps(records.get("list")).get(0);
+        assertEquals(2, latest.get("status"));
+        assertEquals("admin", latest.get("author"));
+        assertEquals("Export KB", latest.get("knowledgeName"));
+        assertTrue(((String) latest.get("filePath")).contains("/knowledge/export/file/"));
+
+        Map<String, Object> qaFile = service.getExportRecordFile("dev-admin", "default-org",
+                singleton("exportRecordId", qaExport.get("exportRecordId")));
+        assertEquals("text/csv;charset=UTF-8", qaFile.get("contentType"));
+        assertTrue(((String) qaFile.get("content")).contains("What is exported?"));
+
+        Map<String, Object> docFile = service.getExportRecordFile("dev-admin", "default-org",
+                singleton("exportRecordId", docExport.get("exportRecordId")));
+        assertEquals("application/zip", docFile.get("contentType"));
+        assertFalse(((String) docFile.get("contentBase64")).isEmpty());
+
+        service.deleteExportRecord("dev-admin", "default-org",
+                singleton("exportRecordId", qaExport.get("exportRecordId")));
+        assertEquals(1, service.listExportRecords("dev-admin", "default-org",
+                exportRecordList(knowledgeId, 1, 10)).get("total"));
+    }
+
+    @Test
     public void reportLifecycleFollowsFrontendAndGoContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Report KB", 0)).get("knowledgeId");
@@ -332,6 +377,7 @@ public class KnowledgeServiceImplTest {
                 keywordCreate("Persist keyword", "Persist alias", knowledgeId));
         persistent.addReport("dev-admin", "default-org",
                 reportCreate(knowledgeId, "Persist report", "Persist report body"));
+        persistent.exportQaPairs("dev-admin", "default-org", singleton("knowledgeId", knowledgeId));
         String externalApiId = (String) persistent.createExternalApi("dev-admin", "default-org",
                 externalApiCreate("Persist Dify", "https://persist.example/v1", "persist-key")).get("externalApiId");
         String externalKnowledgeId = (String) listOfMaps(persistent.listExternalKnowledge("dev-admin", "default-org",
@@ -349,6 +395,7 @@ public class KnowledgeServiceImplTest {
         assertTrue(last.getPayload().contains("Persist?"));
         assertTrue(last.getPayload().contains("Persist keyword"));
         assertTrue(last.getPayload().contains("Persist report"));
+        assertTrue(last.getPayload().contains("export-1001"));
         assertTrue(last.getPayload().contains("Persist Dify"));
         assertTrue(last.getPayload().contains("Persist External KB"));
     }
@@ -369,6 +416,7 @@ public class KnowledgeServiceImplTest {
                 keywordCreate("Restart keyword", "Restart alias", knowledgeId));
         source.addReport("dev-admin", "default-org",
                 reportCreate(knowledgeId, "Restart report", "Restart report body"));
+        source.exportQaPairs("dev-admin", "default-org", singleton("knowledgeId", knowledgeId));
         String externalApiId = (String) source.createExternalApi("dev-admin", "default-org",
                 externalApiCreate("Restart Dify", "https://restart.example/v1", "restart-key")).get("externalApiId");
         String externalKnowledgeId = (String) listOfMaps(source.listExternalKnowledge("dev-admin", "default-org",
@@ -395,6 +443,8 @@ public class KnowledgeServiceImplTest {
                 qaPairList(knowledgeId, "Restart", Collections.singletonList(-1))).get("total"));
         assertEquals(1, restarted.listKeywords("dev-admin", "default-org", keywordList("Restart")).get("total"));
         assertEquals(1, restarted.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10)).get("total"));
+        assertEquals(1, restarted.listExportRecords("dev-admin", "default-org",
+                exportRecordList(knowledgeId, 1, 10)).get("total"));
         List<Map<String, Object>> externalKnowledgeList = listOfMaps(restarted.selectKnowledge("dev-admin", "default-org",
                 selectKnowledge("Restart External", 0, 1)).get("knowledgeList"));
         assertEquals(1, externalKnowledgeList.size());
@@ -413,6 +463,9 @@ public class KnowledgeServiceImplTest {
                 reportCreate((String) next.get("knowledgeId"), "Restart next report", "Restart next report body"));
         assertEquals("report-1002", listOfMaps(restarted.listReports("dev-admin", "default-org",
                 reportList((String) next.get("knowledgeId"), 1, 10)).get("list")).get(0).get("contentId"));
+        restarted.exportQaPairs("dev-admin", "default-org", singleton("knowledgeId", (String) next.get("knowledgeId")));
+        assertEquals("export-1002", listOfMaps(restarted.listExportRecords("dev-admin", "default-org",
+                exportRecordList((String) next.get("knowledgeId"), 1, 10)).get("list")).get(0).get("exportRecordId"));
         Map<String, Object> nextExternalApi = restarted.createExternalApi("dev-admin", "default-org",
                 externalApiCreate("Restart Next Dify", "https://restart.example/v2", "restart-key-2"));
         assertEquals("external-api-1002", nextExternalApi.get("externalApiId"));
@@ -617,6 +670,14 @@ public class KnowledgeServiceImplTest {
     }
 
     private Map<String, Object> reportList(String knowledgeId, int pageNo, int pageSize) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("pageNo", pageNo);
+        request.put("pageSize", pageSize);
+        return request;
+    }
+
+    private Map<String, Object> exportRecordList(String knowledgeId, int pageNo, int pageSize) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("pageNo", pageNo);

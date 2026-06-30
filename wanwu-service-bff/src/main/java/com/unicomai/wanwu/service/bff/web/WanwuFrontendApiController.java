@@ -95,10 +95,12 @@ import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -2151,10 +2153,11 @@ public class WanwuFrontendApiController {
     }
 
     @PostMapping("/knowledge/doc/export")
-    public FrontendResponse<Map<String, Object>> exportKnowledgeDocs() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("recordCreated", false);
-        return FrontendResponse.ok(result);
+    public FrontendResponse<Map<String, Object>> exportKnowledgeDocs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.exportDocs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @PostMapping({"/knowledge/doc/meta", "/knowledge/meta/value/update"})
@@ -2387,6 +2390,29 @@ public class WanwuFrontendApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
                 (ctx, body) -> knowledgeService.deleteExportRecord(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/export/file/{exportRecordId}/{fileName:.+}")
+    public ResponseEntity<byte[]> downloadKnowledgeExportRecord(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable("exportRecordId") String exportRecordId,
+            @PathVariable("fileName") String fileName) {
+        UserContext ctx = userContext(authorization);
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("exportRecordId", exportRecordId);
+        request.put("fileName", fileName);
+        Map<String, Object> file = knowledgeService.getExportRecordFile(ctx.getUserId(), ctx.getOrgId(), request);
+        String resolvedName = defaultIfBlank(stringValue(file.get("fileName")), fileName);
+        String contentType = defaultIfBlank(stringValue(file.get("contentType")), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        String base64Content = stringValue(file.get("contentBase64"));
+        byte[] payload = base64Content.isEmpty()
+                ? stringValue(file.get("content")).getBytes(StandardCharsets.UTF_8)
+                : Base64.getDecoder().decode(base64Content);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resolvedName + "\"")
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(payload.length)
+                .body(payload);
     }
 
     @GetMapping("/knowledge/doc/by/name")
