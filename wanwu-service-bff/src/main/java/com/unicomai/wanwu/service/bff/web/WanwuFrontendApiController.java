@@ -48,6 +48,17 @@ import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelListResult;
+import com.unicomai.wanwu.api.model.dto.ModelStatusCommand;
+import com.unicomai.wanwu.api.model.dto.ModelTypeQuery;
+import com.unicomai.wanwu.api.model.dto.ModelUpsertCommand;
+import com.unicomai.wanwu.api.model.dto.ProviderListQuery;
+import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
+import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
+import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.MediaType;
@@ -85,12 +96,20 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
+
     public WanwuFrontendApiController() {
     }
 
     public WanwuFrontendApiController(IamService iamService, AppService appService) {
+        this(iamService, appService, null);
+    }
+
+    public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService) {
         this.iamService = iamService;
         this.appService = appService;
+        this.modelService = modelService;
     }
 
     @GetMapping("/base/captcha")
@@ -178,6 +197,126 @@ public class WanwuFrontendApiController {
     @GetMapping("/base/custom")
     public FrontendResponse<Map<String, Object>> platformConfig() {
         return FrontendResponse.ok(iamService.platformConfig());
+    }
+
+    @GetMapping("/model/list")
+    public FrontendResponse<ModelListResult> listModels(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "modelType", required = false) String modelType,
+            @RequestParam(value = "provider", required = false) String provider,
+            @RequestParam(value = "displayName", required = false) String displayName,
+            @RequestParam(value = "filterScope", required = false) String filterScope,
+            @RequestParam(value = "scopeType", required = false) String scopeType) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.listModels(new ModelListQuery(
+                userContext.getUserId(),
+                userContext.getOrgId(),
+                defaultIfBlank(modelType, ""),
+                defaultIfBlank(provider, ""),
+                defaultIfBlank(displayName, ""),
+                defaultIfBlank(filterScope, ""),
+                defaultIfBlank(scopeType, ""))));
+    }
+
+    @GetMapping("/model")
+    public FrontendResponse<ModelInfo> getModel(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("modelId") String modelId) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.getModel(userContext.getUserId(), userContext.getOrgId(), modelId));
+    }
+
+    @PostMapping("/model")
+    public FrontendResponse<ModelInfo> importModel(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelUpsertRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ModelUpsertCommand command = request == null ? new ModelUpsertCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(modelService.importModel(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/model")
+    public FrontendResponse<Map<String, Object>> updateModel(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelUpsertRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ModelUpsertCommand command = request == null ? new ModelUpsertCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            modelService.updateModel(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/model")
+    public FrontendResponse<Map<String, Object>> deleteModel(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            String modelId = request == null ? "" : request.getModelId();
+            modelService.deleteModel(userContext.getUserId(), userContext.getOrgId(), modelId);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/model/status")
+    public FrontendResponse<Map<String, Object>> changeModelStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ModelStatusRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ModelStatusCommand command = request == null ? new ModelStatusCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            modelService.changeModelStatus(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/model/select/{modelType}")
+    public FrontendResponse<ModelListResult> selectModels(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @org.springframework.web.bind.annotation.PathVariable("modelType") String modelType) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(modelService.listTypeModels(new ModelTypeQuery(
+                userContext.getUserId(),
+                userContext.getOrgId(),
+                modelType)));
+    }
+
+    @GetMapping("/model/import/providers")
+    public FrontendResponse<ProviderModelTypeResult> listModelImportProviders(
+            @RequestParam(value = "provider", required = false) String provider,
+            @RequestParam(value = "modelType", required = false) String modelType) {
+        return FrontendResponse.ok(modelService.listImportProviders(
+                new ProviderListQuery(defaultIfBlank(provider, ""), defaultIfBlank(modelType, ""))));
+    }
+
+    @GetMapping("/model/recommend")
+    public FrontendResponse<RecommendModelResult> recommendModels(
+            @RequestParam(value = "provider", required = false) String provider,
+            @RequestParam(value = "modelType", required = false) String modelType) {
+        return FrontendResponse.ok(modelService.recommendModels(
+                new RecommendModelQuery(defaultIfBlank(provider, ""), defaultIfBlank(modelType, ""))));
+    }
+
+    @PostMapping("/model/validate-thinking")
+    public FrontendResponse<Map<String, Object>> validateModelThinking() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     @GetMapping("/appspace/assistant/list")
@@ -793,7 +932,6 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping({
-            "/model/select/{modelType}",
             "/prompt/custom/list",
             "/prompt/template/list",
             "/mcp/select",
@@ -1038,6 +1176,155 @@ public class WanwuFrontendApiController {
         command.setOrgId(userContext.getOrgId());
         appService.deleteAssistant(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    public static class ModelUpsertRequest {
+        private String modelId;
+        private String provider;
+        private String modelType;
+        private String model;
+        private String displayName;
+        private AvatarRequest avatar;
+        private String publishDate;
+        private String modelDesc;
+        private String scopeType;
+        private String importSource;
+        private Map<String, Object> config;
+
+        public ModelUpsertCommand toCommand() {
+            ModelUpsertCommand command = new ModelUpsertCommand();
+            command.setModelId(modelId);
+            command.setProvider(provider);
+            command.setModelType(modelType);
+            command.setModel(model);
+            command.setDisplayName(displayName);
+            if (avatar != null) {
+                command.setAvatarKey(avatar.getKey());
+                command.setAvatarPath(avatar.getPath());
+            }
+            command.setPublishDate(publishDate);
+            command.setModelDesc(modelDesc);
+            command.setScopeType(scopeType);
+            command.setImportSource(importSource);
+            command.setConfig(config);
+            return command;
+        }
+
+        public String getModelId() {
+            return modelId;
+        }
+
+        public void setModelId(String modelId) {
+            this.modelId = modelId;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public String getModelType() {
+            return modelType;
+        }
+
+        public void setModelType(String modelType) {
+            this.modelType = modelType;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public AvatarRequest getAvatar() {
+            return avatar;
+        }
+
+        public void setAvatar(AvatarRequest avatar) {
+            this.avatar = avatar;
+        }
+
+        public String getPublishDate() {
+            return publishDate;
+        }
+
+        public void setPublishDate(String publishDate) {
+            this.publishDate = publishDate;
+        }
+
+        public String getModelDesc() {
+            return modelDesc;
+        }
+
+        public void setModelDesc(String modelDesc) {
+            this.modelDesc = modelDesc;
+        }
+
+        public String getScopeType() {
+            return scopeType;
+        }
+
+        public void setScopeType(String scopeType) {
+            this.scopeType = scopeType;
+        }
+
+        public String getImportSource() {
+            return importSource;
+        }
+
+        public void setImportSource(String importSource) {
+            this.importSource = importSource;
+        }
+
+        public Map<String, Object> getConfig() {
+            return config;
+        }
+
+        public void setConfig(Map<String, Object> config) {
+            this.config = config;
+        }
+    }
+
+    public static class ModelIdRequest {
+        private String modelId;
+
+        public String getModelId() {
+            return modelId;
+        }
+
+        public void setModelId(String modelId) {
+            this.modelId = modelId;
+        }
+    }
+
+    public static class ModelStatusRequest extends ModelIdRequest {
+        private Boolean isActive;
+
+        public ModelStatusCommand toCommand() {
+            return new ModelStatusCommand(null, null, getModelId(), isActive);
+        }
+
+        public Boolean getIsActive() {
+            return isActive;
+        }
+
+        public void setIsActive(Boolean active) {
+            isActive = active;
+        }
     }
 
     public static class ApiKeyCreateRequest {

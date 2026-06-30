@@ -47,6 +47,14 @@ import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelListResult;
+import com.unicomai.wanwu.api.model.dto.ModelTypeInfo;
+import com.unicomai.wanwu.api.model.dto.ProviderModelTypeInfo;
+import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
+import com.unicomai.wanwu.api.model.dto.RecommendModelInfo;
+import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -79,8 +87,9 @@ public class WanwuFrontendApiControllerTest {
 
     private final IamService iamService = mock(IamService.class);
     private final AppService appService = mock(AppService.class);
+    private final ModelService modelService = mock(ModelService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new WanwuFrontendApiController(iamService, appService))
+            .standaloneSetup(new WanwuFrontendApiController(iamService, appService, modelService))
             .build();
 
     @Test
@@ -114,10 +123,12 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("permission.user"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[2].perm").value("permission.org"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("permission.role"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("app"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("app.agent"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("api_key"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("model"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("model.model_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[8].perm").value("api_key"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[9].perm").value("api_key.api_key_management"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -214,6 +225,75 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.list[0].orgId").value("default-org"));
+    }
+
+    @Test
+    public void modelManagementRoutesReturnFrontendContracts() throws Exception {
+        when(modelService.listModels(any()))
+                .thenReturn(new ModelListResult(Collections.singletonList(modelInfo("model-001", "DeepSeek Chat", "llm")), 1));
+        when(modelService.getModel(anyString(), anyString(), anyString()))
+                .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
+        when(modelService.listTypeModels(any()))
+                .thenReturn(new ModelListResult(Collections.singletonList(modelInfo("model-001", "DeepSeek Chat", "llm")), 1));
+        when(modelService.listImportProviders(any()))
+                .thenReturn(new ProviderModelTypeResult(Collections.singletonList(providerInfo()), 1));
+        when(modelService.recommendModels(any()))
+                .thenReturn(new RecommendModelResult(Collections.singletonList(recommendInfo()), 1));
+
+        mockMvc.perform(get("/user/api/v1/model/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelType", "llm")
+                        .param("provider", "DeepSeek"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].modelId").value("model-001"))
+                .andExpect(jsonPath("$.data.list[0].displayName").value("DeepSeek Chat"))
+                .andExpect(jsonPath("$.data.list[0].isActive").value(true))
+                .andExpect(jsonPath("$.data.list[0].allowEdit").value(true))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(get("/user/api/v1/model")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelId", "model-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.config.apiKey").value("dev-model-key"));
+
+        mockMvc.perform(get("/user/api/v1/model/select/llm")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].modelId").value("model-001"));
+
+        mockMvc.perform(get("/user/api/v1/model/import/providers")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelType", "llm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].key").value("DeepSeek"))
+                .andExpect(jsonPath("$.data.list[0].children[0].key").value("llm"));
+
+        mockMvc.perform(get("/user/api/v1/model/recommend")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("provider", "DeepSeek")
+                        .param("modelType", "llm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].model").value("deepseek-chat"));
+
+        mockMvc.perform(put("/user/api/v1/model/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"isActive\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(modelService).listModels(any());
+        verify(modelService).getModel("dev-admin", "default-org", "model-001");
+        verify(modelService).listTypeModels(any());
+        verify(modelService).listImportProviders(any());
+        verify(modelService).recommendModels(any());
+        verify(modelService).changeModelStatus(any());
     }
 
     @Test
@@ -981,12 +1061,6 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void editorSelectEndpointsReturnEmptyListsForFrontend() throws Exception {
-        mockMvc.perform(get("/user/api/v1/model/select/llm"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.list", hasSize(0)))
-                .andExpect(jsonPath("$.data.total").value(0));
-
         mockMvc.perform(get("/user/api/v1/prompt/template/list"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -1143,6 +1217,8 @@ public class WanwuFrontendApiControllerTest {
                 permission("permission.user"),
                 permission("permission.org"),
                 permission("permission.role"),
+                permission("model"),
+                permission("model.model_management"),
                 permission("app"),
                 permission("app.agent"),
                 permission("api_key"),
@@ -1152,6 +1228,49 @@ public class WanwuFrontendApiControllerTest {
         orgPermission.put("isAdmin", true);
         orgPermission.put("isSystem", true);
         return orgPermission;
+    }
+
+    private ModelInfo modelInfo(String modelId, String displayName, String modelType) {
+        ModelInfo info = new ModelInfo();
+        info.setModelId(modelId);
+        info.setUuid("uuid-" + modelId);
+        info.setProvider("DeepSeek");
+        info.setModel("deepseek-chat");
+        info.setModelType(modelType);
+        info.setDisplayName(displayName);
+        info.setAvatar(Collections.singletonMap("path", ""));
+        info.setPublishDate("2026-06-30");
+        info.setIsActive(true);
+        info.setUserId("dev-admin");
+        info.setOrgId("default-org");
+        info.setCreatedAt("2026-06-30 00:00:00");
+        info.setUpdatedAt("2026-06-30 00:00:00");
+        info.setModelDesc("Docker development model");
+        info.setTags(Collections.singletonList(Collections.singletonMap("text", "LLM")));
+        info.setConfig(Collections.singletonMap("apiKey", "dev-model-key"));
+        info.setScopeType("1");
+        info.setAllowEdit(true);
+        info.setImportSource("builtin");
+        return info;
+    }
+
+    private ProviderModelTypeInfo providerInfo() {
+        ProviderModelTypeInfo provider = new ProviderModelTypeInfo();
+        provider.setKey("DeepSeek");
+        provider.setName("DeepSeek");
+        provider.setChildren(Collections.singletonList(new ModelTypeInfo("llm", "文本生成")));
+        return provider;
+    }
+
+    private RecommendModelInfo recommendInfo() {
+        RecommendModelInfo info = new RecommendModelInfo();
+        info.setModel("deepseek-chat");
+        info.setDisplayName("DeepSeek Chat");
+        info.setTags(Collections.singletonList(Collections.singletonMap("text", "Tool call")));
+        info.setVisionSupport("noSupport");
+        info.setFunctionCalling("toolCall");
+        info.setThinkingSupport("support");
+        return info;
     }
 
     private Map<String, Object> platformConfig() {

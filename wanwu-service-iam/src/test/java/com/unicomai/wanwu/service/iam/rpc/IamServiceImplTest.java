@@ -45,10 +45,12 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("permission.user"));
         assertTrue(permissions.contains("permission.org"));
         assertTrue(permissions.contains("permission.role"));
+        assertTrue(permissions.contains("model"));
+        assertTrue(permissions.contains("model.model_management"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(8, permissions.size());
+        assertEquals(10, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -73,6 +75,7 @@ public class IamServiceImplTest {
         assertEquals("default-org", ((Map) result.getOrgPermission().get("org")).get("id"));
         assertEquals(java.util.Arrays.asList(
                 "permission", "permission.user", "permission.org", "permission.role",
+                "model", "model.model_management",
                 "app", "app.agent", "api_key", "api_key.api_key_management"),
                 permissions(result.getOrgPermission()));
 

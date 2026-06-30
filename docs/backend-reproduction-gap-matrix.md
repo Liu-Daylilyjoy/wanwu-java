@@ -31,12 +31,12 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/api_key.go` | 5 | Covered for create/update/delete/list/status |
 | `v1/assistant.go` | 32 | Partially covered; tool/workflow/mcp/skill/multi-agent/template/select missing |
 | `v1/callback.go` | 5 | Missing |
-| `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; user/file/doc/model/selects missing |
+| `v1/common.go` | 48 | Partially covered; app-key and app-list covered for Agent; model select endpoints covered; user/file/doc selects still missing |
 | `v1/explore.go` | 25 | Missing except overlapping published Agent conversation behavior |
 | `v1/guest.go` | 13 | Missing |
 | `v1/knowledge.go` | 79 | Missing |
 | `v1/mcp_square.go` | 3 | Missing |
-| `v1/model.go` | 15 | Missing |
+| `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, and select endpoints covered; model experience dialog and ASR stream missing |
 | `v1/oauth.go` | 5 | Missing |
 | `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
 | `v1/rag.go` | 10 | Missing |
@@ -65,7 +65,7 @@ Measured from this Java repo before the full reproduction pass:
 | `KnowledgeBaseSplitterService` | 4 | Missing |
 | `KnowledgeBaseTagService` | 6 | Missing |
 | `MCPService` | 65 | Placeholder-level |
-| `ModelService` | 16 | Placeholder-level |
+| `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows; model experience persistence and callback inference APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
 | `RagService` | 15 | Placeholder-level |
@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
+- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
 - `app` / token `dev-token-app`: `app` and `app.agent` only.
 
-Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model persistence model.
 
 ## Operating Rule
 

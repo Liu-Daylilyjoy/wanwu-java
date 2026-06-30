@@ -49,6 +49,31 @@ services:
       retries: 12
       start_period: 30s
 
+  model:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_MODULE: wanwu-service-model
+    image: wanwu-java/model:0.1.0-SNAPSHOT
+    container_name: wanwu-java-model
+    environment:
+      DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      JAVA_OPTS: ${WANWU_MODEL_JAVA_OPTS:-}
+    ports:
+      - "8082:8082"
+      - "20882:20882"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
   app:
     profiles: ["full"]
     build:

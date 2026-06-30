@@ -28,6 +28,8 @@ public class IamServiceImpl implements IamService {
             "permission.user",
             "permission.org",
             "permission.role",
+            "model",
+            "model.model_management",
             "app",
             "app.agent",
             "api_key",
@@ -310,6 +312,9 @@ public class IamServiceImpl implements IamService {
                         route("Organizations", "permission.org", Collections.<Map<String, Object>>emptyList()),
                         route("Roles", "permission.role", Collections.<Map<String, Object>>emptyList())
                 )),
+                route("Model Service", "model", Collections.singletonList(
+                        route("Model Management", "model.model_management", Collections.<Map<String, Object>>emptyList())
+                )),
                 route("Application", "app", Collections.singletonList(
                         route("Agent", "app.agent", Collections.<Map<String, Object>>emptyList())
                 )),
@@ -345,6 +350,12 @@ public class IamServiceImpl implements IamService {
         }
         if ("app.agent".equals(perm)) {
             return "Agent";
+        }
+        if ("model".equals(perm)) {
+            return "Model Service";
+        }
+        if ("model.model_management".equals(perm)) {
+            return "Model Management";
         }
         if ("api_key".equals(perm)) {
             return "API Key";
