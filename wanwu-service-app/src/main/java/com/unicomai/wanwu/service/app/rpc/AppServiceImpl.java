@@ -47,6 +47,9 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -105,6 +108,7 @@ public class AppServiceImpl implements AppService {
     private static final String APP_TYPE_ASSISTANT = "assistant";
     private static final String APP_TYPE_RAG = "rag";
     private static final String APP_TYPE_WORKFLOW = "workflow";
+    private static final String APP_TYPE_CHATFLOW = "chatflow";
     private static final String PUBLISH_TYPE_UNPUBLISHED = "";
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
@@ -460,8 +464,8 @@ public class AppServiceImpl implements AppService {
             publishRag(command, userId, orgId, publishType);
             return;
         }
-        if (APP_TYPE_WORKFLOW.equals(appType)) {
-            publishWorkflow(command, userId, orgId, publishType);
+        if (isWorkflowLike(appType)) {
+            publishWorkflow(command, userId, orgId, publishType, appType);
             return;
         }
         if (!APP_TYPE_AGENT.equals(appType)) {
@@ -517,10 +521,10 @@ public class AppServiceImpl implements AppService {
             }
             return;
         }
-        if (APP_TYPE_WORKFLOW.equals(appType)) {
+        if (isWorkflowLike(appType)) {
             if (!applicationRepository.updateWorkflowPublishType(
-                    userId, orgId, command.getAppId(), PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
-                throw new IllegalArgumentException("workflow draft not found");
+                    userId, orgId, command.getAppId(), appType, PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
+                throw new IllegalArgumentException(appType + " draft not found");
             }
             return;
         }
@@ -548,10 +552,10 @@ public class AppServiceImpl implements AppService {
             }
             return toVersionInfo(latest, defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
         }
-        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
-            AppRecord record = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId);
+        if (isWorkflowLike(context.appType)) {
+            AppRecord record = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId, context.appType);
             if (record == null) {
-                throw new IllegalArgumentException("workflow draft not found");
+                throw new IllegalArgumentException(context.appType + " draft not found");
             }
             WorkflowSnapshotRecord latest = applicationRepository.findLatestWorkflowSnapshot(
                     context.userId, context.orgId, context.appId);
@@ -584,7 +588,7 @@ public class AppServiceImpl implements AppService {
             }
             return new AppVersionListResult(versions, versions.size());
         }
-        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+        if (isWorkflowLike(context.appType)) {
             List<WorkflowSnapshotRecord> snapshots = applicationRepository.listWorkflowSnapshots(
                     context.userId, context.orgId, context.appId);
             List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
@@ -620,13 +624,13 @@ public class AppServiceImpl implements AppService {
             }
             return;
         }
-        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+        if (isWorkflowLike(context.appType)) {
             if (!applicationRepository.updateLatestWorkflowSnapshot(
                     context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
-                throw new IllegalArgumentException("workflow snapshot not found");
+                throw new IllegalArgumentException(context.appType + " snapshot not found");
             }
-            if (!applicationRepository.updateWorkflowPublishType(context.userId, context.orgId, context.appId, publishType, now)) {
-                throw new IllegalArgumentException("workflow draft not found");
+            if (!applicationRepository.updateWorkflowPublishType(context.userId, context.orgId, context.appId, context.appType, publishType, now)) {
+                throw new IllegalArgumentException(context.appType + " draft not found");
             }
             return;
         }
@@ -652,7 +656,7 @@ public class AppServiceImpl implements AppService {
             rollbackRagVersion(command, context);
             return;
         }
-        if (APP_TYPE_WORKFLOW.equals(context.appType)) {
+        if (isWorkflowLike(context.appType)) {
             rollbackWorkflowVersion(command, context);
             return;
         }
@@ -701,11 +705,11 @@ public class AppServiceImpl implements AppService {
             }
             return new ApplicationListResult(items, items.size());
         }
-        if (APP_TYPE_WORKFLOW.equals(appType)) {
+        if (isWorkflowLike(appType)) {
             String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
             String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
             String name = query == null ? "" : defaultIfBlank(query.getName(), "");
-            List<AppRecord> records = applicationRepository.listWorkflows(userId, orgId, name);
+            List<AppRecord> records = applicationRepository.listWorkflows(userId, orgId, name, appType);
             List<Map<String, Object>> items = new ArrayList<>(records.size());
             for (AppRecord record : records) {
                 items.add(toFrontendCard(record));
@@ -1022,16 +1026,25 @@ public class AppServiceImpl implements AppService {
 
     @Override
     public WorkflowCreateResult createWorkflow(WorkflowCreateCommand command) {
+        return createFlow(command, APP_TYPE_WORKFLOW);
+    }
+
+    @Override
+    public WorkflowCreateResult createChatflow(WorkflowCreateCommand command) {
+        return createFlow(command, APP_TYPE_CHATFLOW);
+    }
+
+    private WorkflowCreateResult createFlow(WorkflowCreateCommand command, String appType) {
         if (command == null) {
-            throw new IllegalArgumentException("workflow create command is required");
+            throw new IllegalArgumentException(appType + " create command is required");
         }
         if (isBlank(command.getName())) {
-            throw new IllegalArgumentException("workflow name is required");
+            throw new IllegalArgumentException(appType + " name is required");
         }
         long now = clock.millis();
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        String workflowId = newWorkflowId();
+        String workflowId = newFlowId(appType);
 
         AppRecord record = new AppRecord();
         record.setCreatedAt(now);
@@ -1039,7 +1052,7 @@ public class AppServiceImpl implements AppService {
         record.setUserId(userId);
         record.setOrgId(orgId);
         record.setAppId(workflowId);
-        record.setAppType(APP_TYPE_WORKFLOW);
+        record.setAppType(appType);
         record.setPublishType(PUBLISH_TYPE_UNPUBLISHED);
         record.setName(command.getName().trim());
         record.setDesc(defaultIfBlank(command.getDesc(), ""));
@@ -1055,14 +1068,23 @@ public class AppServiceImpl implements AppService {
 
     @Override
     public WorkflowCreateResult importWorkflow(WorkflowImportCommand command) {
+        return importFlow(command, APP_TYPE_WORKFLOW);
+    }
+
+    @Override
+    public WorkflowCreateResult importChatflow(WorkflowImportCommand command) {
+        return importFlow(command, APP_TYPE_CHATFLOW);
+    }
+
+    private WorkflowCreateResult importFlow(WorkflowImportCommand command, String appType) {
         if (command == null) {
-            throw new IllegalArgumentException("workflow import command is required");
+            throw new IllegalArgumentException(appType + " import command is required");
         }
         if (isBlank(command.getName())) {
-            throw new IllegalArgumentException("workflow name is required");
+            throw new IllegalArgumentException(appType + " name is required");
         }
         if (isBlank(command.getDesc())) {
-            throw new IllegalArgumentException("workflow desc is required");
+            throw new IllegalArgumentException(appType + " desc is required");
         }
         WorkflowCreateCommand create = new WorkflowCreateCommand();
         create.setName(command.getName());
@@ -1070,28 +1092,38 @@ public class AppServiceImpl implements AppService {
         create.setSchema(command.getSchema());
         create.setUserId(command.getUserId());
         create.setOrgId(command.getOrgId());
-        return createWorkflow(create);
+        return createFlow(create, appType);
     }
 
     @Override
     public WorkflowCreateResult copyWorkflow(WorkflowCopyCommand command) {
+        return copyFlow(command, APP_TYPE_WORKFLOW);
+    }
+
+    @Override
+    public WorkflowCreateResult copyChatflow(WorkflowCopyCommand command) {
+        return copyFlow(command, APP_TYPE_CHATFLOW);
+    }
+
+    private WorkflowCreateResult copyFlow(WorkflowCopyCommand command, String appType) {
         if (command == null || isBlank(command.getWorkflowId())) {
-            throw new IllegalArgumentException("workflow id is required");
+            throw new IllegalArgumentException(appType + " id is required");
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        AppRecord source = applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId());
+        AppRecord source = applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId(), appType);
         if (source == null) {
-            throw new IllegalArgumentException("workflow draft not found");
+            throw new IllegalArgumentException(appType + " draft not found");
         }
         if (command.isNeedPublished()
                 && applicationRepository.findLatestWorkflowSnapshot(userId, orgId, command.getWorkflowId()) == null) {
-            throw new IllegalArgumentException("workflow snapshot not found");
+            throw new IllegalArgumentException(appType + " snapshot not found");
         }
 
         long now = clock.millis();
-        String newWorkflowId = newWorkflowId();
-        AppRecord copied = copyBaseRecord(source, newWorkflowId, nextWorkflowCopyName(userId, orgId, source.getName()), now);
+        String newWorkflowId = newFlowId(appType);
+        AppRecord copied = copyBaseRecord(source, newWorkflowId,
+                nextWorkflowCopyName(userId, orgId, source.getName(), appType), now);
         WorkflowDraftRecord sourceDraft = applicationRepository.findWorkflowDraft(userId, orgId, command.getWorkflowId());
         WorkflowDraftRecord copiedDraft = copyWorkflowDraft(sourceDraft, userId, orgId, newWorkflowId, now);
         applicationRepository.copyWorkflow(copied, copiedDraft);
@@ -1100,33 +1132,51 @@ public class AppServiceImpl implements AppService {
 
     @Override
     public void deleteWorkflow(WorkflowDeleteCommand command) {
+        deleteFlow(command, APP_TYPE_WORKFLOW);
+    }
+
+    @Override
+    public void deleteChatflow(WorkflowDeleteCommand command) {
+        deleteFlow(command, APP_TYPE_CHATFLOW);
+    }
+
+    private void deleteFlow(WorkflowDeleteCommand command, String appType) {
         if (command == null || isBlank(command.getWorkflowId())) {
-            throw new IllegalArgumentException("workflow id is required");
+            throw new IllegalArgumentException(appType + " id is required");
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        if (!applicationRepository.deleteWorkflow(userId, orgId, command.getWorkflowId())) {
-            throw new IllegalArgumentException("workflow draft not found");
+        if (!applicationRepository.deleteWorkflow(userId, orgId, command.getWorkflowId(), appType)) {
+            throw new IllegalArgumentException(appType + " draft not found");
         }
     }
 
     @Override
     public WorkflowExportResult exportWorkflow(WorkflowExportQuery query) {
+        return exportFlow(query, APP_TYPE_WORKFLOW);
+    }
+
+    @Override
+    public WorkflowExportResult exportChatflow(WorkflowExportQuery query) {
+        return exportFlow(query, APP_TYPE_CHATFLOW);
+    }
+
+    private WorkflowExportResult exportFlow(WorkflowExportQuery query, String appType) {
         if (query == null || isBlank(query.getWorkflowId())) {
-            throw new IllegalArgumentException("workflow id is required");
+            throw new IllegalArgumentException(appType + " id is required");
         }
         String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
-        AppRecord workflow = applicationRepository.findWorkflow(userId, orgId, query.getWorkflowId());
+        AppRecord workflow = applicationRepository.findWorkflow(userId, orgId, query.getWorkflowId(), appType);
         if (workflow == null) {
-            throw new IllegalArgumentException("workflow draft not found");
+            throw new IllegalArgumentException(appType + " draft not found");
         }
         if (query.isPublished() || !isBlank(query.getVersion())) {
             WorkflowSnapshotRecord snapshot = isBlank(query.getVersion())
                     ? applicationRepository.findLatestWorkflowSnapshot(userId, orgId, query.getWorkflowId())
                     : applicationRepository.findWorkflowSnapshotByVersion(userId, orgId, query.getWorkflowId(), query.getVersion());
             if (snapshot == null) {
-                throw new IllegalArgumentException("workflow snapshot not found");
+                throw new IllegalArgumentException(appType + " snapshot not found");
             }
             Map<String, Object> snapshotInfo = mapOrDefault(snapshot.getWorkflowInfoJson(), new LinkedHashMap<String, Object>());
             return new WorkflowExportResult(
@@ -1160,6 +1210,54 @@ public class AppServiceImpl implements AppService {
                 : command.getInput();
         output.putAll(input);
         return new WorkflowRunResult(command.getWorkflowId(), output);
+    }
+
+    @Override
+    public Map<String, Object> listChatflowApplications(ChatflowApplicationListQuery query) {
+        if (query == null || isBlank(query.getWorkflowId())) {
+            throw new IllegalArgumentException("chatflow workflow id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AppRecord chatflow = applicationRepository.findWorkflow(userId, orgId, query.getWorkflowId(), APP_TYPE_CHATFLOW);
+        if (chatflow == null) {
+            throw new IllegalArgumentException("chatflow draft not found");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("intelligences", Collections.singletonList(chatflowIntelligence(chatflow)));
+        result.put("total", 1);
+        result.put("has_more", false);
+        result.put("next_cursor_id", "");
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> getChatflowApplication(ChatflowApplicationInfoQuery query) {
+        if (query == null || isBlank(query.getIntelligenceId())) {
+            throw new IllegalArgumentException("chatflow intelligence id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AppRecord chatflow = findChatflowByApplicationId(userId, orgId, query.getIntelligenceId());
+        if (chatflow == null) {
+            throw new IllegalArgumentException("chatflow application not found");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("intelligence_type", query.getIntelligenceType() == null ? 1L : query.getIntelligenceType());
+        result.put("basic_info", chatflowBasicInfo(chatflow));
+        result.put("publish_info", chatflowPublishInfo(chatflow));
+        result.put("owner_info", chatflowOwnerInfo(chatflow));
+        return result;
+    }
+
+    @Override
+    public void deleteChatflowConversation(ChatflowConversationDeleteCommand command) {
+        if (command == null || isBlank(command.getProjectId())) {
+            throw new IllegalArgumentException("chatflow project id is required");
+        }
+        if (isBlank(command.getUniqueId())) {
+            throw new IllegalArgumentException("chatflow unique id is required");
+        }
     }
 
     @Override
@@ -2295,6 +2393,10 @@ public class AppServiceImpl implements AppService {
         item.put("uniqueId", record.getAppType() + "_" + record.getAppId());
         item.put("appId", record.getAppId());
         item.put("appType", record.getAppType());
+        if (isWorkflowLike(record.getAppType())) {
+            item.put("workflowId", record.getAppId());
+            item.put("workflow_id", record.getAppId());
+        }
         item.put("avatar", avatar(record));
         item.put("name", record.getName());
         item.put("desc", record.getDesc());
@@ -2370,7 +2472,7 @@ public class AppServiceImpl implements AppService {
         item.put("workflowId", record.getAppId());
         item.put("workflow_id", record.getAppId());
         item.put("appId", record.getAppId());
-        item.put("appType", APP_TYPE_WORKFLOW);
+        item.put("appType", defaultIfBlank(record.getAppType(), APP_TYPE_WORKFLOW));
         item.put("uuid", record.getAppId());
         item.put("avatar", avatar(record));
         item.put("name", record.getName());
@@ -2378,6 +2480,76 @@ public class AppServiceImpl implements AppService {
         item.put("category", record.getCategory());
         item.put("publishType", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
         return item;
+    }
+
+    private Map<String, Object> chatflowIntelligence(AppRecord record) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("basic_info", chatflowBasicInfo(record));
+        item.put("type", 1L);
+        item.put("publish_info", chatflowPublishInfo(record));
+        Map<String, Object> permission = new LinkedHashMap<>();
+        permission.put("in_collaboration", false);
+        permission.put("can_delete", true);
+        permission.put("can_view", true);
+        item.put("permission_info", permission);
+        item.put("owner_info", chatflowOwnerInfo(record));
+        Map<String, Object> favorite = new LinkedHashMap<>();
+        favorite.put("is_fav", false);
+        favorite.put("fav_time", "");
+        item.put("favorite_info", favorite);
+        return item;
+    }
+
+    private Map<String, Object> chatflowBasicInfo(AppRecord record) {
+        Map<String, Object> basic = new LinkedHashMap<>();
+        basic.put("id", chatflowApplicationId(record.getAppId()));
+        basic.put("name", defaultIfBlank(record.getName(), ""));
+        basic.put("description", defaultIfBlank(record.getDesc(), ""));
+        basic.put("icon_uri", defaultIfBlank(record.getAvatarKey(), ""));
+        basic.put("icon_url", defaultIfBlank(record.getAvatarPath(), ""));
+        basic.put("space_id", record.getOrgId());
+        basic.put("owner_id", record.getUserId());
+        basic.put("create_time", record.getCreatedAt() == null ? 0L : record.getCreatedAt() / 1000L);
+        basic.put("update_time", record.getUpdatedAt() == null ? 0L : record.getUpdatedAt() / 1000L);
+        basic.put("status", 1L);
+        basic.put("publish_time", 0L);
+        basic.put("enterprise_id", "");
+        basic.put("organization_id", 0L);
+        return basic;
+    }
+
+    private Map<String, Object> chatflowPublishInfo(AppRecord record) {
+        Map<String, Object> publish = new LinkedHashMap<>();
+        publish.put("publish_time", "");
+        publish.put("has_published", !isBlank(record.getPublishType()));
+        publish.put("connectors", Collections.emptyList());
+        return publish;
+    }
+
+    private Map<String, Object> chatflowOwnerInfo(AppRecord record) {
+        Map<String, Object> owner = new LinkedHashMap<>();
+        owner.put("user_id", record.getUserId());
+        owner.put("nickname", "admin");
+        owner.put("avatar_url", "");
+        owner.put("user_unique_name", record.getUserId());
+        owner.put("user_label", null);
+        return owner;
+    }
+
+    private AppRecord findChatflowByApplicationId(String userId, String orgId, String applicationId) {
+        List<AppRecord> chatflows = applicationRepository.listWorkflows(userId, orgId, "", APP_TYPE_CHATFLOW);
+        for (AppRecord record : chatflows) {
+            if (chatflowApplicationId(record.getAppId()).equals(applicationId)) {
+                return record;
+            }
+        }
+        return null;
+    }
+
+    private String chatflowApplicationId(String workflowId) {
+        long hash = workflowId == null ? 0 : workflowId.hashCode();
+        long positive = hash == Long.MIN_VALUE ? 0 : Math.abs(hash);
+        return String.valueOf(1000000000L + positive);
     }
 
     private AppRecord copyBaseRecord(AppRecord source, String newAssistantId, String newName, long now) {
@@ -2509,9 +2681,13 @@ public class AppServiceImpl implements AppService {
     }
 
     private String nextWorkflowCopyName(String userId, String orgId, String sourceName) {
+        return nextWorkflowCopyName(userId, orgId, sourceName, APP_TYPE_WORKFLOW);
+    }
+
+    private String nextWorkflowCopyName(String userId, String orgId, String sourceName, String appType) {
         String prefix = sourceName + "_";
         int max = 0;
-        for (String name : applicationRepository.listWorkflowNamesByPrefix(userId, orgId, prefix)) {
+        for (String name : applicationRepository.listWorkflowNamesByPrefix(userId, orgId, prefix, appType)) {
             if (name == null || !name.startsWith(prefix)) {
                 continue;
             }
@@ -2561,9 +2737,13 @@ public class AppServiceImpl implements AppService {
     }
 
     private void publishWorkflow(AppPublishCommand command, String userId, String orgId, String publishType) {
-        AppRecord record = applicationRepository.findWorkflow(userId, orgId, command.getAppId());
+        publishWorkflow(command, userId, orgId, publishType, APP_TYPE_WORKFLOW);
+    }
+
+    private void publishWorkflow(AppPublishCommand command, String userId, String orgId, String publishType, String appType) {
+        AppRecord record = applicationRepository.findWorkflow(userId, orgId, command.getAppId(), appType);
         if (record == null) {
-            throw new IllegalArgumentException("workflow draft not found");
+            throw new IllegalArgumentException(appType + " draft not found");
         }
         WorkflowSnapshotRecord latest = applicationRepository.findLatestWorkflowSnapshot(userId, orgId, command.getAppId());
         String version = isBlank(command.getVersion()) ? nextVersion(latestVersion(latest)) : command.getVersion().trim();
@@ -2593,7 +2773,7 @@ public class AppServiceImpl implements AppService {
                 ? defaultWorkflowSchema(command.getAppId())
                 : defaultIfBlank(draft.getSchemaJson(), defaultWorkflowSchema(command.getAppId())));
         applicationRepository.saveWorkflowSnapshot(snapshot);
-        applicationRepository.updateWorkflowPublishType(userId, orgId, command.getAppId(), publishType, now);
+        applicationRepository.updateWorkflowPublishType(userId, orgId, command.getAppId(), appType, publishType, now);
     }
 
     private void rollbackRagVersion(AppVersionRollbackCommand command, VersionContext context) {
@@ -2616,9 +2796,9 @@ public class AppServiceImpl implements AppService {
     }
 
     private void rollbackWorkflowVersion(AppVersionRollbackCommand command, VersionContext context) {
-        AppRecord existing = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId);
+        AppRecord existing = applicationRepository.findWorkflow(context.userId, context.orgId, context.appId, context.appType);
         if (existing == null) {
-            throw new IllegalArgumentException("workflow draft not found");
+            throw new IllegalArgumentException(context.appType + " draft not found");
         }
         WorkflowSnapshotRecord snapshot = applicationRepository.findWorkflowSnapshotByVersion(
                 context.userId, context.orgId, context.appId, command.getVersion());
@@ -2649,7 +2829,7 @@ public class AppServiceImpl implements AppService {
         String normalizedAppType = normalizeAppType(appType);
         if (!APP_TYPE_AGENT.equals(normalizedAppType)
                 && !APP_TYPE_RAG.equals(normalizedAppType)
-                && !APP_TYPE_WORKFLOW.equals(normalizedAppType)) {
+                && !isWorkflowLike(normalizedAppType)) {
             throw new IllegalArgumentException("unsupported app type");
         }
         if (isBlank(appId)) {
@@ -2672,6 +2852,10 @@ public class AppServiceImpl implements AppService {
             return APP_TYPE_AGENT;
         }
         return normalized;
+    }
+
+    private boolean isWorkflowLike(String appType) {
+        return APP_TYPE_WORKFLOW.equals(appType) || APP_TYPE_CHATFLOW.equals(appType);
     }
 
     private String normalizePublishType(String publishType, String defaultValue) {
@@ -2715,7 +2899,7 @@ public class AppServiceImpl implements AppService {
             return latestVersion(applicationRepository.findLatestRagSnapshot(
                     record.getUserId(), record.getOrgId(), record.getAppId()));
         }
-        if (APP_TYPE_WORKFLOW.equals(record.getAppType())) {
+        if (isWorkflowLike(record.getAppType())) {
             return latestVersion(applicationRepository.findLatestWorkflowSnapshot(
                     record.getUserId(), record.getOrgId(), record.getAppId()));
         }
@@ -2975,7 +3159,12 @@ public class AppServiceImpl implements AppService {
     }
 
     private String newWorkflowId() {
-        return "workflow-" + UUID.randomUUID().toString().replace("-", "");
+        return newFlowId(APP_TYPE_WORKFLOW);
+    }
+
+    private String newFlowId(String appType) {
+        String prefix = APP_TYPE_CHATFLOW.equals(appType) ? "chatflow-" : "workflow-";
+        return prefix + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String newConversationId() {

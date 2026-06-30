@@ -407,12 +407,22 @@ public class MybatisApplicationRepository implements ApplicationRepository {
 
     @Override
     public List<AppRecord> listWorkflows(String userId, String orgId, String name) {
-        return appMapper.selectWorkflowRecords(userId, orgId, name);
+        return listWorkflows(userId, orgId, name, "workflow");
+    }
+
+    @Override
+    public List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType) {
+        return appMapper.selectWorkflowRecords(userId, orgId, name, appType);
     }
 
     @Override
     public AppRecord findWorkflow(String userId, String orgId, String workflowId) {
-        return appMapper.selectWorkflowRecord(userId, orgId, workflowId);
+        return findWorkflow(userId, orgId, workflowId, "workflow");
+    }
+
+    @Override
+    public AppRecord findWorkflow(String userId, String orgId, String workflowId, String appType) {
+        return appMapper.selectWorkflowRecord(userId, orgId, workflowId, appType);
     }
 
     @Override
@@ -428,16 +438,27 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     @Transactional
     public boolean deleteWorkflow(String userId, String orgId, String workflowId) {
+        return deleteWorkflow(userId, orgId, workflowId, "workflow");
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteWorkflow(String userId, String orgId, String workflowId, String appType) {
         appUrlMapper.deleteByAssistant(userId, orgId, workflowId);
         workflowSnapshotMapper.deleteByWorkflow(userId, orgId, workflowId);
         int draftDeleted = workflowDraftMapper.deleteDraft(userId, orgId, workflowId);
-        int appDeleted = appMapper.deleteWorkflowApp(userId, orgId, workflowId);
+        int appDeleted = appMapper.deleteWorkflowApp(userId, orgId, workflowId, appType);
         return draftDeleted > 0 && appDeleted > 0;
     }
 
     @Override
     public List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix) {
-        return appMapper.selectWorkflowNamesByPrefix(userId, orgId, prefix);
+        return listWorkflowNamesByPrefix(userId, orgId, prefix, "workflow");
+    }
+
+    @Override
+    public List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix, String appType) {
+        return appMapper.selectWorkflowNamesByPrefix(userId, orgId, prefix, appType);
     }
 
     @Override
@@ -481,13 +502,18 @@ public class MybatisApplicationRepository implements ApplicationRepository {
 
     @Override
     public boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String publishType, long updatedAt) {
-        return appMapper.updateWorkflowPublishType(userId, orgId, workflowId, publishType, updatedAt) > 0;
+        return updateWorkflowPublishType(userId, orgId, workflowId, "workflow", publishType, updatedAt);
+    }
+
+    @Override
+    public boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String appType, String publishType, long updatedAt) {
+        return appMapper.updateWorkflowPublishType(userId, orgId, workflowId, appType, publishType, updatedAt) > 0;
     }
 
     @Override
     @Transactional
     public boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft) {
-        appMapper.updateWorkflowUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getUpdatedAt());
+        appMapper.updateWorkflowUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getAppType(), record.getUpdatedAt());
         int updated = workflowDraftMapper.updateDraft(record);
         if (updated <= 0) {
             return false;

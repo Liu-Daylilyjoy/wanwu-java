@@ -43,6 +43,9 @@ import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
@@ -634,6 +637,135 @@ public class WanwuFrontendApiControllerTest {
         assertEquals("workflow-001", deleteCaptor.getValue().getWorkflowId());
         assertEquals("dev-admin", deleteCaptor.getValue().getUserId());
         assertEquals("default-org", deleteCaptor.getValue().getOrgId());
+    }
+
+    @Test
+    public void chatflowRoutesReturnFrontendContractsAndMapCommands() throws Exception {
+        Map<String, Object> chatflowCard = new LinkedHashMap<>();
+        chatflowCard.put("appId", "chatflow-001");
+        chatflowCard.put("workflowId", "chatflow-001");
+        chatflowCard.put("workflow_id", "chatflow-001");
+        chatflowCard.put("appType", "chatflow");
+        chatflowCard.put("name", "PolicyChat");
+        chatflowCard.put("desc", "policy chatflow");
+        chatflowCard.put("publishType", "private");
+        chatflowCard.put("version", "");
+
+        Map<String, Object> basicInfo = new LinkedHashMap<>();
+        basicInfo.put("id", "100001");
+        basicInfo.put("name", "PolicyChat");
+        Map<String, Object> intelligence = new LinkedHashMap<>();
+        intelligence.put("basic_info", basicInfo);
+        Map<String, Object> applicationList = new LinkedHashMap<>();
+        applicationList.put("intelligences", Collections.singletonList(intelligence));
+        applicationList.put("total", 1);
+        applicationList.put("has_more", false);
+        applicationList.put("next_cursor_id", "");
+
+        Map<String, Object> applicationInfo = new LinkedHashMap<>();
+        applicationInfo.put("intelligence_type", 1L);
+        applicationInfo.put("basic_info", basicInfo);
+
+        when(appService.createChatflow(any(WorkflowCreateCommand.class)))
+                .thenReturn(new WorkflowCreateResult("chatflow-001"));
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(chatflowCard), 1));
+        when(appService.copyChatflow(any(WorkflowCopyCommand.class)))
+                .thenReturn(new WorkflowCreateResult("chatflow-002"));
+        when(appService.exportChatflow(any(WorkflowExportQuery.class)))
+                .thenReturn(new WorkflowExportResult("PolicyChat", "policy chatflow", "{\"nodes\":[]}"));
+        when(appService.importChatflow(any(WorkflowImportCommand.class)))
+                .thenReturn(new WorkflowCreateResult("chatflow-003"));
+        when(appService.listChatflowApplications(any(ChatflowApplicationListQuery.class)))
+                .thenReturn(applicationList);
+        when(appService.getChatflowApplication(any(ChatflowApplicationInfoQuery.class)))
+                .thenReturn(applicationInfo);
+
+        mockMvc.perform(post("/user/api/v1/appspace/chatflow")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"PolicyChat\",\"desc\":\"policy chatflow\",\"avatar\":{\"key\":\"avatar-key\",\"path\":\"/avatar.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("chatflow-001"))
+                .andExpect(jsonPath("$.data.workflowId").value("chatflow-001"));
+
+        org.mockito.ArgumentCaptor<WorkflowCreateCommand> createCaptor = forClass(WorkflowCreateCommand.class);
+        verify(appService).createChatflow(createCaptor.capture());
+        assertEquals("PolicyChat", createCaptor.getValue().getName());
+        assertEquals("avatar-key", createCaptor.getValue().getAvatarKey());
+
+        mockMvc.perform(get("/user/api/v1/appspace/workflow/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "chatflow")
+                        .param("name", "Policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appType").value("chatflow"))
+                .andExpect(jsonPath("$.data.list[0].workflow_id").value("chatflow-001"));
+
+        org.mockito.ArgumentCaptor<ApplicationListQuery> listCaptor = forClass(ApplicationListQuery.class);
+        verify(appService).listApplications(listCaptor.capture());
+        assertEquals("chatflow", listCaptor.getValue().getAppType());
+
+        mockMvc.perform(post("/user/api/v1/appspace/chatflow/copy")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"chatflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("chatflow-002"));
+
+        mockMvc.perform(get("/user/api/v1/appspace/chatflow/export/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("workflow_id", "chatflow-001"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"name\":\"PolicyChat\"")));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "chatflow.json",
+                "application/json",
+                "{\"name\":\"ImportedChat\",\"desc\":\"imported\",\"schema\":\"{\\\"nodes\\\":[]}\"}"
+                        .getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/user/api/v1/appspace/chatflow/import")
+                        .file(file)
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("chatflow-003"));
+
+        mockMvc.perform(post("/user/api/v1/chatflow/application/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"chatflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.intelligences[0].basic_info.id").value("100001"));
+
+        mockMvc.perform(post("/user/api/v1/chatflow/application/info")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intelligence_id\":\"100001\",\"intelligence_type\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.basic_info.name").value("PolicyChat"));
+
+        mockMvc.perform(delete("/user/api/v1/chatflow/conversation/delete")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"project_id\":\"chatflow-001\",\"unique_id\":\"100001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/app")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"chatflow-001\",\"appType\":\"chatflow\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(appService).copyChatflow(any(WorkflowCopyCommand.class));
+        verify(appService).exportChatflow(any(WorkflowExportQuery.class));
+        verify(appService).importChatflow(any(WorkflowImportCommand.class));
+        verify(appService).listChatflowApplications(any(ChatflowApplicationListQuery.class));
+        verify(appService).getChatflowApplication(any(ChatflowApplicationInfoQuery.class));
+        verify(appService).deleteChatflowConversation(any(ChatflowConversationDeleteCommand.class));
+        verify(appService).deleteChatflow(any(WorkflowDeleteCommand.class));
     }
 
     @Test

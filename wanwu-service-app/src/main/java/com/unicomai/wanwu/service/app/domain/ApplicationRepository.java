@@ -74,13 +74,21 @@ public interface ApplicationRepository {
 
     List<AppRecord> listWorkflows(String userId, String orgId, String name);
 
+    List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType);
+
     AppRecord findWorkflow(String userId, String orgId, String workflowId);
+
+    AppRecord findWorkflow(String userId, String orgId, String workflowId, String appType);
 
     WorkflowDraftRecord findWorkflowDraft(String userId, String orgId, String workflowId);
 
     boolean deleteWorkflow(String userId, String orgId, String workflowId);
 
+    boolean deleteWorkflow(String userId, String orgId, String workflowId, String appType);
+
     List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix);
+
+    List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix, String appType);
 
     AppRecord copyWorkflow(AppRecord record, WorkflowDraftRecord draft);
 
@@ -95,6 +103,8 @@ public interface ApplicationRepository {
     boolean updateLatestWorkflowSnapshot(String userId, String orgId, String workflowId, String desc, long updatedAt);
 
     boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String publishType, long updatedAt);
+
+    boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String appType, String publishType, long updatedAt);
 
     boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft);
 

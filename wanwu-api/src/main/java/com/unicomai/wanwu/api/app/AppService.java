@@ -18,6 +18,9 @@ import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
@@ -127,6 +130,22 @@ public interface AppService {
     WorkflowExportResult exportWorkflow(WorkflowExportQuery query);
 
     WorkflowRunResult runWorkflow(WorkflowRunCommand command);
+
+    WorkflowCreateResult createChatflow(WorkflowCreateCommand command);
+
+    WorkflowCreateResult importChatflow(WorkflowImportCommand command);
+
+    WorkflowCreateResult copyChatflow(WorkflowCopyCommand command);
+
+    void deleteChatflow(WorkflowDeleteCommand command);
+
+    WorkflowExportResult exportChatflow(WorkflowExportQuery query);
+
+    Map<String, Object> listChatflowApplications(ChatflowApplicationListQuery query);
+
+    Map<String, Object> getChatflowApplication(ChatflowApplicationInfoQuery query);
+
+    void deleteChatflowConversation(ChatflowConversationDeleteCommand command);
 
     void addAssistantWorkflow(AssistantResourceCommand command);
 

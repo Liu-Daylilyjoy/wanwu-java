@@ -45,6 +45,9 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -124,6 +127,7 @@ public class WanwuFrontendApiController {
     private static final String AGENT_APP_TYPE = "agent";
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
+    private static final String CHATFLOW_APP_TYPE = "chatflow";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
@@ -903,11 +907,13 @@ public class WanwuFrontendApiController {
     @GetMapping("/appspace/workflow/list")
     public FrontendResponse<ApplicationListResult> workflowList(
             @RequestHeader(value = "Authorization", required = false) String authorization,
-            @RequestParam(value = "name", required = false) String name) {
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "appType", required = false) String appType) {
         try {
             UserContext userContext = userContext(authorization);
+            String effectiveAppType = CHATFLOW_APP_TYPE.equals(appType) ? CHATFLOW_APP_TYPE : WORKFLOW_APP_TYPE;
             return FrontendResponse.ok(appService.listApplications(
-                    new ApplicationListQuery(WORKFLOW_APP_TYPE, name, userContext.getUserId(), userContext.getOrgId())));
+                    new ApplicationListQuery(effectiveAppType, name, userContext.getUserId(), userContext.getOrgId())));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -981,6 +987,127 @@ public class WanwuFrontendApiController {
     @PostMapping("/appspace/workflow/convert")
     public FrontendResponse<Map<String, Object>> convertWorkflow() {
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PostMapping("/appspace/chatflow")
+    public FrontendResponse<Map<String, Object>> createChatflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowCreateCommand command = request == null ? new WorkflowCreateRequest().toCreateCommand() : request.toCreateCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.createChatflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping({"/appspace/chatflow/copy", "/appspace/chatflow/copy/draft"})
+    public FrontendResponse<Map<String, Object>> copyChatflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowCopyCommand command = new WorkflowCopyCommand();
+            command.setWorkflowId(request == null ? null : request.workflowId());
+            command.setNeedPublished(request != null && request.isNeedPublished());
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.copyChatflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/chatflow/import")
+    public FrontendResponse<Map<String, Object>> importChatflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam Map<String, String> form) {
+        try {
+            UserContext userContext = userContext(authorization);
+            WorkflowImportRequest request = workflowImportRequest(file, form);
+            WorkflowImportCommand command = request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(workflowCreateResult(appService.importChatflow(command)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        } catch (IOException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/chatflow/export/draft")
+    public ResponseEntity<byte[]> exportChatflowDraft(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return exportChatflowJson(authorization, request, false);
+    }
+
+    @GetMapping("/appspace/chatflow/export")
+    public ResponseEntity<byte[]> exportChatflowPublished(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return exportChatflowJson(authorization, request, true);
+    }
+
+    @PostMapping("/appspace/chatflow/convert")
+    public FrontendResponse<Map<String, Object>> convertChatflow() {
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PostMapping("/chatflow/application/list")
+    public FrontendResponse<Map<String, Object>> listChatflowApplications(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ChatflowApplicationListQuery query = new ChatflowApplicationListQuery();
+            query.setWorkflowId(request == null ? null : request.workflowId());
+            query.setUserId(userContext.getUserId());
+            query.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.listChatflowApplications(query));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/chatflow/application/info")
+    public FrontendResponse<Map<String, Object>> getChatflowApplication(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) ChatflowApplicationInfoRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ChatflowApplicationInfoQuery query = request == null
+                    ? new ChatflowApplicationInfoRequest().toQuery()
+                    : request.toQuery();
+            query.setUserId(userContext.getUserId());
+            query.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.getChatflowApplication(query));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/chatflow/conversation/delete")
+    public FrontendResponse<Map<String, Object>> deleteChatflowConversation(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) ChatflowConversationDeleteRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            ChatflowConversationDeleteCommand command = request == null
+                    ? new ChatflowConversationDeleteRequest().toCommand()
+                    : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.deleteChatflowConversation(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping("/appspace/workflow/model/select/{modelType}")
@@ -1086,6 +1213,15 @@ public class WanwuFrontendApiController {
                 command.setUserId(userContext.getUserId());
                 command.setOrgId(userContext.getOrgId());
                 appService.deleteWorkflow(command);
+                return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+            }
+            if (CHATFLOW_APP_TYPE.equals(request.getAppType())) {
+                WorkflowDeleteCommand command = new WorkflowDeleteCommand();
+                command.setWorkflowId(request.getAppId());
+                UserContext userContext = userContext(authorization);
+                command.setUserId(userContext.getUserId());
+                command.setOrgId(userContext.getOrgId());
+                appService.deleteChatflow(command);
                 return FrontendResponse.ok(Collections.<String, Object>emptyMap());
             }
             if (!AGENT_APP_TYPE.equals(request.getAppType())) {
@@ -2802,6 +2938,17 @@ public class WanwuFrontendApiController {
     }
 
     private ResponseEntity<byte[]> exportWorkflowJson(String authorization, Map<String, String> request, boolean published) {
+        return exportFlowJson(authorization, request, published, false);
+    }
+
+    private ResponseEntity<byte[]> exportChatflowJson(String authorization, Map<String, String> request, boolean published) {
+        return exportFlowJson(authorization, request, published, true);
+    }
+
+    private ResponseEntity<byte[]> exportFlowJson(String authorization,
+                                                  Map<String, String> request,
+                                                  boolean published,
+                                                  boolean chatflow) {
         try {
             UserContext userContext = userContext(authorization);
             WorkflowExportQuery query = new WorkflowExportQuery();
@@ -2810,7 +2957,9 @@ public class WanwuFrontendApiController {
             query.setPublished(published);
             query.setUserId(userContext.getUserId());
             query.setOrgId(userContext.getOrgId());
-            WorkflowExportResult result = appService.exportWorkflow(query);
+            WorkflowExportResult result = chatflow
+                    ? appService.exportChatflow(query)
+                    : appService.exportWorkflow(query);
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("name", result == null ? "" : result.getName());
             body.put("desc", result == null ? "" : result.getDesc());
@@ -3534,6 +3683,78 @@ public class WanwuFrontendApiController {
 
         public void setNeedPublished(boolean needPublished) {
             this.needPublished = needPublished;
+        }
+    }
+
+    public static class ChatflowApplicationInfoRequest {
+        private String intelligenceId;
+        private Long intelligenceType;
+
+        public ChatflowApplicationInfoQuery toQuery() {
+            ChatflowApplicationInfoQuery query = new ChatflowApplicationInfoQuery();
+            query.setIntelligenceId(intelligenceId);
+            query.setIntelligenceType(intelligenceType);
+            return query;
+        }
+
+        public String getIntelligenceId() {
+            return intelligenceId;
+        }
+
+        public void setIntelligenceId(String intelligenceId) {
+            this.intelligenceId = intelligenceId;
+        }
+
+        public void setIntelligence_id(String intelligenceId) {
+            this.intelligenceId = intelligenceId;
+        }
+
+        public Long getIntelligenceType() {
+            return intelligenceType;
+        }
+
+        public void setIntelligenceType(Long intelligenceType) {
+            this.intelligenceType = intelligenceType;
+        }
+
+        public void setIntelligence_type(Long intelligenceType) {
+            this.intelligenceType = intelligenceType;
+        }
+    }
+
+    public static class ChatflowConversationDeleteRequest {
+        private String projectId;
+        private String uniqueId;
+
+        public ChatflowConversationDeleteCommand toCommand() {
+            ChatflowConversationDeleteCommand command = new ChatflowConversationDeleteCommand();
+            command.setProjectId(projectId);
+            command.setUniqueId(uniqueId);
+            return command;
+        }
+
+        public String getProjectId() {
+            return projectId;
+        }
+
+        public void setProjectId(String projectId) {
+            this.projectId = projectId;
+        }
+
+        public void setProject_id(String projectId) {
+            this.projectId = projectId;
+        }
+
+        public String getUniqueId() {
+            return uniqueId;
+        }
+
+        public void setUniqueId(String uniqueId) {
+            this.uniqueId = uniqueId;
+        }
+
+        public void setUnique_id(String uniqueId) {
+            this.uniqueId = uniqueId;
         }
     }
 

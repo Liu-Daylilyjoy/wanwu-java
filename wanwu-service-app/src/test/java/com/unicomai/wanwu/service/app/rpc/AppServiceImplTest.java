@@ -37,6 +37,9 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
@@ -352,6 +355,100 @@ public class AppServiceImplTest {
         service.deleteWorkflow(delete);
         assertEquals(0, service.listApplications(
                 new ApplicationListQuery("workflow", created.getWorkflowId(), "dev-admin", "default-org")).getTotal());
+    }
+
+    @Test
+    public void chatflowLifecycleUsesWorkflowStorageWithoutPollutingWorkflowList() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("PolicyChat");
+        create.setDesc("policy chatflow");
+        create.setAvatarKey("avatars/chatflow.png");
+        create.setAvatarPath("/static/chatflow.png");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createChatflow(create);
+
+        assertTrue(created.getWorkflowId().startsWith("chatflow-"));
+        assertEquals(0, service.listApplications(
+                new ApplicationListQuery("workflow", "Policy", "dev-admin", "default-org")).getTotal());
+
+        ApplicationListResult chatflows = service.listApplications(
+                new ApplicationListQuery("chatflow", "Policy", "dev-admin", "default-org"));
+        assertEquals(1, chatflows.getTotal());
+        assertEquals(created.getWorkflowId(), chatflows.getList().get(0).get("workflow_id"));
+        assertEquals("chatflow", chatflows.getList().get(0).get("appType"));
+
+        WorkflowExportResult draftExport = service.exportChatflow(
+                new WorkflowExportQuery(created.getWorkflowId(), "", false, "dev-admin", "default-org"));
+        assertEquals("PolicyChat", draftExport.getName());
+        assertTrue(draftExport.getSchema().contains(created.getWorkflowId()));
+
+        ChatflowApplicationListQuery applicationListQuery = new ChatflowApplicationListQuery();
+        applicationListQuery.setWorkflowId(created.getWorkflowId());
+        applicationListQuery.setUserId("dev-admin");
+        applicationListQuery.setOrgId("default-org");
+        Map<String, Object> applicationList = service.listChatflowApplications(applicationListQuery);
+        assertEquals(1, applicationList.get("total"));
+        List<Map<String, Object>> intelligences = castList(applicationList.get("intelligences"));
+        Map<String, Object> basicInfo = castMap(intelligences.get(0).get("basic_info"));
+        String applicationId = String.valueOf(basicInfo.get("id"));
+        assertEquals("PolicyChat", basicInfo.get("name"));
+
+        ChatflowApplicationInfoQuery infoQuery = new ChatflowApplicationInfoQuery();
+        infoQuery.setIntelligenceId(applicationId);
+        infoQuery.setIntelligenceType(1L);
+        infoQuery.setUserId("dev-admin");
+        infoQuery.setOrgId("default-org");
+        Map<String, Object> info = service.getChatflowApplication(infoQuery);
+        assertEquals(1L, info.get("intelligence_type"));
+        assertEquals(applicationId, String.valueOf(castMap(info.get("basic_info")).get("id")));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getWorkflowId());
+        publish.setAppType("chatflow");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setDesc("first chatflow version");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+        assertEquals("v1.0.0", service.getLatestAppVersion(
+                new AppVersionQuery(created.getWorkflowId(), "chatflow", "dev-admin", "default-org")).getVersion());
+
+        WorkflowCopyCommand copy = new WorkflowCopyCommand();
+        copy.setWorkflowId(created.getWorkflowId());
+        copy.setUserId("dev-admin");
+        copy.setOrgId("default-org");
+        WorkflowCreateResult copied = service.copyChatflow(copy);
+        assertTrue(copied.getWorkflowId().startsWith("chatflow-"));
+        assertEquals(2, service.listApplications(
+                new ApplicationListQuery("chatflow", "PolicyChat", "dev-admin", "default-org")).getTotal());
+
+        WorkflowImportCommand importCommand = new WorkflowImportCommand();
+        importCommand.setName("ImportedChat");
+        importCommand.setDesc("imported chatflow");
+        importCommand.setSchema("{\"nodes\":[]}");
+        importCommand.setUserId("dev-admin");
+        importCommand.setOrgId("default-org");
+        WorkflowCreateResult imported = service.importChatflow(importCommand);
+        assertEquals("ImportedChat", service.exportChatflow(
+                new WorkflowExportQuery(imported.getWorkflowId(), "", false, "dev-admin", "default-org")).getName());
+
+        ChatflowConversationDeleteCommand deleteConversation = new ChatflowConversationDeleteCommand();
+        deleteConversation.setProjectId(created.getWorkflowId());
+        deleteConversation.setUniqueId(applicationId);
+        service.deleteChatflowConversation(deleteConversation);
+
+        WorkflowDeleteCommand delete = new WorkflowDeleteCommand();
+        delete.setWorkflowId(created.getWorkflowId());
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        service.deleteChatflow(delete);
+        assertEquals(0, service.listApplications(
+                new ApplicationListQuery("chatflow", created.getWorkflowId(), "dev-admin", "default-org")).getTotal());
     }
 
     @Test
@@ -1236,6 +1333,11 @@ public class AppServiceImplTest {
         return (List<Map<String, Object>>) value;
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) {
+        return (Map<String, Object>) value;
+    }
+
     private boolean listContainsName(ApplicationListResult result, String name) {
         for (Map<String, Object> item : result.getList()) {
             if (name.equals(item.get("name"))) {
@@ -1778,11 +1880,16 @@ public class AppServiceImplTest {
 
         @Override
         public List<AppRecord> listWorkflows(String userId, String orgId, String name) {
+            return listWorkflows(userId, orgId, name, "workflow");
+        }
+
+        @Override
+        public List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType) {
             List<AppRecord> matches = new ArrayList<>();
             for (AppRecord record : records) {
                 if (userId.equals(record.getUserId())
                         && orgId.equals(record.getOrgId())
-                        && "workflow".equals(record.getAppType())
+                        && appType.equals(record.getAppType())
                         && (name == null || name.isEmpty() || record.getName().contains(name))) {
                     matches.add(record);
                 }
@@ -1793,11 +1900,16 @@ public class AppServiceImplTest {
 
         @Override
         public AppRecord findWorkflow(String userId, String orgId, String workflowId) {
+            return findWorkflow(userId, orgId, workflowId, "workflow");
+        }
+
+        @Override
+        public AppRecord findWorkflow(String userId, String orgId, String workflowId, String appType) {
             for (AppRecord record : records) {
                 if (userId.equals(record.getUserId())
                         && orgId.equals(record.getOrgId())
                         && workflowId.equals(record.getAppId())
-                        && "workflow".equals(record.getAppType())) {
+                        && appType.equals(record.getAppType())) {
                     return record;
                 }
             }
@@ -1818,7 +1930,12 @@ public class AppServiceImplTest {
 
         @Override
         public boolean deleteWorkflow(String userId, String orgId, String workflowId) {
-            AppRecord existing = findWorkflow(userId, orgId, workflowId);
+            return deleteWorkflow(userId, orgId, workflowId, "workflow");
+        }
+
+        @Override
+        public boolean deleteWorkflow(String userId, String orgId, String workflowId, String appType) {
+            AppRecord existing = findWorkflow(userId, orgId, workflowId, appType);
             if (existing == null) {
                 return false;
             }
@@ -1841,11 +1958,16 @@ public class AppServiceImplTest {
 
         @Override
         public List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix) {
+            return listWorkflowNamesByPrefix(userId, orgId, prefix, "workflow");
+        }
+
+        @Override
+        public List<String> listWorkflowNamesByPrefix(String userId, String orgId, String prefix, String appType) {
             List<String> names = new ArrayList<>();
             for (AppRecord record : records) {
                 if (userId.equals(record.getUserId())
                         && orgId.equals(record.getOrgId())
-                        && "workflow".equals(record.getAppType())
+                        && appType.equals(record.getAppType())
                         && record.getName() != null
                         && record.getName().startsWith(prefix)) {
                     names.add(record.getName());
@@ -1912,7 +2034,12 @@ public class AppServiceImplTest {
 
         @Override
         public boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String publishType, long updatedAt) {
-            AppRecord existing = findWorkflow(userId, orgId, workflowId);
+            return updateWorkflowPublishType(userId, orgId, workflowId, "workflow", publishType, updatedAt);
+        }
+
+        @Override
+        public boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String appType, String publishType, long updatedAt) {
+            AppRecord existing = findWorkflow(userId, orgId, workflowId, appType);
             if (existing == null) {
                 return false;
             }
@@ -1923,7 +2050,7 @@ public class AppServiceImplTest {
 
         @Override
         public boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft) {
-            AppRecord existing = findWorkflow(record.getUserId(), record.getOrgId(), record.getAppId());
+            AppRecord existing = findWorkflow(record.getUserId(), record.getOrgId(), record.getAppId(), record.getAppType());
             if (existing == null) {
                 return false;
             }
