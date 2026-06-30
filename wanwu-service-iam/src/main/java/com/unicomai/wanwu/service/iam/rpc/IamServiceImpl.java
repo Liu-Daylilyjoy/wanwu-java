@@ -52,7 +52,9 @@ public class IamServiceImpl implements IamService {
             "exploration.app",
             "exploration.mcp",
             "exploration.template",
-            "exploration.skill"
+            "exploration.skill",
+            "app_observability",
+            "app_observability.statistic"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -466,6 +468,9 @@ public class IamServiceImpl implements IamService {
                         route("MCP Square", "exploration.mcp", Collections.<Map<String, Object>>emptyList()),
                         route("Template Square", "exploration.template", Collections.<Map<String, Object>>emptyList()),
                         route("Skill Square", "exploration.skill", Collections.<Map<String, Object>>emptyList())
+                )),
+                route("App Observation", "app_observability", Collections.singletonList(
+                        route("Statistic Dashboard", "app_observability.statistic", Collections.<Map<String, Object>>emptyList())
                 ))
         );
     }
@@ -562,6 +567,12 @@ public class IamServiceImpl implements IamService {
         }
         if ("exploration.skill".equals(perm)) {
             return "Skill Square";
+        }
+        if ("app_observability".equals(perm)) {
+            return "App Observation";
+        }
+        if ("app_observability.statistic".equals(perm)) {
+            return "Statistic Dashboard";
         }
         return perm;
     }

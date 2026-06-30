@@ -65,10 +65,12 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("exploration.mcp"));
         assertTrue(permissions.contains("exploration.template"));
         assertTrue(permissions.contains("exploration.skill"));
+        assertTrue(permissions.contains("app_observability"));
+        assertTrue(permissions.contains("app_observability.statistic"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(28, permissions.size());
+        assertEquals(30, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -99,7 +101,8 @@ public class IamServiceImplTest {
                 "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt",
                 "resource.skill", "resource.safety",
                 "operation", "operation.oauth", "operation.statistic_client",
-                "exploration", "exploration.app", "exploration.mcp", "exploration.template", "exploration.skill"),
+                "exploration", "exploration.app", "exploration.mcp", "exploration.template", "exploration.skill",
+                "app_observability", "app_observability.statistic"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
@@ -162,6 +165,10 @@ public class IamServiceImplTest {
         assertEquals(4, ((List) explorationRoute.get("children")).size());
         assertEquals("exploration.app", ((Map) ((List) explorationRoute.get("children")).get(0)).get("perm"));
         assertEquals("exploration.skill", ((Map) ((List) explorationRoute.get("children")).get(3)).get("perm"));
+        Map statisticRoute = (Map) ((List) template.get("routes")).get(8);
+        assertEquals("app_observability", statisticRoute.get("perm"));
+        assertEquals(1, ((List) statisticRoute.get("children")).size());
+        assertEquals("app_observability.statistic", ((Map) ((List) statisticRoute.get("children")).get(0)).get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));

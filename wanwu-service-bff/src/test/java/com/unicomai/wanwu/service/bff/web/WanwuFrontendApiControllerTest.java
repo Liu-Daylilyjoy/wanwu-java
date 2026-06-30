@@ -74,6 +74,7 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.dto.ModelTypeInfo;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeInfo;
@@ -130,7 +131,8 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuSafetyApiController(safetyService),
                     new WanwuSettingApiController(iamService),
                     new WanwuOperationApiController(iamService),
-                    new WanwuExplorationApiController(appService))
+                    new WanwuExplorationApiController(appService),
+                    new WanwuStatisticApiController(appService, modelService))
             .build();
 
     @Test
@@ -188,6 +190,8 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[25].perm").value("exploration.mcp"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[26].perm").value("exploration.template"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[27].perm").value("exploration.skill"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[28].perm").value("app_observability"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[29].perm").value("app_observability.statistic"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -284,6 +288,105 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).updateOauthApp(any(Map.class));
         verify(iamService).updateOauthAppStatus(any(Map.class));
         verify(iamService).deleteOauthApp(any(Map.class));
+    }
+
+    @Test
+    public void statisticDashboardRoutesReturnFrontendContracts() throws Exception {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("appId", "assistant-001");
+        app.put("appType", "agent");
+        app.put("name", "Agent One");
+        app.put("appName", "Agent One");
+        app.put("avatar", Collections.singletonMap("path", ""));
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(app), 1));
+        when(modelService.listModels(any(ModelListQuery.class)))
+                .thenReturn(new ModelListResult(Collections.singletonList(modelInfo("model-001", "DeepSeek Chat", "llm")), 1));
+        when(appService.listApiKeys(any(ApiKeyListQuery.class)))
+                .thenReturn(new ApiKeyPageResult(
+                        Collections.singletonList(apiKeyInfo("key-001", "wanwu_api_001", "Main key", true)),
+                        1,
+                        1,
+                        20));
+
+        mockMvc.perform(get("/user/api/v1/statistic/app/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.list[0].name").value("Agent One"));
+        mockMvc.perform(get("/user/api/v1/statistic/app")
+                        .param("startDate", "2026-06-01")
+                        .param("endDate", "2026-06-02"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overview.callCount.value").value(0))
+                .andExpect(jsonPath("$.data.trend.callTrend.lines[0].items[0].key").value("2026-06-01"));
+        mockMvc.perform(get("/user/api/v1/statistic/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "agent")
+                        .param("apps", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appName").value("Agent One"))
+                .andExpect(jsonPath("$.data.list[0].callCount").value(0));
+
+        mockMvc.perform(get("/user/api/v1/statistic/model")
+                        .param("startDate", "2026-06-01")
+                        .param("endDate", "2026-06-02"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overview.totalTokensTotal.value").value(0))
+                .andExpect(jsonPath("$.data.trend.modelCalls.lines[0].items[0].key").value("2026-06-01"))
+                .andExpect(jsonPath("$.data.trend.tokensUsage.lines[0].items[0].key").value("2026-06-01"));
+        mockMvc.perform(get("/user/api/v1/statistic/model/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelType", "llm")
+                        .param("models", "model-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].model").value("DeepSeek Chat"))
+                .andExpect(jsonPath("$.data.list[0].totalTokens").value(0));
+
+        mockMvc.perform(get("/user/api/v1/statistic/api/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].keyId").value("key-001"))
+                .andExpect(jsonPath("$.data.list[0].apiKey").value("wanwu_api_001"));
+        mockMvc.perform(get("/user/api/v1/statistic/api/routes"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].method").value("POST"))
+                .andExpect(jsonPath("$.data.list[0].path").value("/assistant/stream"));
+        mockMvc.perform(post("/user/api/v1/statistic/api")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"startDate\":\"2026-06-01\",\"endDate\":\"2026-06-02\",\"apiKeyIds\":[\"ALL\"],\"methodPaths\":[\"POST-/assistant/stream\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overview.callCount.value").value(0))
+                .andExpect(jsonPath("$.data.trend.apiCalls.lines[0].items[0].key").value("2026-06-01"));
+        mockMvc.perform(post("/user/api/v1/statistic/api/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/assistant/stream\"],\"pageNo\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].name").value("Main key"))
+                .andExpect(jsonPath("$.data.list[0].methodPath").value("POST-/assistant/stream"));
+        mockMvc.perform(post("/user/api/v1/statistic/api/record")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/assistant/stream\"],\"pageNo\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].responseStatus").value("success"));
+
+        mockMvc.perform(get("/user/api/v1/statistic/app/export"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("appName")));
+        mockMvc.perform(get("/user/api/v1/statistic/model/export"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("model")));
+        mockMvc.perform(post("/user/api/v1/statistic/api/list/export"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("apiKey")));
+
+        verify(appService, times(2)).listApplications(any(ApplicationListQuery.class));
+        verify(modelService, times(1)).listModels(any(ModelListQuery.class));
+        verify(appService, times(3)).listApiKeys(any(ApiKeyListQuery.class));
     }
 
     @Test
@@ -2782,7 +2885,9 @@ public class WanwuFrontendApiControllerTest {
                 permission("exploration.app"),
                 permission("exploration.mcp"),
                 permission("exploration.template"),
-                permission("exploration.skill")
+                permission("exploration.skill"),
+                permission("app_observability"),
+                permission("app_observability.statistic")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);
