@@ -204,6 +204,70 @@ public class WanwuFrontendApiController {
         return FrontendResponse.ok(iamService.listUsers(userContext.getOrgId(), defaultIfBlank(name, ""), pageNo, pageSize));
     }
 
+    @PostMapping("/user")
+    public FrontendResponse<Map<String, Object>> createUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.createUser(userContext.getUserId(), userContext.getOrgId(), request));
+    }
+
+    @PostMapping("/user/batch")
+    public FrontendResponse<Map<String, Object>> createUserByFile(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "file", required = false) MultipartFile file) {
+        UserContext userContext = userContext(authorization);
+        String fileName = file == null ? "" : defaultIfBlank(file.getOriginalFilename(), "");
+        long fileSize = file == null ? 0L : file.getSize();
+        return FrontendResponse.ok(iamService.importUsers(userContext.getUserId(), userContext.getOrgId(), fileName, fileSize));
+    }
+
+    @PutMapping("/user")
+    public FrontendResponse<Map<String, Object>> updateUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateUser(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping("/user")
+    public FrontendResponse<Map<String, Object>> deleteUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.deleteUser(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping("/user/status")
+    public FrontendResponse<Map<String, Object>> updateUserStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateUserStatus(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @GetMapping("/org/other/select")
+    public FrontendResponse<Map<String, Object>> listUsersOutsideOrg(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.listUsersOutsideOrg(userContext.getOrgId(), defaultIfBlank(name, ""), pageNo, pageSize));
+    }
+
+    @PostMapping("/org/user")
+    public FrontendResponse<Map<String, Object>> addOrgUser(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.addOrgUser(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
     @GetMapping("/role/select")
     public FrontendResponse<Map<String, Object>> selectRoles(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
@@ -216,6 +280,41 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization) {
         UserContext userContext = userContext(authorization);
         return FrontendResponse.ok(iamService.roleTemplate(userContext.getUserId(), userContext.getOrgId()));
+    }
+
+    @PostMapping("/role")
+    public FrontendResponse<Map<String, Object>> createRole(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.createRole(userContext.getUserId(), userContext.getOrgId(), request));
+    }
+
+    @PutMapping("/role")
+    public FrontendResponse<Map<String, Object>> updateRole(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateRole(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping("/role")
+    public FrontendResponse<Map<String, Object>> deleteRole(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.deleteRole(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping("/role/status")
+    public FrontendResponse<Map<String, Object>> updateRoleStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateRoleStatus(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     @GetMapping("/role/list")
@@ -249,6 +348,41 @@ public class WanwuFrontendApiController {
     @GetMapping("/org/info")
     public FrontendResponse<Map<String, Object>> organizationInfo(@RequestParam("orgId") String orgId) {
         return FrontendResponse.ok(iamService.organizationInfo(orgId));
+    }
+
+    @PostMapping("/org")
+    public FrontendResponse<Map<String, Object>> createOrganization(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.createOrganization(userContext.getUserId(), userContext.getOrgId(), request));
+    }
+
+    @PutMapping("/org")
+    public FrontendResponse<Map<String, Object>> updateOrganization(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateOrganization(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @DeleteMapping("/org")
+    public FrontendResponse<Map<String, Object>> deleteOrganization(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.deleteOrganization(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping("/org/status")
+    public FrontendResponse<Map<String, Object>> updateOrganizationStatus(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
+        iamService.updateOrganizationStatus(userContext.getUserId(), userContext.getOrgId(), request);
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     @GetMapping("/base/custom")

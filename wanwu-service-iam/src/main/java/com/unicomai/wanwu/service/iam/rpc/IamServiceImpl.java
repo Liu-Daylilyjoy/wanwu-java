@@ -71,8 +71,22 @@ public class IamServiceImpl implements IamService {
     private volatile Map<String, Object> customTab = Collections.emptyMap();
     private volatile Map<String, Object> customLogin = Collections.emptyMap();
     private volatile Map<String, Object> customHome = Collections.emptyMap();
+    private final Map<String, Map<String, Object>> users = new LinkedHashMap<>();
+    private final Map<String, Map<String, Object>> roles = new LinkedHashMap<>();
+    private final Map<String, Map<String, Object>> organizations = new LinkedHashMap<>();
     private final Map<String, Map<String, Object>> oauthApps = new LinkedHashMap<>();
+    private final AtomicLong userSequence = new AtomicLong(0);
+    private final AtomicLong roleSequence = new AtomicLong(0);
+    private final AtomicLong orgSequence = new AtomicLong(0);
     private final AtomicLong oauthSequence = new AtomicLong(0);
+
+    public IamServiceImpl() {
+        organizations.put(DEFAULT_ORG.getId(), defaultOrganization());
+        roles.put("admin", builtInRole("admin"));
+        roles.put("app", builtInRole("app"));
+        users.put(ADMIN_ACCOUNT.uid, userInfo(ADMIN_ACCOUNT));
+        users.put(APP_ACCOUNT.uid, userInfo(APP_ACCOUNT));
+    }
 
     @Override
     public ServiceDescriptor describe() {
@@ -119,26 +133,113 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
-    public OrganizationSelectResult selectOrganizations() {
-        return new OrganizationSelectResult(Collections.singletonList(DEFAULT_ORG));
+    public synchronized OrganizationSelectResult selectOrganizations() {
+        java.util.ArrayList<OrganizationOption> options = new java.util.ArrayList<>();
+        for (Map<String, Object> org : organizations.values()) {
+            options.add(new OrganizationOption(String.valueOf(org.get("orgId")), String.valueOf(org.get("name"))));
+        }
+        return new OrganizationSelectResult(options);
     }
 
     @Override
-    public Map<String, Object> listUsers(String orgId, String name, int pageNo, int pageSize) {
+    public synchronized Map<String, Object> createUser(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String userId = defaultText(request, "userId", "");
+        if (!Strings.hasText(userId)) {
+            userId = defaultText(request, "uid", "user-" + userSequence.incrementAndGet());
+        }
+        Map<String, Object> user = userRecord(userId, request, operatorUserId, operatorOrgId);
+        users.put(userId, user);
+        return copy(user);
+    }
+
+    @Override
+    public synchronized Map<String, Object> importUsers(String operatorUserId, String operatorOrgId, String fileName, long fileSize) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        String seq = String.valueOf(userSequence.incrementAndGet());
+        request.put("userId", "batch-user-" + seq);
+        request.put("username", defaultText(singletonMap("fileName", fileName), "fileName", "batch-user-" + seq));
+        request.put("nickname", "Imported User " + seq);
+        Map<String, Object> user = userRecord(String.valueOf(request.get("userId")), request, operatorUserId, operatorOrgId);
+        users.put(String.valueOf(user.get("userId")), user);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", 1);
+        result.put("successCount", 1);
+        result.put("failCount", 0);
+        result.put("fileName", defaultText(singletonMap("fileName", fileName), "fileName", ""));
+        result.put("fileSize", fileSize);
+        result.put("list", Collections.singletonList(copy(user)));
+        return result;
+    }
+
+    @Override
+    public synchronized void updateUser(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String userId = idFrom(request, "userId", "uid");
+        Map<String, Object> current = users.get(userId);
+        if (current == null) {
+            return;
+        }
+        putIfText(current, request, "username");
+        putIfText(current, request, "nickname");
+        putIfText(current, request, "phone");
+        putIfText(current, request, "email");
+        putIfText(current, request, "gender");
+        putIfText(current, request, "remark");
+        putIfText(current, request, "company");
+        current.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
+        current.put("updatedAt", CREATED_AT);
+    }
+
+    @Override
+    public synchronized void deleteUser(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String userId = idFrom(request, "userId", "uid");
+        if (!ADMIN_ACCOUNT.uid.equals(userId) && !APP_ACCOUNT.uid.equals(userId)) {
+            users.remove(userId);
+        }
+    }
+
+    @Override
+    public synchronized void updateUserStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        Map<String, Object> user = users.get(idFrom(request, "userId", "uid"));
+        if (user != null) {
+            user.put("status", booleanValue(request, "status", true));
+            user.put("updatedAt", CREATED_AT);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> listUsers(String orgId, String name, int pageNo, int pageSize) {
         java.util.ArrayList<Map<String, Object>> users = new java.util.ArrayList<>();
-        for (DevAccount account : ACCOUNTS_BY_USERNAME.values()) {
-            if (Strings.hasText(name) && !account.username.toLowerCase().contains(name.trim().toLowerCase())) {
+        for (Map<String, Object> user : this.users.values()) {
+            if (Strings.hasText(name) && !String.valueOf(user.get("username")).toLowerCase().contains(name.trim().toLowerCase())) {
                 continue;
             }
-            users.add(userInfo(account));
+            if (Strings.hasText(orgId) && !userBelongsToOrg(user, orgId)) {
+                continue;
+            }
+            users.add(copy(user));
         }
         return page(users, pageNo, pageSize);
     }
 
     @Override
-    public Map<String, Object> selectRoles(String orgId) {
+    public synchronized Map<String, Object> listUsersOutsideOrg(String orgId, String name, int pageNo, int pageSize) {
+        java.util.ArrayList<Map<String, Object>> outside = new java.util.ArrayList<>();
+        for (Map<String, Object> user : users.values()) {
+            if (Strings.hasText(name) && !String.valueOf(user.get("username")).toLowerCase().contains(name.trim().toLowerCase())) {
+                continue;
+            }
+            if (!Strings.hasText(orgId) || !userBelongsToOrg(user, orgId)) {
+                outside.add(copy(user));
+            }
+        }
+        return page(outside, pageNo, pageSize);
+    }
+
+    @Override
+    public synchronized Map<String, Object> selectRoles(String orgId) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("select", roleIdNames(Arrays.asList("admin", "app")));
+        result.put("select", roleIdNames(new java.util.ArrayList<>(roles.keySet())));
         return result;
     }
 
@@ -150,55 +251,136 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
-    public Map<String, Object> listRoles(String userId, String orgId, String name, int pageNo, int pageSize) {
+    public synchronized Map<String, Object> createRole(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String roleId = defaultText(request, "roleId", "");
+        if (!Strings.hasText(roleId)) {
+            roleId = "role-" + roleSequence.incrementAndGet();
+        }
+        Map<String, Object> role = roleRecord(roleId, request, operatorUserId);
+        roles.put(roleId, role);
+        return copy(role);
+    }
+
+    @Override
+    public synchronized void updateRole(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String roleId = idFrom(request, "roleId", "id");
+        Map<String, Object> role = roles.get(roleId);
+        if (role == null || Boolean.TRUE.equals(role.get("isAdmin"))) {
+            return;
+        }
+        putIfText(role, request, "name");
+        putIfText(role, request, "remark");
+        role.put("permissions", permissionItems(extractPermissions(request)));
+        role.put("updatedAt", CREATED_AT);
+    }
+
+    @Override
+    public synchronized void deleteRole(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String roleId = idFrom(request, "roleId", "id");
+        if (!"admin".equals(roleId) && !"app".equals(roleId)) {
+            roles.remove(roleId);
+        }
+    }
+
+    @Override
+    public synchronized void updateRoleStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        Map<String, Object> role = roles.get(idFrom(request, "roleId", "id"));
+        if (role != null) {
+            role.put("status", booleanValue(request, "status", true));
+            role.put("updatedAt", CREATED_AT);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> listRoles(String userId, String orgId, String name, int pageNo, int pageSize) {
         java.util.ArrayList<Map<String, Object>> roles = new java.util.ArrayList<>();
-        for (String roleId : Arrays.asList("admin", "app")) {
-            Map<String, Object> role = roleInfo(userId, orgId, roleId);
+        for (Map<String, Object> role : this.roles.values()) {
             if (Strings.hasText(name) && !((String) role.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
                 continue;
             }
-            roles.add(role);
+            roles.add(copy(role));
         }
         return page(roles, pageNo, pageSize);
     }
 
     @Override
-    public Map<String, Object> roleInfo(String userId, String orgId, String roleId) {
-        boolean admin = "admin".equals(roleId);
-        List<String> permissions = admin ? IMPLEMENTED_FRONTEND_PERMISSIONS : APP_PERMISSIONS;
-        Map<String, Object> role = new LinkedHashMap<>();
-        role.put("roleId", admin ? "admin" : "app");
-        role.put("name", admin ? "System Admin" : "App User");
-        role.put("remark", admin ? "Built-in development administrator" : "Application-only development role");
-        role.put("createdAt", CREATED_AT);
-        role.put("creator", idName("system", "System"));
-        role.put("status", true);
-        role.put("isAdmin", admin);
-        role.put("routes", roleRoutes());
-        role.put("permissions", permissionItems(permissions));
-        return role;
+    public synchronized Map<String, Object> roleInfo(String userId, String orgId, String roleId) {
+        Map<String, Object> role = roles.get(roleId);
+        return role == null ? builtInRole("app") : copy(role);
     }
 
     @Override
-    public Map<String, Object> listOrganizations(String parentId, String name, int pageNo, int pageSize) {
+    public synchronized void addOrgUser(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String targetOrgId = defaultText(request, "orgId", operatorOrgId);
+        String userId = idFrom(request, "userId", "uid");
+        Map<String, Object> user = users.get(userId);
+        if (user != null) {
+            user.put("orgs", userOrgRoles(targetOrgId, extractRoleIds(request)));
+            user.put("updatedAt", CREATED_AT);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> createOrganization(String operatorUserId, String parentOrgId, Map<String, Object> request) {
+        String orgId = defaultText(request, "orgId", "");
+        if (!Strings.hasText(orgId)) {
+            orgId = "org-" + orgSequence.incrementAndGet();
+        }
+        Map<String, Object> org = organizationRecord(orgId, parentOrgId, request, operatorUserId);
+        organizations.put(orgId, org);
+        return copy(org);
+    }
+
+    @Override
+    public synchronized void updateOrganization(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String orgId = idFrom(request, "orgId", "id");
+        Map<String, Object> org = organizations.get(orgId);
+        if (org == null) {
+            return;
+        }
+        putIfText(org, request, "name");
+        putIfText(org, request, "remark");
+        org.put("updatedAt", CREATED_AT);
+    }
+
+    @Override
+    public synchronized void deleteOrganization(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        String orgId = idFrom(request, "orgId", "id");
+        if (!DEFAULT_ORG.getId().equals(orgId)) {
+            organizations.remove(orgId);
+        }
+    }
+
+    @Override
+    public synchronized void updateOrganizationStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request) {
+        Map<String, Object> org = organizations.get(idFrom(request, "orgId", "id"));
+        if (org != null) {
+            org.put("status", booleanValue(request, "status", true));
+            org.put("updatedAt", CREATED_AT);
+        }
+    }
+
+    @Override
+    public synchronized Map<String, Object> listOrganizations(String parentId, String name, int pageNo, int pageSize) {
         java.util.ArrayList<Map<String, Object>> orgs = new java.util.ArrayList<>();
-        Map<String, Object> org = organizationInfo(DEFAULT_ORG.getId());
-        if (!Strings.hasText(name) || ((String) org.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
-            orgs.add(org);
+        for (Map<String, Object> org : organizations.values()) {
+            if (Strings.hasText(name) && !((String) org.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
+                continue;
+            }
+            if (Strings.hasText(parentId)
+                    && !DEFAULT_ORG.getId().equals(org.get("orgId"))
+                    && !parentId.equals(org.get("parentId"))) {
+                continue;
+            }
+            orgs.add(copy(org));
         }
         return page(orgs, pageNo, pageSize);
     }
 
     @Override
-    public Map<String, Object> organizationInfo(String orgId) {
-        Map<String, Object> org = new LinkedHashMap<>();
-        org.put("orgId", DEFAULT_ORG.getId());
-        org.put("name", DEFAULT_ORG.getName());
-        org.put("remark", "Default development organization");
-        org.put("createdAt", CREATED_AT);
-        org.put("creator", idName("system", "System"));
-        org.put("status", true);
-        return org;
+    public synchronized Map<String, Object> organizationInfo(String orgId) {
+        Map<String, Object> org = organizations.get(orgId);
+        return org == null ? copy(defaultOrganization()) : copy(org);
     }
 
     @Override
@@ -410,6 +592,96 @@ public class IamServiceImpl implements IamService {
         return result;
     }
 
+    private Map<String, Object> userRecord(String userId,
+                                           Map<String, Object> request,
+                                           String operatorUserId,
+                                           String operatorOrgId) {
+        String username = defaultText(request, "username", defaultText(request, "name", userId));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", userId);
+        result.put("uid", userId);
+        result.put("username", username);
+        result.put("nickname", defaultText(request, "nickname", username));
+        result.put("phone", defaultText(request, "phone", ""));
+        result.put("email", defaultText(request, "email", ""));
+        result.put("gender", defaultText(request, "gender", ""));
+        result.put("remark", defaultText(request, "remark", ""));
+        result.put("company", defaultText(request, "company", "Wanwu Java"));
+        result.put("createdAt", CREATED_AT);
+        result.put("updatedAt", CREATED_AT);
+        result.put("creator", idName(Strings.hasText(operatorUserId) ? operatorUserId : "system", "System"));
+        result.put("status", booleanValue(request, "status", true));
+        result.put("language", language());
+        result.put("avatar", singletonMap("path", ""));
+        result.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
+        return result;
+    }
+
+    private Map<String, Object> defaultOrganization() {
+        Map<String, Object> org = new LinkedHashMap<>();
+        org.put("orgId", DEFAULT_ORG.getId());
+        org.put("id", DEFAULT_ORG.getId());
+        org.put("parentId", "");
+        org.put("name", DEFAULT_ORG.getName());
+        org.put("remark", "Default development organization");
+        org.put("createdAt", CREATED_AT);
+        org.put("updatedAt", CREATED_AT);
+        org.put("creator", idName("system", "System"));
+        org.put("status", true);
+        return org;
+    }
+
+    private Map<String, Object> organizationRecord(String orgId,
+                                                   String parentOrgId,
+                                                   Map<String, Object> request,
+                                                   String operatorUserId) {
+        Map<String, Object> org = new LinkedHashMap<>();
+        org.put("orgId", orgId);
+        org.put("id", orgId);
+        org.put("parentId", defaultText(request, "parentId", defaultText(request, "parentOrgId", parentOrgId)));
+        org.put("name", defaultText(request, "name", "Organization " + orgId));
+        org.put("remark", defaultText(request, "remark", ""));
+        org.put("createdAt", CREATED_AT);
+        org.put("updatedAt", CREATED_AT);
+        org.put("creator", idName(Strings.hasText(operatorUserId) ? operatorUserId : "system", "System"));
+        org.put("status", booleanValue(request, "status", true));
+        return org;
+    }
+
+    private Map<String, Object> builtInRole(String roleId) {
+        boolean admin = "admin".equals(roleId);
+        List<String> permissions = admin ? IMPLEMENTED_FRONTEND_PERMISSIONS : APP_PERMISSIONS;
+        Map<String, Object> role = new LinkedHashMap<>();
+        role.put("roleId", admin ? "admin" : "app");
+        role.put("id", admin ? "admin" : "app");
+        role.put("name", admin ? "System Admin" : "App User");
+        role.put("remark", admin ? "Built-in development administrator" : "Application-only development role");
+        role.put("createdAt", CREATED_AT);
+        role.put("updatedAt", CREATED_AT);
+        role.put("creator", idName("system", "System"));
+        role.put("status", true);
+        role.put("isAdmin", admin);
+        role.put("routes", roleRoutes());
+        role.put("permissions", permissionItems(permissions));
+        return role;
+    }
+
+    private Map<String, Object> roleRecord(String roleId, Map<String, Object> request, String operatorUserId) {
+        Map<String, Object> role = new LinkedHashMap<>();
+        role.put("roleId", roleId);
+        role.put("id", roleId);
+        role.put("name", defaultText(request, "name", "Role " + roleId));
+        role.put("remark", defaultText(request, "remark", ""));
+        role.put("createdAt", CREATED_AT);
+        role.put("updatedAt", CREATED_AT);
+        role.put("creator", idName(Strings.hasText(operatorUserId) ? operatorUserId : "system", "System"));
+        role.put("status", booleanValue(request, "status", true));
+        role.put("isAdmin", false);
+        role.put("routes", roleRoutes());
+        role.put("permissions", permissionItems(extractPermissions(request)));
+        return role;
+    }
+
     private Map<String, Object> idName(String id, String name) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", id);
@@ -429,7 +701,11 @@ public class IamServiceImpl implements IamService {
         if ("admin".equals(roleId)) {
             return idName("admin", "System Admin");
         }
-        return idName("app", "App User");
+        if ("app".equals(roleId)) {
+            return idName("app", "App User");
+        }
+        Map<String, Object> role = roles.get(roleId);
+        return idName(roleId, role == null ? roleId : String.valueOf(role.get("name")));
     }
 
     private List<Map<String, Object>> roleRoutes() {
@@ -575,6 +851,114 @@ public class IamServiceImpl implements IamService {
             return "Statistic Dashboard";
         }
         return perm;
+    }
+
+    private List<Map<String, Object>> userOrgRoles(String orgId, List<String> roleIds) {
+        String safeOrgId = Strings.hasText(orgId) ? orgId : DEFAULT_ORG.getId();
+        Map<String, Object> orgRole = new LinkedHashMap<>();
+        orgRole.put("org", org(organizationInfo(safeOrgId)));
+        orgRole.put("roles", roleIdNames(roleIds.isEmpty() ? Collections.singletonList("app") : roleIds));
+        return Collections.singletonList(orgRole);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean userBelongsToOrg(Map<String, Object> user, String orgId) {
+        Object orgs = user.get("orgs");
+        if (!(orgs instanceof List)) {
+            return false;
+        }
+        for (Object item : (List<Object>) orgs) {
+            if (!(item instanceof Map)) {
+                continue;
+            }
+            Object org = ((Map<String, Object>) item).get("org");
+            if (org instanceof Map && orgId.equals(String.valueOf(((Map<String, Object>) org).get("id")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, Object> org(Map<String, Object> organization) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", organization.get("orgId"));
+        result.put("name", organization.get("name"));
+        return result;
+    }
+
+    private String idFrom(Map<String, Object> request, String... keys) {
+        for (String key : keys) {
+            String value = defaultText(request, key, "");
+            if (Strings.hasText(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private void putIfText(Map<String, Object> target, Map<String, Object> request, String key) {
+        if (request == null) {
+            return;
+        }
+        Object value = request.get(key);
+        if (value != null && Strings.hasText(String.valueOf(value))) {
+            target.put(key, value);
+        }
+    }
+
+    private List<String> extractRoleIds(Map<String, Object> request) {
+        List<String> values = extractStrings(firstPresent(request, "roleIds", "roles", "roleId"));
+        return values.isEmpty() ? Collections.singletonList("app") : values;
+    }
+
+    private List<String> extractPermissions(Map<String, Object> request) {
+        List<String> values = extractStrings(firstPresent(request, "permissions", "perms", "routes"));
+        return values.isEmpty() ? APP_PERMISSIONS : values;
+    }
+
+    private Object firstPresent(Map<String, Object> request, String... keys) {
+        if (request == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (request.containsKey(key)) {
+                return request.get(key);
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractStrings(Object value) {
+        java.util.ArrayList<String> result = new java.util.ArrayList<>();
+        if (value == null) {
+            return result;
+        }
+        if (value instanceof List) {
+            for (Object item : (List<Object>) value) {
+                result.addAll(extractStrings(item));
+            }
+            return result;
+        }
+        if (value instanceof Map) {
+            Map<String, Object> map = (Map<String, Object>) value;
+            for (String key : Arrays.asList("perm", "id", "roleId", "value")) {
+                Object item = map.get(key);
+                if (item != null && Strings.hasText(String.valueOf(item))) {
+                    result.add(String.valueOf(item));
+                    return result;
+                }
+            }
+            return result;
+        }
+        if (Strings.hasText(String.valueOf(value))) {
+            result.add(String.valueOf(value));
+        }
+        return result;
+    }
+
+    private Map<String, Object> copy(Map<String, Object> source) {
+        return new LinkedHashMap<>(source);
     }
 
     private Map<String, Object> emailToggle(boolean status) {

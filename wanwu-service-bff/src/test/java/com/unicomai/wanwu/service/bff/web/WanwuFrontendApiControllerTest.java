@@ -97,6 +97,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1074,6 +1075,129 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.list[0].orgId").value("default-org"));
+    }
+
+    @Test
+    public void permissionManagementWriteRoutesCallIamService() throws Exception {
+        when(iamService.createUser(anyString(), anyString(), any(Map.class)))
+                .thenReturn(userInfo("user-001", "alice"));
+        when(iamService.importUsers(anyString(), anyString(), anyString(), anyLong()))
+                .thenReturn(map("total", 1, "successCount", 1, "failCount", 0));
+        when(iamService.listUsersOutsideOrg(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(page(userInfo("user-002", "bob"), 1, 1, 10));
+        when(iamService.createRole(anyString(), anyString(), any(Map.class)))
+                .thenReturn(roleInfo("role-001", "Operator"));
+        when(iamService.createOrganization(anyString(), anyString(), any(Map.class)))
+                .thenReturn(orgInfo("org-001", "Sub Org"));
+
+        mockMvc.perform(post("/user/api/v1/user")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"roleIds\":[\"app\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").value("user-001"));
+        mockMvc.perform(multipart("/user/api/v1/user/batch")
+                        .file(new MockMultipartFile("file", "users.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                "rows".getBytes(StandardCharsets.UTF_8)))
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1));
+        mockMvc.perform(put("/user/api/v1/user")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"user-001\",\"nickname\":\"Alice\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/user/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"user-001\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/user/api/v1/user")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"user-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/org/other/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "bob"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].userId").value("user-002"));
+        mockMvc.perform(post("/user/api/v1/org/user")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orgId\":\"default-org\",\"userId\":\"user-002\",\"roleIds\":[\"app\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/role")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Operator\",\"permissions\":[\"app\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roleId").value("role-001"));
+        mockMvc.perform(put("/user/api/v1/role")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"roleId\":\"role-001\",\"name\":\"Operator 2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/role/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"roleId\":\"role-001\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/user/api/v1/role")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"roleId\":\"role-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/org")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Sub Org\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orgId").value("org-001"));
+        mockMvc.perform(put("/user/api/v1/org")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orgId\":\"org-001\",\"name\":\"Sub Org 2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(put("/user/api/v1/org/status")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orgId\":\"org-001\",\"status\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/user/api/v1/org")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orgId\":\"org-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(iamService).createUser(anyString(), anyString(), any(Map.class));
+        verify(iamService).importUsers(anyString(), anyString(), anyString(), anyLong());
+        verify(iamService).updateUser(anyString(), anyString(), any(Map.class));
+        verify(iamService).updateUserStatus(anyString(), anyString(), any(Map.class));
+        verify(iamService).deleteUser(anyString(), anyString(), any(Map.class));
+        verify(iamService).listUsersOutsideOrg(anyString(), anyString(), anyInt(), anyInt());
+        verify(iamService).addOrgUser(anyString(), anyString(), any(Map.class));
+        verify(iamService).createRole(anyString(), anyString(), any(Map.class));
+        verify(iamService).updateRole(anyString(), anyString(), any(Map.class));
+        verify(iamService).updateRoleStatus(anyString(), anyString(), any(Map.class));
+        verify(iamService).deleteRole(anyString(), anyString(), any(Map.class));
+        verify(iamService).createOrganization(anyString(), anyString(), any(Map.class));
+        verify(iamService).updateOrganization(anyString(), anyString(), any(Map.class));
+        verify(iamService).updateOrganizationStatus(anyString(), anyString(), any(Map.class));
+        verify(iamService).deleteOrganization(anyString(), anyString(), any(Map.class));
     }
 
     @Test

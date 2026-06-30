@@ -176,6 +176,55 @@ public class IamServiceImplTest {
     }
 
     @Test
+    public void permissionManagementWritesAreReflectedInReadModels() {
+        Map<String, Object> createdOrg = service.createOrganization("dev-admin", "default-org",
+                map("name", "Sub Org", "remark", "child"));
+        String orgId = (String) createdOrg.get("orgId");
+        assertEquals("Sub Org", service.organizationInfo(orgId).get("name"));
+
+        Map<String, Object> createdRole = service.createRole("dev-admin", "default-org",
+                map("name", "Operator", "permissions", java.util.Arrays.asList("app", "resource.knowledge")));
+        String roleId = (String) createdRole.get("roleId");
+        assertEquals("Operator", service.roleInfo("dev-admin", "default-org", roleId).get("name"));
+
+        Map<String, Object> createdUser = service.createUser("dev-admin", "default-org",
+                map("username", "alice", "nickname", "Alice", "orgId", orgId,
+                        "roleIds", java.util.Collections.singletonList(roleId)));
+        String userId = (String) createdUser.get("userId");
+        Map<String, Object> subOrgUsers = service.listUsers(orgId, "alice", 1, 10);
+        assertEquals(1L, subOrgUsers.get("total"));
+        Map user = (Map) ((List) subOrgUsers.get("list")).get(0);
+        assertEquals("alice", user.get("username"));
+        assertEquals(roleId, ((Map) ((List) ((Map) ((List) user.get("orgs")).get(0)).get("roles")).get(0)).get("id"));
+
+        service.updateUser("dev-admin", "default-org", map("userId", userId, "nickname", "Alice Updated", "orgId", orgId));
+        assertEquals("Alice Updated", ((Map) ((List) service.listUsers(orgId, "alice", 1, 10).get("list")).get(0)).get("nickname"));
+        service.updateUserStatus("dev-admin", "default-org", map("userId", userId, "status", false));
+        assertEquals(false, ((Map) ((List) service.listUsers(orgId, "alice", 1, 10).get("list")).get(0)).get("status"));
+
+        service.updateRole("dev-admin", "default-org",
+                map("roleId", roleId, "name", "Operator 2", "permissions", java.util.Collections.singletonList("app.workflow")));
+        assertEquals("Operator 2", service.roleInfo("dev-admin", "default-org", roleId).get("name"));
+        service.updateRoleStatus("dev-admin", "default-org", map("roleId", roleId, "status", false));
+        assertEquals(false, service.roleInfo("dev-admin", "default-org", roleId).get("status"));
+
+        service.updateOrganization("dev-admin", "default-org", map("orgId", orgId, "name", "Sub Org 2"));
+        assertEquals("Sub Org 2", service.organizationInfo(orgId).get("name"));
+        service.updateOrganizationStatus("dev-admin", "default-org", map("orgId", orgId, "status", false));
+        assertEquals(false, service.organizationInfo(orgId).get("status"));
+
+        Map<String, Object> imported = service.importUsers("dev-admin", "default-org", "users.xlsx", 4L);
+        assertEquals(1, imported.get("successCount"));
+
+        service.deleteUser("dev-admin", "default-org", map("userId", userId));
+        assertEquals(0L, service.listUsers(orgId, "alice", 1, 10).get("total"));
+        service.deleteRole("dev-admin", "default-org", map("roleId", roleId));
+        assertEquals(0L, service.listRoles("dev-admin", "default-org", "Operator 2", 1, 10).get("total"));
+        service.deleteOrganization("dev-admin", "default-org", map("orgId", orgId));
+        assertEquals(0L, service.listOrganizations("default-org", "Sub Org 2", 1, 10).get("total"));
+    }
+
+    @Test
     public void platformCustomConfigCanBeUpdatedAndReadBack() {
         service.updateCustomTab(map("tabTitle", "Smoke Tab", "tabLogo", map("path", "/tab.png", "key", "tab.png")));
         service.updateCustomLogin(map("loginBg", map("path", "/bg.png", "key", "bg.png"),

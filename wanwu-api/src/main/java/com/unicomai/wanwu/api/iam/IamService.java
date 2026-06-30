@@ -21,15 +21,45 @@ public interface IamService {
 
     OrganizationSelectResult selectOrganizations();
 
+    Map<String, Object> createUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    Map<String, Object> importUsers(String operatorUserId, String operatorOrgId, String fileName, long fileSize);
+
+    void updateUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void deleteUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void updateUserStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
     Map<String, Object> listUsers(String orgId, String name, int pageNo, int pageSize);
+
+    Map<String, Object> listUsersOutsideOrg(String orgId, String name, int pageNo, int pageSize);
 
     Map<String, Object> selectRoles(String orgId);
 
     Map<String, Object> roleTemplate(String userId, String orgId);
 
+    Map<String, Object> createRole(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void updateRole(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void deleteRole(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void updateRoleStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
     Map<String, Object> listRoles(String userId, String orgId, String name, int pageNo, int pageSize);
 
     Map<String, Object> roleInfo(String userId, String orgId, String roleId);
+
+    void addOrgUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    Map<String, Object> createOrganization(String operatorUserId, String parentOrgId, Map<String, Object> request);
+
+    void updateOrganization(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void deleteOrganization(String operatorUserId, String operatorOrgId, Map<String, Object> request);
+
+    void updateOrganizationStatus(String operatorUserId, String operatorOrgId, Map<String, Object> request);
 
     Map<String, Object> listOrganizations(String parentId, String name, int pageNo, int pageSize);
 
