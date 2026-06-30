@@ -42,6 +42,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int REPORT_IMPORT_SUCCESS = 2;
     private static final int EXTERNAL_ALL = -1;
     private static final int EXTERNAL_INTERNAL = 0;
+    private static final int EXTERNAL_KNOWLEDGE = 1;
+    private static final String EXTERNAL_PROVIDER_DIFY = "dify";
     private static final int DOC_STATUS_FINISHED = 1;
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
@@ -60,6 +62,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
     private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
     private final Map<String, List<ReportState>> reportsByKnowledgeId = new LinkedHashMap<String, List<ReportState>>();
+    private final Map<String, ExternalApiState> externalApis = new LinkedHashMap<String, ExternalApiState>();
+    private final Map<String, List<ExternalKnowledgeState>> externalKnowledgeByApiId =
+            new LinkedHashMap<String, List<ExternalKnowledgeState>>();
     private final Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
     private final Map<String, List<Map<String, Object>>> metasByKnowledgeId = new LinkedHashMap<String, List<Map<String, Object>>>();
     private final Map<String, List<PermissionState>> permissionsByKnowledgeId = new LinkedHashMap<String, List<PermissionState>>();
@@ -71,6 +76,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
     private final AtomicLong nextReportId = new AtomicLong(1000);
+    private final AtomicLong nextExternalApiId = new AtomicLong(1000);
+    private final AtomicLong nextExternalKnowledgeId = new AtomicLong(1000);
     private final AtomicLong nextKeywordId = new AtomicLong(1000);
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
@@ -164,6 +171,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         knowledge.llmModelId = graphModelId(safe.get("knowledgeGraph"));
         knowledge.avatar = avatar(safe.get("avatar"));
         knowledge.external = EXTERNAL_INTERNAL;
+        knowledge.docCount = 0;
         knowledge.createdAt = CREATED_AT;
         knowledge.updatedAt = CREATED_AT;
         knowledgeBases.put(knowledgeId, knowledge);
@@ -198,7 +206,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Override
     public synchronized void deleteKnowledge(String userId, String orgId, Map<String, Object> request) {
         String knowledgeId = string(safe(request).get("knowledgeId"));
-        existingKnowledge(knowledgeId);
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        if (knowledge.external == EXTERNAL_KNOWLEDGE) {
+            unmountExternalKnowledge(knowledge);
+        }
         knowledgeBases.remove(knowledgeId);
         tagIdsByKnowledgeId.remove(knowledgeId);
         for (DocState doc : docs(knowledgeId)) {
@@ -991,6 +1002,174 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
+    public synchronized Map<String, Object> listExternalApis(String userId, String orgId, Map<String, Object> request) {
+        List<String> requestedIds = stringList(safe(request).get("externalApiIds"));
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (ExternalApiState api : externalApis.values()) {
+            if (!matchesOwner(orgId, api)) {
+                continue;
+            }
+            if (!requestedIds.isEmpty() && !requestedIds.contains(api.externalApiId)) {
+                continue;
+            }
+            result.add(toExternalApiInfo(api));
+        }
+        return singleton("externalApiList", result);
+    }
+
+    @Override
+    public synchronized Map<String, Object> createExternalApi(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String name = string(safe.get("name")).trim();
+        String baseUrl = string(safe.get("baseUrl")).trim();
+        String apiKey = string(safe.get("apiKey")).trim();
+        if (isBlank(name) || isBlank(baseUrl) || isBlank(apiKey)) {
+            throw new IllegalArgumentException("external api name, baseUrl and apiKey cannot be empty");
+        }
+        ExternalApiState api = new ExternalApiState();
+        api.externalApiId = "external-api-" + nextExternalApiId.incrementAndGet();
+        api.userId = defaultIfBlank(userId, DEFAULT_USER_ID);
+        api.orgId = defaultIfBlank(orgId, DEFAULT_ORG_ID);
+        api.name = name;
+        api.description = string(safe.get("description"));
+        api.baseUrl = baseUrl;
+        api.apiKey = apiKey;
+        api.provider = EXTERNAL_PROVIDER_DIFY;
+        externalApis.put(api.externalApiId, api);
+        seedExternalKnowledgeCandidates(api);
+        saveSnapshot();
+        return singleton("externalApiId", api.externalApiId);
+    }
+
+    @Override
+    public synchronized void updateExternalApi(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        ExternalApiState api = existingExternalApi(string(safe.get("externalApiId")));
+        String name = string(safe.get("name")).trim();
+        String baseUrl = string(safe.get("baseUrl")).trim();
+        String apiKey = string(safe.get("apiKey")).trim();
+        if (isBlank(name) || isBlank(baseUrl) || isBlank(apiKey)) {
+            throw new IllegalArgumentException("external api name, baseUrl and apiKey cannot be empty");
+        }
+        api.name = name;
+        api.description = string(safe.get("description"));
+        api.baseUrl = baseUrl;
+        api.apiKey = apiKey;
+        for (KnowledgeState knowledge : knowledgeBases.values()) {
+            Map<String, Object> info = knowledge.externalKnowledgeInfo;
+            if (info != null && api.externalApiId.equals(string(info.get("externalApiId")))) {
+                info.put("externalApiName", api.name);
+                info.put("externalApiUrl", api.baseUrl);
+                info.put("externalApiKey", api.apiKey);
+            }
+        }
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized void deleteExternalApi(String userId, String orgId, Map<String, Object> request) {
+        String externalApiId = string(safe(request).get("externalApiId"));
+        existingExternalApi(externalApiId);
+        externalApis.remove(externalApiId);
+        externalKnowledgeByApiId.remove(externalApiId);
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized Map<String, Object> listExternalKnowledge(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        ExternalApiState api = existingExternalApi(string(safe.get("externalApiId")));
+        seedExternalKnowledgeCandidates(api);
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (ExternalKnowledgeState externalKnowledge : externalKnowledge(api.externalApiId)) {
+            if (externalKnowledge.mounted) {
+                continue;
+            }
+            result.add(toExternalKnowledgeInfo(api, externalKnowledge));
+        }
+        return singleton("externalKnowledgeList", result);
+    }
+
+    @Override
+    public synchronized Map<String, Object> createExternalKnowledge(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String name = string(safe.get("name")).trim();
+        if (isBlank(name)) {
+            throw new IllegalArgumentException("knowledge name cannot be empty");
+        }
+        ensureUniqueKnowledgeName(orgId, name, "");
+        ExternalApiState api = existingExternalApi(string(safe.get("externalApiId")));
+        ExternalKnowledgeState externalKnowledge = existingExternalKnowledge(
+                api.externalApiId, string(safe.get("externalKnowledgeId")));
+        String knowledgeId = "knowledge-" + nextKnowledgeId.incrementAndGet();
+        KnowledgeState knowledge = new KnowledgeState();
+        knowledge.knowledgeId = knowledgeId;
+        knowledge.userId = defaultIfBlank(userId, DEFAULT_USER_ID);
+        knowledge.orgId = defaultIfBlank(orgId, DEFAULT_ORG_ID);
+        knowledge.orgName = DEFAULT_ORG_NAME;
+        knowledge.name = name;
+        knowledge.description = string(safe.get("description"));
+        knowledge.category = CATEGORY_KNOWLEDGE;
+        knowledge.embeddingModelId = "";
+        knowledge.graphSwitch = 0;
+        knowledge.llmModelId = "";
+        knowledge.avatar = avatar(safe.get("avatar"));
+        knowledge.external = EXTERNAL_KNOWLEDGE;
+        knowledge.docCount = externalKnowledge.docCount;
+        knowledge.externalKnowledgeInfo = externalKnowledgeInfo(api, externalKnowledge,
+                defaultIfBlank(string(safe.get("externalSource")), EXTERNAL_PROVIDER_DIFY));
+        knowledge.createdAt = CREATED_AT;
+        knowledge.updatedAt = CREATED_AT;
+        knowledgeBases.put(knowledgeId, knowledge);
+        tagIdsByKnowledgeId.put(knowledgeId, new ArrayList<String>());
+        docsByKnowledgeId.put(knowledgeId, new ArrayList<DocState>());
+        qaPairsByKnowledgeId.put(knowledgeId, new ArrayList<QaPairState>());
+        reportsByKnowledgeId.put(knowledgeId, new ArrayList<ReportState>());
+        metasByKnowledgeId.put(knowledgeId, new ArrayList<Map<String, Object>>());
+        permissionsByKnowledgeId.put(knowledgeId, new ArrayList<PermissionState>());
+        addOwnerPermission(knowledgeId, knowledge.userId, knowledge.orgId);
+        mountExternalKnowledge(externalKnowledge, knowledgeId);
+        saveSnapshot();
+        return singleton("knowledgeId", knowledgeId);
+    }
+
+    @Override
+    public synchronized void updateExternalKnowledge(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        KnowledgeState knowledge = existingKnowledge(string(safe.get("knowledgeId")));
+        if (knowledge.external != EXTERNAL_KNOWLEDGE) {
+            throw new IllegalArgumentException("knowledge is not external");
+        }
+        String name = string(safe.get("name")).trim();
+        if (isBlank(name)) {
+            throw new IllegalArgumentException("knowledge name cannot be empty");
+        }
+        ensureUniqueKnowledgeName(orgId, name, knowledge.knowledgeId);
+        ExternalApiState api = existingExternalApi(string(safe.get("externalApiId")));
+        ExternalKnowledgeState externalKnowledge = existingExternalKnowledge(
+                api.externalApiId, string(safe.get("externalKnowledgeId")));
+        unmountExternalKnowledge(knowledge);
+        mountExternalKnowledge(externalKnowledge, knowledge.knowledgeId);
+        knowledge.name = name;
+        knowledge.description = string(safe.get("description"));
+        knowledge.docCount = externalKnowledge.docCount;
+        knowledge.externalKnowledgeInfo = externalKnowledgeInfo(api, externalKnowledge,
+                defaultIfBlank(string(safe.get("externalSource")), EXTERNAL_PROVIDER_DIFY));
+        knowledge.updatedAt = CREATED_AT;
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized void deleteExternalKnowledge(String userId, String orgId, Map<String, Object> request) {
+        String knowledgeId = string(safe(request).get("knowledgeId"));
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        if (knowledge.external != EXTERNAL_KNOWLEDGE) {
+            throw new IllegalArgumentException("knowledge is not external");
+        }
+        deleteKnowledge(userId, orgId, request);
+    }
+
+    @Override
     public Map<String, Object> listExportRecords(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> result = page(Collections.<Map<String, Object>>emptyList(),
                 intValue(safe(request).get("pageNo"), 1),
@@ -1239,7 +1418,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("name", knowledge.name);
         result.put("orgName", knowledge.orgName);
         result.put("description", knowledge.description);
-        result.put("docCount", docs(knowledge.knowledgeId).size());
+        result.put("docCount", Math.max(knowledge.docCount, docs(knowledge.knowledgeId).size()));
         result.put("embeddingModelInfo", singleton("modelId", knowledge.embeddingModelId));
         result.put("knowledgeTagList", tagListForKnowledge(knowledge.knowledgeId));
         result.put("createUserId", knowledge.userId);
@@ -1252,7 +1431,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("llmModelId", knowledge.llmModelId);
         result.put("updatedAt", knowledge.updatedAt);
         result.put("external", knowledge.external);
-        result.put("externalKnowledgeInfo", null);
+        result.put("externalKnowledgeInfo", knowledge.external == EXTERNAL_KNOWLEDGE
+                ? new LinkedHashMap<String, Object>(safe(knowledge.externalKnowledgeInfo))
+                : null);
         result.put("avatar", new LinkedHashMap<String, Object>(knowledge.avatar));
         return result;
     }
@@ -1544,6 +1725,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         throw new IllegalArgumentException("report not found: " + contentId);
     }
 
+    private ExternalApiState existingExternalApi(String externalApiId) {
+        if (isBlank(externalApiId) || !externalApis.containsKey(externalApiId)) {
+            throw new IllegalArgumentException("external api not found");
+        }
+        return externalApis.get(externalApiId);
+    }
+
+    private ExternalKnowledgeState existingExternalKnowledge(String externalApiId, String externalKnowledgeId) {
+        for (ExternalKnowledgeState externalKnowledge : externalKnowledge(externalApiId)) {
+            if (externalKnowledgeId.equals(externalKnowledge.externalKnowledgeId)) {
+                return externalKnowledge;
+            }
+        }
+        throw new IllegalArgumentException("external knowledge not found");
+    }
+
     private PermissionState findPermission(String permissionId) {
         if (isBlank(permissionId)) {
             return null;
@@ -1575,6 +1772,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private boolean matchesOwner(String orgId, KeywordState keyword) {
         return isBlank(orgId) || orgId.equals(keyword.orgId);
+    }
+
+    private boolean matchesOwner(String orgId, ExternalApiState api) {
+        return isBlank(orgId) || orgId.equals(api.orgId);
     }
 
     private List<String> tagIds(String knowledgeId) {
@@ -1620,6 +1821,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             reportsByKnowledgeId.put(knowledgeId, reports);
         }
         return reports;
+    }
+
+    private List<ExternalKnowledgeState> externalKnowledge(String externalApiId) {
+        List<ExternalKnowledgeState> result = externalKnowledgeByApiId.get(externalApiId);
+        if (result == null) {
+            result = new ArrayList<ExternalKnowledgeState>();
+            externalKnowledgeByApiId.put(externalApiId, result);
+        }
+        return result;
     }
 
     private List<Map<String, Object>> metas(String knowledgeId) {
@@ -1728,6 +1938,121 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return "Development community report for " + knowledge.name
                 + ". Documents: " + docCount
                 + ", QA pairs: " + qaCount + ".";
+    }
+
+    private void seedExternalKnowledgeCandidates(ExternalApiState api) {
+        List<ExternalKnowledgeState> candidates = externalKnowledge(api.externalApiId);
+        if (!candidates.isEmpty()) {
+            return;
+        }
+        candidates.add(newExternalKnowledgeCandidate(api, "Development Dataset", 3));
+        candidates.add(newExternalKnowledgeCandidate(api, "Operations Dataset", 5));
+    }
+
+    private ExternalKnowledgeState newExternalKnowledgeCandidate(ExternalApiState api, String suffix, int docCount) {
+        ExternalKnowledgeState candidate = new ExternalKnowledgeState();
+        candidate.externalKnowledgeId = "external-knowledge-" + nextExternalKnowledgeId.incrementAndGet();
+        candidate.externalKnowledgeName = api.name + " " + suffix;
+        candidate.externalApiId = api.externalApiId;
+        candidate.provider = api.provider;
+        candidate.userId = api.userId;
+        candidate.orgId = api.orgId;
+        candidate.docCount = docCount;
+        candidate.mounted = false;
+        candidate.mountedKnowledgeId = "";
+        return candidate;
+    }
+
+    private Map<String, Object> toExternalApiInfo(ExternalApiState api) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("externalApiId", api.externalApiId);
+        result.put("name", api.name);
+        result.put("description", api.description);
+        result.put("baseUrl", api.baseUrl);
+        result.put("apiKey", api.apiKey);
+        return result;
+    }
+
+    private Map<String, Object> toExternalKnowledgeInfo(ExternalApiState api, ExternalKnowledgeState externalKnowledge) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("externalKnowledgeId", externalKnowledge.externalKnowledgeId);
+        result.put("externalKnowledgeName", externalKnowledge.externalKnowledgeName);
+        result.put("externalApiId", api.externalApiId);
+        result.put("externalApiName", api.name);
+        result.put("externalApiUrl", api.baseUrl);
+        result.put("externalApiKey", api.apiKey);
+        result.put("externalSource", defaultIfBlank(externalKnowledge.provider, EXTERNAL_PROVIDER_DIFY));
+        result.put("provider", defaultIfBlank(externalKnowledge.provider, EXTERNAL_PROVIDER_DIFY));
+        result.put("docCount", externalKnowledge.docCount);
+        result.put("retrievalModelInfo", retrievalModelInfo());
+        return result;
+    }
+
+    private Map<String, Object> externalKnowledgeInfo(ExternalApiState api, ExternalKnowledgeState externalKnowledge,
+                                                      String externalSource) {
+        Map<String, Object> result = toExternalKnowledgeInfo(api, externalKnowledge);
+        result.put("externalSource", defaultIfBlank(externalSource, EXTERNAL_PROVIDER_DIFY));
+        result.put("provider", defaultIfBlank(externalSource, EXTERNAL_PROVIDER_DIFY));
+        return result;
+    }
+
+    private Map<String, Object> retrievalModelInfo() {
+        Map<String, Object> rerankingModel = new LinkedHashMap<String, Object>();
+        rerankingModel.put("rerankingProviderName", "");
+        rerankingModel.put("rerankingModelName", "");
+        Map<String, Object> keywordSetting = new LinkedHashMap<String, Object>();
+        keywordSetting.put("keywordWeight", 0.3D);
+        Map<String, Object> vectorSetting = new LinkedHashMap<String, Object>();
+        vectorSetting.put("vectorWeight", 0.7D);
+        vectorSetting.put("embeddingModelName", "development-embedding");
+        vectorSetting.put("embeddingProviderName", "wanwu-java");
+        Map<String, Object> weights = new LinkedHashMap<String, Object>();
+        weights.put("weightType", "customized");
+        weights.put("keywordSetting", keywordSetting);
+        weights.put("vectorSetting", vectorSetting);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("searchMethod", "hybrid_search");
+        result.put("rerankingEnable", Boolean.FALSE);
+        result.put("rerankingMode", "");
+        result.put("rerankingModel", rerankingModel);
+        result.put("weights", weights);
+        result.put("topK", 3);
+        result.put("scoreThresholdEnabled", Boolean.FALSE);
+        result.put("scoreThreshold", 0D);
+        return result;
+    }
+
+    private void mountExternalKnowledge(ExternalKnowledgeState externalKnowledge, String knowledgeId) {
+        externalKnowledge.mounted = true;
+        externalKnowledge.mountedKnowledgeId = knowledgeId;
+    }
+
+    private void unmountExternalKnowledge(KnowledgeState knowledge) {
+        if (knowledge.externalKnowledgeInfo == null) {
+            return;
+        }
+        String externalApiId = string(knowledge.externalKnowledgeInfo.get("externalApiId"));
+        String externalKnowledgeId = string(knowledge.externalKnowledgeInfo.get("externalKnowledgeId"));
+        for (ExternalKnowledgeState externalKnowledge : externalKnowledge(externalApiId)) {
+            if (externalKnowledgeId.equals(externalKnowledge.externalKnowledgeId)
+                    && knowledge.knowledgeId.equals(externalKnowledge.mountedKnowledgeId)) {
+                externalKnowledge.mounted = false;
+                externalKnowledge.mountedKnowledgeId = "";
+            }
+        }
+    }
+
+    private void ensureUniqueKnowledgeName(String orgId, String name, String currentKnowledgeId) {
+        for (KnowledgeState knowledge : knowledgeBases.values()) {
+            if (!matchesOwner(orgId, knowledge)) {
+                continue;
+            }
+            if (!knowledge.knowledgeId.equals(currentKnowledgeId)
+                    && knowledge.category == CATEGORY_KNOWLEDGE
+                    && name.equals(knowledge.name)) {
+                throw new IllegalArgumentException("knowledge already exists");
+            }
+        }
     }
 
     private String embeddingModelId(Object raw) {
@@ -1935,6 +2260,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.qaPairsByKnowledgeId.putAll(qaPairsByKnowledgeId);
         snapshot.qaPairsById.putAll(qaPairsById);
         snapshot.reportsByKnowledgeId.putAll(reportsByKnowledgeId);
+        snapshot.externalApis.putAll(externalApis);
+        snapshot.externalKnowledgeByApiId.putAll(externalKnowledgeByApiId);
         snapshot.keywords.putAll(keywords);
         snapshot.metasByKnowledgeId.putAll(metasByKnowledgeId);
         snapshot.permissionsByKnowledgeId.putAll(permissionsByKnowledgeId);
@@ -1945,6 +2272,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.nextSegmentId = nextSegmentId.get();
         snapshot.nextQaPairId = nextQaPairId.get();
         snapshot.nextReportId = nextReportId.get();
+        snapshot.nextExternalApiId = nextExternalApiId.get();
+        snapshot.nextExternalKnowledgeId = nextExternalKnowledgeId.get();
         snapshot.nextKeywordId = nextKeywordId.get();
         snapshot.nextMetaId = nextMetaId.get();
         snapshot.nextPermissionId = nextPermissionId.get();
@@ -1977,6 +2306,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         rebuildQaPairIndex();
         reportsByKnowledgeId.clear();
         reportsByKnowledgeId.putAll(safeMap(snapshot.reportsByKnowledgeId));
+        externalApis.clear();
+        externalApis.putAll(safeMap(snapshot.externalApis));
+        externalKnowledgeByApiId.clear();
+        externalKnowledgeByApiId.putAll(safeMap(snapshot.externalKnowledgeByApiId));
         keywords.clear();
         keywords.putAll(safeMap(snapshot.keywords));
         metasByKnowledgeId.clear();
@@ -1991,6 +2324,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         restoreSequence(nextSegmentId, snapshot.nextSegmentId);
         restoreSequence(nextQaPairId, snapshot.nextQaPairId);
         restoreSequence(nextReportId, snapshot.nextReportId);
+        restoreSequence(nextExternalApiId, snapshot.nextExternalApiId);
+        restoreSequence(nextExternalKnowledgeId, snapshot.nextExternalKnowledgeId);
         restoreSequence(nextKeywordId, snapshot.nextKeywordId);
         restoreSequence(nextMetaId, snapshot.nextMetaId);
         restoreSequence(nextPermissionId, snapshot.nextPermissionId);
@@ -2019,6 +2354,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         for (List<ReportState> reports : reportsByKnowledgeId.values()) {
             for (ReportState report : safeList(reports)) {
                 bumpSequence(nextReportId, report.contentId, "report-");
+            }
+        }
+        for (ExternalApiState api : externalApis.values()) {
+            bumpSequence(nextExternalApiId, api.externalApiId, "external-api-");
+        }
+        for (List<ExternalKnowledgeState> externalKnowledgeList : externalKnowledgeByApiId.values()) {
+            for (ExternalKnowledgeState externalKnowledge : safeList(externalKnowledgeList)) {
+                bumpSequence(nextExternalKnowledgeId, externalKnowledge.externalKnowledgeId, "external-knowledge-");
             }
         }
         for (KeywordState keyword : keywords.values()) {
@@ -2084,6 +2427,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
         private Map<String, List<ReportState>> reportsByKnowledgeId =
                 new LinkedHashMap<String, List<ReportState>>();
+        private Map<String, ExternalApiState> externalApis = new LinkedHashMap<String, ExternalApiState>();
+        private Map<String, List<ExternalKnowledgeState>> externalKnowledgeByApiId =
+                new LinkedHashMap<String, List<ExternalKnowledgeState>>();
         private Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
         private Map<String, List<Map<String, Object>>> metasByKnowledgeId =
                 new LinkedHashMap<String, List<Map<String, Object>>>();
@@ -2096,6 +2442,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private long nextSegmentId;
         private long nextQaPairId;
         private long nextReportId;
+        private long nextExternalApiId;
+        private long nextExternalKnowledgeId;
         private long nextKeywordId;
         private long nextMetaId;
         private long nextPermissionId;
@@ -2113,6 +2461,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private int graphSwitch;
         private String llmModelId;
         private int external;
+        private int docCount;
+        private Map<String, Object> externalKnowledgeInfo;
         private Map<String, Object> avatar;
         private String createdAt;
         private String updatedAt;
@@ -2188,6 +2538,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String createdAt;
         private boolean imported;
         private boolean generated;
+    }
+
+    private static final class ExternalApiState {
+        private String externalApiId;
+        private String userId;
+        private String orgId;
+        private String name;
+        private String description;
+        private String baseUrl;
+        private String apiKey;
+        private String provider;
+    }
+
+    private static final class ExternalKnowledgeState {
+        private String externalKnowledgeId;
+        private String externalKnowledgeName;
+        private String externalApiId;
+        private String provider;
+        private String userId;
+        private String orgId;
+        private int docCount;
+        private boolean mounted;
+        private String mountedKnowledgeId;
     }
 
     private static final class PermissionState {

@@ -4,7 +4,7 @@ Date: 2026-06-30
 
 ## Source Alignment
 
-- Frontend callers: `web/src/api/knowledge.js`, `web/src/api/keyword.js`, `web/src/api/qaDatabase.js`, `web/src/views/knowledge/index.vue`, `web/src/views/knowledge/component/create.vue`, `web/src/views/knowledge/knowledgeDatabase/doclist.vue`, `web/src/views/knowledge/component/communityReport/*`, `web/src/views/knowledge/keyword/*`, `tagDialog.vue`, `splitterDialog.vue`, and `power` views.
+- Frontend callers: `web/src/api/knowledge.js`, `web/src/api/keyword.js`, `web/src/api/qaDatabase.js`, `web/src/views/knowledge/index.vue`, `web/src/views/knowledge/component/create.vue`, `web/src/components/externalAPIDrawer.vue`, `web/src/components/externalAPIDialog.vue`, `web/src/views/knowledge/knowledgeDatabase/doclist.vue`, `web/src/views/knowledge/component/communityReport/*`, `web/src/views/knowledge/keyword/*`, `tagDialog.vue`, `splitterDialog.vue`, and `power` views.
 - Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\knowledge.go`.
 - Go request/response contracts: `internal\bff-service\model\request\knowledge*.go`, `internal\bff-service\model\response\knowledge*.go`.
 - Go proto baseline: the `KnowledgeBase*` service groups in `D:\work\week3\wanwu\proto`.
@@ -22,7 +22,8 @@ Date: 2026-06-30
   - Permission owner/admin/user/org compatibility.
   - QA pair create/list/update/switch/delete, import-tip, export shell, and local text hit.
   - Community report list/add/update/delete, deterministic local generate, batch-add placeholder, and frontend status fields.
-  - Graph, export record, and external knowledge compatibility shells.
+  - External API create/list/update/delete, external dataset selection, external knowledge create/update/delete, and external knowledge list integration.
+  - Graph and export record compatibility shells.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1/knowledge`.
 - Docker Compose `full` profile includes `knowledge` on ports `8083` and `20883`, and BFF now depends on it.
 
@@ -35,7 +36,7 @@ The Java knowledge service currently uses a Docker MySQL snapshot repository in 
 - Document pages include `list`, `total`, `pageNo`, `pageSize`, and `docKnowledgeInfo`.
 - Permission pages return `knowledgeUserInfoList`, `knowOrgInfoList`, and `userInfoList`.
 
-This is enough for the frontend to open the Knowledge module, create a knowledge base, bind tags, create and edit keyword mappings, view splitters, import local development document descriptors, see the document list, inspect and edit local segments, open permission-related panels, and manage community reports without backend 404s. Mutable knowledge, tag, keyword, splitter, doc, segment, metadata, permission, QA-pair, and report state now survives Docker restarts. It is not the final Go-equivalent storage or indexing model.
+This is enough for the frontend to open the Knowledge module, create internal and external knowledge bases, bind tags, create and edit keyword mappings, view splitters, import local development document descriptors, see the document list, inspect and edit local segments, open permission-related panels, and manage community reports without backend 404s. Mutable knowledge, external API, external dataset mount state, tag, keyword, splitter, doc, segment, metadata, permission, QA-pair, and report state now survives Docker restarts. It is not the final Go-equivalent storage or indexing model.
 
 The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, and run a deterministic hit test over enabled finished pairs. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous import or retrieval engine.
 
@@ -43,10 +44,12 @@ The document path stores imported `docInfoList` entries in memory, derives a def
 
 The community report path now has the frontend-visible loop from Go's `KnowledgeBaseReportService`: list returns `list`, `total`, pagination, `createdAt`, `status`, `canGenerate`, `canAddReport`, `generateLabel`, and `lastImportStatus`; single add, update, delete, generate, and batch-add calls mutate the same snapshot. `generate` creates or refreshes a deterministic development report, and `batch-add` records the uploaded file id as an imported report placeholder. The Go implementation delegates to graph/RAG report generation and CSV import tasks; those runtime integrations remain later work.
 
+The external knowledge path now follows the Go BFF contract from `knowledge_external.go`: `/knowledge/external/api/select`, `/knowledge/external/api`, `/knowledge/external/select`, and `/knowledge/external` all dispatch to `KnowledgeService`. The Go service validates and lists Dify datasets over the external API; the Java Docker reproduction uses a persisted local candidate dataset list per external API so frontend flows do not depend on an external Dify server. Creating an external knowledge base mounts one candidate, creates a normal Wanwu `knowledgeId` with `external = 1`, and returns `externalKnowledgeInfo` in `/knowledge/select`. Updating or deleting external knowledge mutates the same snapshot and releases the candidate for reuse.
+
 ## Still Missing
 
-- Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, and external knowledge.
+- Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
 - Real document upload byte handling, file parsing, chunking, vector indexing, reimport, export records, child segment persistence, and asynchronous callback status updates.
 - Real QA file import parsing, persisted export records, and vector/keyword/rerank retrieval for QA hit tests.
-- Real keyword extraction/sync into the RAG engine, graph generation, graph-derived report generation, CSV report import parsing, and RAG query integration.
+- Real keyword extraction/sync into the RAG engine, graph generation, graph-derived report generation, CSV report import parsing, Dify external API validation/listing, and RAG query integration.
 - Callback status updates from asynchronous document processing.

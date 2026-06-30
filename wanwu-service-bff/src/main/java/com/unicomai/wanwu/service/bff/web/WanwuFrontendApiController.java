@@ -2470,33 +2470,67 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping("/knowledge/external/api/select")
-    public FrontendResponse<Map<String, Object>> listExternalKnowledgeApis() {
-        return FrontendResponse.ok(singleton("externalApiList", Collections.emptyList()));
+    public FrontendResponse<Map<String, Object>> listExternalKnowledgeApis(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listExternalApis(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/external/select")
-    public FrontendResponse<Map<String, Object>> listExternalKnowledge() {
-        return FrontendResponse.ok(singleton("externalKnowledgeList", Collections.emptyList()));
+    public FrontendResponse<Map<String, Object>> listExternalKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listExternalKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @PostMapping("/knowledge/external/api")
-    public FrontendResponse<Map<String, Object>> createExternalKnowledgeApi() {
-        return FrontendResponse.ok(singleton("externalApiId", "external-api-dev"));
+    public FrontendResponse<Map<String, Object>> createExternalKnowledgeApi(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createExternalApi(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @PostMapping("/knowledge/external")
-    public FrontendResponse<Map<String, Object>> createExternalKnowledge() {
-        return FrontendResponse.ok(singleton("knowledgeId", "external-knowledge-dev"));
+    public FrontendResponse<Map<String, Object>> createExternalKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createExternalKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PutMapping({"/knowledge/external/api", "/knowledge/external"})
-    public FrontendResponse<Map<String, Object>> updateExternalKnowledge() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    @PutMapping("/knowledge/external/api")
+    public FrontendResponse<Map<String, Object>> updateExternalKnowledgeApi(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateExternalApi(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @DeleteMapping({"/knowledge/external/api", "/knowledge/external"})
-    public FrontendResponse<Map<String, Object>> deleteExternalKnowledge() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    @PutMapping("/knowledge/external")
+    public FrontendResponse<Map<String, Object>> updateExternalKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateExternalKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/external/api")
+    public FrontendResponse<Map<String, Object>> deleteExternalKnowledgeApi(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteExternalApi(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/external")
+    public FrontendResponse<Map<String, Object>> deleteExternalKnowledge(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteExternalKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     private FrontendResponse<Map<String, Object>> assistantVoidResponse(

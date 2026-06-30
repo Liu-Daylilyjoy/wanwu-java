@@ -124,6 +124,22 @@ public interface KnowledgeService {
 
     void batchAddReports(String userId, String orgId, Map<String, Object> request);
 
+    Map<String, Object> listExternalApis(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createExternalApi(String userId, String orgId, Map<String, Object> request);
+
+    void updateExternalApi(String userId, String orgId, Map<String, Object> request);
+
+    void deleteExternalApi(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> listExternalKnowledge(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createExternalKnowledge(String userId, String orgId, Map<String, Object> request);
+
+    void updateExternalKnowledge(String userId, String orgId, Map<String, Object> request);
+
+    void deleteExternalKnowledge(String userId, String orgId, Map<String, Object> request);
+
     Map<String, Object> listExportRecords(String userId, String orgId, Map<String, Object> request);
 
     void deleteExportRecord(String userId, String orgId, Map<String, Object> request);

@@ -200,6 +200,72 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void externalKnowledgeLifecycleFollowsFrontendAndGoContract() {
+        Map<String, Object> createdApi = service.createExternalApi("dev-admin", "default-org",
+                externalApiCreate("Dify Dev", "https://dify.example/v1", "dev-key"));
+        String externalApiId = (String) createdApi.get("externalApiId");
+        assertEquals("external-api-1001", externalApiId);
+
+        Map<String, Object> apiList = service.listExternalApis("dev-admin", "default-org",
+                Collections.<String, Object>emptyMap());
+        Map<String, Object> api = listOfMaps(apiList.get("externalApiList")).get(0);
+        assertEquals("Dify Dev", api.get("name"));
+        assertEquals("https://dify.example/v1", api.get("baseUrl"));
+        assertFalse(api.containsKey("externalAPIId"));
+
+        Map<String, Object> selectable = service.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId));
+        List<Map<String, Object>> candidates = listOfMaps(selectable.get("externalKnowledgeList"));
+        assertEquals(2, candidates.size());
+        assertFalse(candidates.get(0).containsKey("externalAPIId"));
+        String firstExternalKnowledgeId = (String) candidates.get(0).get("externalKnowledgeId");
+
+        Map<String, Object> createdKnowledge = service.createExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeCreate("External KB", externalApiId, firstExternalKnowledgeId));
+        String knowledgeId = (String) createdKnowledge.get("knowledgeId");
+        assertEquals("knowledge-1001", knowledgeId);
+
+        Map<String, Object> afterMount = service.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId));
+        assertEquals(1, listOfMaps(afterMount.get("externalKnowledgeList")).size());
+
+        Map<String, Object> selected = listOfMaps(service.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("External", 0, 1)).get("knowledgeList")).get(0);
+        assertEquals(1, selected.get("external"));
+        assertEquals(3, selected.get("docCount"));
+        Map<String, Object> externalInfo = map(selected.get("externalKnowledgeInfo"));
+        assertEquals(externalApiId, externalInfo.get("externalApiId"));
+        assertEquals("dify", externalInfo.get("externalSource"));
+        assertEquals(firstExternalKnowledgeId, externalInfo.get("externalKnowledgeId"));
+
+        service.updateExternalApi("dev-admin", "default-org",
+                externalApiUpdate(externalApiId, "Dify Updated", "https://dify.example/v2", "dev-key-2"));
+        Map<String, Object> withUpdatedApi = listOfMaps(service.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("External", 0, 1)).get("knowledgeList")).get(0);
+        assertEquals("Dify Updated", map(withUpdatedApi.get("externalKnowledgeInfo")).get("externalApiName"));
+
+        String secondExternalKnowledgeId = (String) listOfMaps(afterMount.get("externalKnowledgeList"))
+                .get(0).get("externalKnowledgeId");
+        service.updateExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeUpdate(knowledgeId, "External KB Updated", externalApiId, secondExternalKnowledgeId));
+        Map<String, Object> updated = listOfMaps(service.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("Updated", 0, 1)).get("knowledgeList")).get(0);
+        assertEquals("External KB Updated", updated.get("name"));
+        assertEquals(5, updated.get("docCount"));
+        assertEquals(secondExternalKnowledgeId, map(updated.get("externalKnowledgeInfo")).get("externalKnowledgeId"));
+
+        service.deleteExternalKnowledge("dev-admin", "default-org", singleton("knowledgeId", knowledgeId));
+        assertEquals(0, listOfMaps(service.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("", 0, 1)).get("knowledgeList")).size());
+        assertEquals(2, listOfMaps(service.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId)).get("externalKnowledgeList")).size());
+
+        service.deleteExternalApi("dev-admin", "default-org", singleton("externalApiId", externalApiId));
+        assertEquals(0, listOfMaps(service.listExternalApis("dev-admin", "default-org",
+                Collections.<String, Object>emptyMap()).get("externalApiList")).size());
+    }
+
+    @Test
     public void documentImportAndSegmentsFollowFrontendAndGoContract() {
         Map<String, Object> created = service.createKnowledge("dev-admin", "default-org", createKnowledge("Dev Docs", 0));
         String knowledgeId = (String) created.get("knowledgeId");
@@ -266,6 +332,12 @@ public class KnowledgeServiceImplTest {
                 keywordCreate("Persist keyword", "Persist alias", knowledgeId));
         persistent.addReport("dev-admin", "default-org",
                 reportCreate(knowledgeId, "Persist report", "Persist report body"));
+        String externalApiId = (String) persistent.createExternalApi("dev-admin", "default-org",
+                externalApiCreate("Persist Dify", "https://persist.example/v1", "persist-key")).get("externalApiId");
+        String externalKnowledgeId = (String) listOfMaps(persistent.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId)).get("externalKnowledgeList")).get(0).get("externalKnowledgeId");
+        persistent.createExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeCreate("Persist External KB", externalApiId, externalKnowledgeId));
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -277,6 +349,8 @@ public class KnowledgeServiceImplTest {
         assertTrue(last.getPayload().contains("Persist?"));
         assertTrue(last.getPayload().contains("Persist keyword"));
         assertTrue(last.getPayload().contains("Persist report"));
+        assertTrue(last.getPayload().contains("Persist Dify"));
+        assertTrue(last.getPayload().contains("Persist External KB"));
     }
 
     @Test
@@ -295,6 +369,12 @@ public class KnowledgeServiceImplTest {
                 keywordCreate("Restart keyword", "Restart alias", knowledgeId));
         source.addReport("dev-admin", "default-org",
                 reportCreate(knowledgeId, "Restart report", "Restart report body"));
+        String externalApiId = (String) source.createExternalApi("dev-admin", "default-org",
+                externalApiCreate("Restart Dify", "https://restart.example/v1", "restart-key")).get("externalApiId");
+        String externalKnowledgeId = (String) listOfMaps(source.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId)).get("externalKnowledgeList")).get(0).get("externalKnowledgeId");
+        String externalWanwuKnowledgeId = (String) source.createExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeCreate("Restart External KB", externalApiId, externalKnowledgeId)).get("knowledgeId");
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -306,7 +386,7 @@ public class KnowledgeServiceImplTest {
         KnowledgeServiceImpl restarted = new KnowledgeServiceImpl(restartMapper);
 
         List<Map<String, Object>> knowledgeList = listOfMaps(restarted.selectKnowledge("dev-admin", "default-org",
-                selectKnowledge("Restart", 0, -1)).get("knowledgeList"));
+                selectKnowledge("Restart KB", 0, -1)).get("knowledgeList"));
         assertEquals(1, knowledgeList.size());
         assertEquals(knowledgeId, knowledgeList.get(0).get("knowledgeId"));
         assertTrue((Boolean) listOfMaps(knowledgeList.get(0).get("knowledgeTagList")).get(0).get("selected"));
@@ -315,10 +395,17 @@ public class KnowledgeServiceImplTest {
                 qaPairList(knowledgeId, "Restart", Collections.singletonList(-1))).get("total"));
         assertEquals(1, restarted.listKeywords("dev-admin", "default-org", keywordList("Restart")).get("total"));
         assertEquals(1, restarted.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10)).get("total"));
+        List<Map<String, Object>> externalKnowledgeList = listOfMaps(restarted.selectKnowledge("dev-admin", "default-org",
+                selectKnowledge("Restart External", 0, 1)).get("knowledgeList"));
+        assertEquals(1, externalKnowledgeList.size());
+        assertEquals(externalWanwuKnowledgeId, externalKnowledgeList.get(0).get("knowledgeId"));
+        assertEquals("Restart Dify", map(externalKnowledgeList.get(0).get("externalKnowledgeInfo")).get("externalApiName"));
+        assertEquals(1, listOfMaps(restarted.listExternalKnowledge("dev-admin", "default-org",
+                externalKnowledgeList(externalApiId)).get("externalKnowledgeList")).size());
 
         Map<String, Object> next = restarted.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Restart Next", 0));
-        assertEquals("knowledge-1002", next.get("knowledgeId"));
+        assertEquals("knowledge-1003", next.get("knowledgeId"));
         Map<String, Object> nextKeyword = restarted.createKeyword("dev-admin", "default-org",
                 keywordCreate("Restart next keyword", "Restart next alias", (String) next.get("knowledgeId")));
         assertEquals(1002L, nextKeyword.get("id"));
@@ -326,6 +413,9 @@ public class KnowledgeServiceImplTest {
                 reportCreate((String) next.get("knowledgeId"), "Restart next report", "Restart next report body"));
         assertEquals("report-1002", listOfMaps(restarted.listReports("dev-admin", "default-org",
                 reportList((String) next.get("knowledgeId"), 1, 10)).get("list")).get(0).get("contentId"));
+        Map<String, Object> nextExternalApi = restarted.createExternalApi("dev-admin", "default-org",
+                externalApiCreate("Restart Next Dify", "https://restart.example/v2", "restart-key-2"));
+        assertEquals("external-api-1002", nextExternalApi.get("externalApiId"));
         verify(restartMapper, atLeastOnce()).upsertRecord(any(KnowledgeRecordEntity.class));
     }
 
@@ -559,6 +649,45 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("fileUploadId", fileUploadId);
+        return request;
+    }
+
+    private Map<String, Object> externalApiCreate(String name, String baseUrl, String apiKey) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("name", name);
+        request.put("description", "external api");
+        request.put("baseUrl", baseUrl);
+        request.put("apiKey", apiKey);
+        return request;
+    }
+
+    private Map<String, Object> externalApiUpdate(String externalApiId, String name, String baseUrl, String apiKey) {
+        Map<String, Object> request = externalApiCreate(name, baseUrl, apiKey);
+        request.put("externalApiId", externalApiId);
+        return request;
+    }
+
+    private Map<String, Object> externalKnowledgeList(String externalApiId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("externalApiId", externalApiId);
+        return request;
+    }
+
+    private Map<String, Object> externalKnowledgeCreate(String name, String externalApiId, String externalKnowledgeId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("name", name);
+        request.put("description", "external knowledge");
+        request.put("externalSource", "dify");
+        request.put("externalApiId", externalApiId);
+        request.put("externalKnowledgeId", externalKnowledgeId);
+        request.put("avatar", singleton("path", ""));
+        return request;
+    }
+
+    private Map<String, Object> externalKnowledgeUpdate(String knowledgeId, String name, String externalApiId,
+                                                        String externalKnowledgeId) {
+        Map<String, Object> request = externalKnowledgeCreate(name, externalApiId, externalKnowledgeId);
+        request.put("knowledgeId", knowledgeId);
         return request;
     }
 

@@ -1786,6 +1786,85 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void knowledgeExternalRoutesDispatchToServiceAndReturnFrontendContract() throws Exception {
+        when(knowledgeService.listExternalApis(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("externalApiList", Collections.singletonList(
+                        externalApi("external-api-001", "Dify Dev"))));
+        when(knowledgeService.createExternalApi(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("externalApiId", "external-api-001"));
+        when(knowledgeService.listExternalKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("externalKnowledgeList", Collections.singletonList(
+                        externalKnowledge("external-knowledge-001", "Dify Dataset", "external-api-001"))));
+        when(knowledgeService.createExternalKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeId", "knowledge-external-001"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/external/api/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.externalApiList[0].externalApiId").value("external-api-001"))
+                .andExpect(jsonPath("$.data.externalApiList[0].name").value("Dify Dev"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/external/api")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dify Dev\",\"description\":\"api\",\"baseUrl\":\"https://dify.example/v1\",\"apiKey\":\"key\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.externalApiId").value("external-api-001"));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/external/api")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"externalApiId\":\"external-api-001\",\"name\":\"Dify Updated\",\"description\":\"api\",\"baseUrl\":\"https://dify.example/v2\",\"apiKey\":\"key2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/external/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("externalApiId", "external-api-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.externalKnowledgeList[0].externalKnowledgeId").value("external-knowledge-001"))
+                .andExpect(jsonPath("$.data.externalKnowledgeList[0].externalKnowledgeName").value("Dify Dataset"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/external")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"External KB\",\"description\":\"docs\",\"externalSource\":\"dify\",\"externalApiId\":\"external-api-001\",\"externalKnowledgeId\":\"external-knowledge-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeId").value("knowledge-external-001"));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/external")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-external-001\",\"name\":\"External KB 2\",\"description\":\"docs\",\"externalSource\":\"dify\",\"externalApiId\":\"external-api-001\",\"externalKnowledgeId\":\"external-knowledge-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/external")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-external-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/external/api")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"externalApiId\":\"external-api-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).listExternalApis(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createExternalApi(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateExternalApi(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listExternalKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createExternalKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateExternalKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteExternalKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteExternalApi(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
     public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
         when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("qaPairId", "qa-001"));
@@ -3113,6 +3192,27 @@ public class WanwuFrontendApiControllerTest {
         report.put("title", title);
         report.put("content", content);
         return report;
+    }
+
+    private Map<String, Object> externalApi(String externalApiId, String name) {
+        Map<String, Object> api = new LinkedHashMap<>();
+        api.put("externalApiId", externalApiId);
+        api.put("name", name);
+        api.put("description", "external api");
+        api.put("baseUrl", "https://dify.example/v1");
+        api.put("apiKey", "key");
+        return api;
+    }
+
+    private Map<String, Object> externalKnowledge(String externalKnowledgeId, String name, String externalApiId) {
+        Map<String, Object> knowledge = new LinkedHashMap<>();
+        knowledge.put("externalKnowledgeId", externalKnowledgeId);
+        knowledge.put("externalKnowledgeName", name);
+        knowledge.put("externalApiId", externalApiId);
+        knowledge.put("externalApiName", "Dify Dev");
+        knowledge.put("externalSource", "dify");
+        knowledge.put("docCount", 3);
+        return knowledge;
     }
 
     private Map<String, Object> qaPairPage(String knowledgeId, String knowledgeName, Map<String, Object> pair) {
