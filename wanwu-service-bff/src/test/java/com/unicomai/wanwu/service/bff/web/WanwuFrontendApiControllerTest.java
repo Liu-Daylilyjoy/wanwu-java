@@ -59,6 +59,8 @@ import java.util.Map;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -108,10 +110,14 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.token").value("dev-token"))
                 .andExpect(jsonPath("$.data.isUpdatePassword").value(true))
                 .andExpect(jsonPath("$.data.orgPermission.org.id").value("default-org"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("app"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("app.agent"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[2].perm").value("api_key"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("api_key.api_key_management"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("permission"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("permission.user"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[2].perm").value("permission.org"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("permission.role"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[4].perm").value("app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[5].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[6].perm").value("api_key"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[7].perm").value("api_key.api_key_management"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -154,6 +160,60 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1));
 
         verify(appService).listApplications(any(ApplicationListQuery.class));
+    }
+
+    @Test
+    public void permissionManagementReadRoutesReturnFrontendContracts() throws Exception {
+        when(iamService.listUsers(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(page(userInfo("dev-admin", "admin"), 1, 1, 10));
+        when(iamService.selectRoles(anyString()))
+                .thenReturn(select(idName("admin", "System Admin")));
+        when(iamService.listRoles(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(page(roleInfo("admin", "System Admin"), 1, 1, 10));
+        when(iamService.roleTemplate(anyString(), anyString()))
+                .thenReturn(roleTemplate());
+        when(iamService.listOrganizations(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(page(orgInfo("default-org", "Default Organization"), 1, 1, 10));
+
+        mockMvc.perform(get("/user/api/v1/user/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].userId").value("dev-admin"))
+                .andExpect(jsonPath("$.data.list[0].username").value("admin"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(get("/user/api/v1/role/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.select[0].id").value("admin"));
+
+        mockMvc.perform(get("/user/api/v1/role/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].roleId").value("admin"))
+                .andExpect(jsonPath("$.data.list[0].permissions[0].perm").value("permission"));
+
+        mockMvc.perform(get("/user/api/v1/role/template")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.routes[0].perm").value("permission"))
+                .andExpect(jsonPath("$.data.routes[0].children", hasSize(3)));
+
+        mockMvc.perform(get("/user/api/v1/org/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].orgId").value("default-org"));
     }
 
     @Test
@@ -964,6 +1024,104 @@ public class WanwuFrontendApiControllerTest {
         return result;
     }
 
+    private Map<String, Object> page(Map<String, Object> item, int total, int pageNo, int pageSize) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(item));
+        page.put("total", total);
+        page.put("pageNo", pageNo);
+        page.put("pageSize", pageSize);
+        return page;
+    }
+
+    private Map<String, Object> select(Map<String, Object> item) {
+        Map<String, Object> select = new LinkedHashMap<>();
+        select.put("select", Collections.singletonList(item));
+        return select;
+    }
+
+    private Map<String, Object> idName(String id, String name) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("id", id);
+        value.put("name", name);
+        return value;
+    }
+
+    private Map<String, Object> userInfo(String userId, String username) {
+        Map<String, Object> user = new LinkedHashMap<>();
+        user.put("userId", userId);
+        user.put("username", username);
+        user.put("nickname", username);
+        user.put("phone", "");
+        user.put("email", "");
+        user.put("gender", "");
+        user.put("remark", "development account");
+        user.put("company", "Wanwu Java");
+        user.put("createdAt", "2026-06-30 00:00:00");
+        user.put("creator", idName("system", "System"));
+        user.put("status", true);
+        user.put("language", idName("zh", "简体中文"));
+        user.put("avatar", Collections.singletonMap("path", ""));
+
+        Map<String, Object> orgRole = new LinkedHashMap<>();
+        orgRole.put("org", idName("default-org", "Default Organization"));
+        orgRole.put("roles", Collections.singletonList(idName("admin", "System Admin")));
+        user.put("orgs", Collections.singletonList(orgRole));
+        return user;
+    }
+
+    private Map<String, Object> roleInfo(String roleId, String name) {
+        Map<String, Object> role = new LinkedHashMap<>();
+        role.put("roleId", roleId);
+        role.put("name", name);
+        role.put("remark", "Built-in development administrator");
+        role.put("createdAt", "2026-06-30 00:00:00");
+        role.put("creator", idName("system", "System"));
+        role.put("status", true);
+        role.put("isAdmin", true);
+        role.put("routes", roleTemplate().get("routes"));
+        role.put("permissions", java.util.Arrays.asList(
+                permission("permission"),
+                permission("permission.user"),
+                permission("permission.org"),
+                permission("permission.role")
+        ));
+        return role;
+    }
+
+    private Map<String, Object> roleTemplate() {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("name", "Permission");
+        root.put("perm", "permission");
+        root.put("children", java.util.Arrays.asList(
+                route("Users", "permission.user"),
+                route("Organizations", "permission.org"),
+                route("Roles", "permission.role")
+        ));
+
+        Map<String, Object> template = new LinkedHashMap<>();
+        template.put("routes", Collections.singletonList(root));
+        return template;
+    }
+
+    private Map<String, Object> route(String name, String perm) {
+        Map<String, Object> route = new LinkedHashMap<>();
+        route.put("name", name);
+        route.put("perm", perm);
+        route.put("children", Collections.emptyList());
+        return route;
+    }
+
+    private Map<String, Object> orgInfo(String orgId, String name) {
+        Map<String, Object> org = new LinkedHashMap<>();
+        org.put("orgId", orgId);
+        org.put("name", name);
+        org.put("remark", "Default development organization");
+        org.put("creator", idName("system", "System"));
+        org.put("createdAt", "2026-06-30 00:00:00");
+        org.put("status", true);
+        return org;
+    }
+
     private Map<String, Object> org(String id, String name) {
         Map<String, Object> org = new LinkedHashMap<>();
         org.put("id", id);
@@ -981,6 +1139,10 @@ public class WanwuFrontendApiControllerTest {
         Map<String, Object> orgPermission = new LinkedHashMap<>();
         orgPermission.put("org", org("default-org", "Default Organization"));
         orgPermission.put("permissions", java.util.Arrays.asList(
+                permission("permission"),
+                permission("permission.user"),
+                permission("permission.org"),
+                permission("permission.role"),
                 permission("app"),
                 permission("app.agent"),
                 permission("api_key"),

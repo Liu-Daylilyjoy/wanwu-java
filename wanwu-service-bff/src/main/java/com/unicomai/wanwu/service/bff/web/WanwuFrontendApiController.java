@@ -118,6 +118,63 @@ public class WanwuFrontendApiController {
         return FrontendResponse.ok(iamService.selectOrganizations());
     }
 
+    @GetMapping("/user/list")
+    public FrontendResponse<Map<String, Object>> listUsers(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.listUsers(userContext.getOrgId(), defaultIfBlank(name, ""), pageNo, pageSize));
+    }
+
+    @GetMapping("/role/select")
+    public FrontendResponse<Map<String, Object>> selectRoles(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.selectRoles(userContext.getOrgId()));
+    }
+
+    @GetMapping("/role/template")
+    public FrontendResponse<Map<String, Object>> roleTemplate(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.roleTemplate(userContext.getUserId(), userContext.getOrgId()));
+    }
+
+    @GetMapping("/role/list")
+    public FrontendResponse<Map<String, Object>> listRoles(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.listRoles(userContext.getUserId(), userContext.getOrgId(), defaultIfBlank(name, ""), pageNo, pageSize));
+    }
+
+    @GetMapping("/role/info")
+    public FrontendResponse<Map<String, Object>> roleInfo(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("roleId") String roleId) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.roleInfo(userContext.getUserId(), userContext.getOrgId(), roleId));
+    }
+
+    @GetMapping("/org/list")
+    public FrontendResponse<Map<String, Object>> listOrganizations(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext userContext = userContext(authorization);
+        return FrontendResponse.ok(iamService.listOrganizations(userContext.getOrgId(), defaultIfBlank(name, ""), pageNo, pageSize));
+    }
+
+    @GetMapping("/org/info")
+    public FrontendResponse<Map<String, Object>> organizationInfo(@RequestParam("orgId") String orgId) {
+        return FrontendResponse.ok(iamService.organizationInfo(orgId));
+    }
+
     @GetMapping("/base/custom")
     public FrontendResponse<Map<String, Object>> platformConfig() {
         return FrontendResponse.ok(iamService.platformConfig());

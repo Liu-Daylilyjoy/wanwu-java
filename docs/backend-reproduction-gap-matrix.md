@@ -38,7 +38,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/mcp_square.go` | 3 | Missing |
 | `v1/model.go` | 15 | Missing |
 | `v1/oauth.go` | 5 | Missing |
-| `v1/permission.go` | 23 | Missing |
+| `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
 | `v1/rag.go` | 10 | Missing |
 | `v1/safety.go` | 9 | Missing |
 | `v1/setting.go` | 3 | Missing |
@@ -55,7 +55,7 @@ Measured from this Java repo before the full reproduction pass:
 | --- | ---: | --- |
 | `AppService` | 41 | Partially covered for publish/version/OpenURL/app keys/API keys; explore/statistics missing |
 | `AssistantService` | 67 | Partially covered through Java `AppService`; assistant-side tool/skill/workflow/multi-agent/WGA missing |
-| `IAMService` | 49 | Development login and frontend permission split covered; persisted user/org/role/OAuth still missing |
+| `IAMService` | 49 | Development login, frontend permission split, and IAM user/role/org read compatibility covered; persisted user/org/role/OAuth writes still missing |
 | `KnowledgeBaseDocService` | 26 | Missing |
 | `KnowledgeBaseKeywordsService` | 5 | Missing |
 | `KnowledgeBasePermissionService` | 6 | Missing |
@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: implemented stable permissions only: `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
+- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`.
 - `app` / token `dev-token-app`: `app` and `app.agent` only.
 
-Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM persistence model.
 
 ## Operating Rule
 

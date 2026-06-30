@@ -41,10 +41,14 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("app.agent"));
         assertTrue(permissions.contains("api_key"));
         assertTrue(permissions.contains("api_key.api_key_management"));
+        assertTrue(permissions.contains("permission"));
+        assertTrue(permissions.contains("permission.user"));
+        assertTrue(permissions.contains("permission.org"));
+        assertTrue(permissions.contains("permission.role"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(4, permissions.size());
+        assertEquals(8, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -68,6 +72,7 @@ public class IamServiceImplTest {
         assertTrue(result.getIsUpdatePassword());
         assertEquals("default-org", ((Map) result.getOrgPermission().get("org")).get("id"));
         assertEquals(java.util.Arrays.asList(
+                "permission", "permission.user", "permission.org", "permission.role",
                 "app", "app.agent", "api_key", "api_key.api_key_management"),
                 permissions(result.getOrgPermission()));
 
@@ -81,6 +86,36 @@ public class IamServiceImplTest {
 
         assertEquals(1, result.getSelect().size());
         assertEquals("default-org", result.getSelect().get(0).getId());
+    }
+
+    @Test
+    public void permissionManagementReadModelsFollowFrontendContract() {
+        Map<String, Object> users = service.listUsers("default-org", "", 1, 10);
+        assertEquals(2L, users.get("total"));
+        assertEquals(1, users.get("pageNo"));
+        Map firstUser = (Map) ((List) users.get("list")).get(0);
+        assertEquals("dev-admin", firstUser.get("userId"));
+        assertEquals("admin", firstUser.get("username"));
+        assertEquals(true, firstUser.get("status"));
+        assertEquals("Default Organization", ((Map) ((Map) ((List) firstUser.get("orgs")).get(0)).get("org")).get("name"));
+
+        Map<String, Object> roleSelect = service.selectRoles("default-org");
+        assertEquals("admin", ((Map) ((List) roleSelect.get("select")).get(0)).get("id"));
+
+        Map<String, Object> roles = service.listRoles("dev-admin", "default-org", "", 1, 10);
+        Map firstRole = (Map) ((List) roles.get("list")).get(0);
+        assertEquals("admin", firstRole.get("roleId"));
+        assertEquals(true, firstRole.get("isAdmin"));
+        assertEquals("permission", ((Map) ((List) firstRole.get("permissions")).get(0)).get("perm"));
+
+        Map<String, Object> template = service.roleTemplate("dev-admin", "default-org");
+        Map firstRoute = (Map) ((List) template.get("routes")).get(0);
+        assertEquals("permission", firstRoute.get("perm"));
+        assertEquals(3, ((List) firstRoute.get("children")).size());
+
+        Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
+        assertEquals(1L, orgs.get("total"));
+        assertEquals("default-org", ((Map) ((List) orgs.get("list")).get(0)).get("orgId"));
     }
 
     private List<String> permissions(Map<String, Object> orgPermission) {

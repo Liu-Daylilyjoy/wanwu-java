@@ -21,5 +21,19 @@ public interface IamService {
 
     OrganizationSelectResult selectOrganizations();
 
+    Map<String, Object> listUsers(String orgId, String name, int pageNo, int pageSize);
+
+    Map<String, Object> selectRoles(String orgId);
+
+    Map<String, Object> roleTemplate(String userId, String orgId);
+
+    Map<String, Object> listRoles(String userId, String orgId, String name, int pageNo, int pageSize);
+
+    Map<String, Object> roleInfo(String userId, String orgId, String roleId);
+
+    Map<String, Object> listOrganizations(String parentId, String name, int pageNo, int pageSize);
+
+    Map<String, Object> organizationInfo(String orgId);
+
     Map<String, Object> platformConfig();
 }

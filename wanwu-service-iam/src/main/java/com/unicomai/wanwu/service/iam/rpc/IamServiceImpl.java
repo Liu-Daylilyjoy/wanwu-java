@@ -24,11 +24,16 @@ public class IamServiceImpl implements IamService {
 
     private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.agent");
     private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
+            "permission",
+            "permission.user",
+            "permission.org",
+            "permission.role",
             "app",
             "app.agent",
             "api_key",
             "api_key.api_key_management"
     ));
+    private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
             "admin", "dev-admin", "admin", "dev-token",
             Collections.singletonList("admin"), true, true, IMPLEMENTED_FRONTEND_PERMISSIONS);
@@ -90,6 +95,84 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
+    public Map<String, Object> listUsers(String orgId, String name, int pageNo, int pageSize) {
+        java.util.ArrayList<Map<String, Object>> users = new java.util.ArrayList<>();
+        for (DevAccount account : ACCOUNTS_BY_USERNAME.values()) {
+            if (Strings.hasText(name) && !account.username.toLowerCase().contains(name.trim().toLowerCase())) {
+                continue;
+            }
+            users.add(userInfo(account));
+        }
+        return page(users, pageNo, pageSize);
+    }
+
+    @Override
+    public Map<String, Object> selectRoles(String orgId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("select", roleIdNames(Arrays.asList("admin", "app")));
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> roleTemplate(String userId, String orgId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("routes", roleRoutes());
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> listRoles(String userId, String orgId, String name, int pageNo, int pageSize) {
+        java.util.ArrayList<Map<String, Object>> roles = new java.util.ArrayList<>();
+        for (String roleId : Arrays.asList("admin", "app")) {
+            Map<String, Object> role = roleInfo(userId, orgId, roleId);
+            if (Strings.hasText(name) && !((String) role.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
+                continue;
+            }
+            roles.add(role);
+        }
+        return page(roles, pageNo, pageSize);
+    }
+
+    @Override
+    public Map<String, Object> roleInfo(String userId, String orgId, String roleId) {
+        boolean admin = "admin".equals(roleId);
+        List<String> permissions = admin ? IMPLEMENTED_FRONTEND_PERMISSIONS : APP_PERMISSIONS;
+        Map<String, Object> role = new LinkedHashMap<>();
+        role.put("roleId", admin ? "admin" : "app");
+        role.put("name", admin ? "System Admin" : "App User");
+        role.put("remark", admin ? "Built-in development administrator" : "Agent-only development role");
+        role.put("createdAt", CREATED_AT);
+        role.put("creator", idName("system", "System"));
+        role.put("status", true);
+        role.put("isAdmin", admin);
+        role.put("routes", roleRoutes());
+        role.put("permissions", permissionItems(permissions));
+        return role;
+    }
+
+    @Override
+    public Map<String, Object> listOrganizations(String parentId, String name, int pageNo, int pageSize) {
+        java.util.ArrayList<Map<String, Object>> orgs = new java.util.ArrayList<>();
+        Map<String, Object> org = organizationInfo(DEFAULT_ORG.getId());
+        if (!Strings.hasText(name) || ((String) org.get("name")).toLowerCase().contains(name.trim().toLowerCase())) {
+            orgs.add(org);
+        }
+        return page(orgs, pageNo, pageSize);
+    }
+
+    @Override
+    public Map<String, Object> organizationInfo(String orgId) {
+        Map<String, Object> org = new LinkedHashMap<>();
+        org.put("orgId", DEFAULT_ORG.getId());
+        org.put("name", DEFAULT_ORG.getName());
+        org.put("remark", "Default development organization");
+        org.put("createdAt", CREATED_AT);
+        org.put("creator", idName("system", "System"));
+        org.put("status", true);
+        return org;
+    }
+
+    @Override
     public Map<String, Object> platformConfig() {
         Map<String, Object> config = new LinkedHashMap<>();
         Map<String, Object> login = new LinkedHashMap<>();
@@ -133,7 +216,7 @@ public class IamServiceImpl implements IamService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("org", org(DEFAULT_ORG));
         result.put("permissions", permissionItems(account.permissions));
-        result.put("roles", account.roles);
+        result.put("roles", roleIdNames(account.roles));
         result.put("isAdmin", account.admin);
         result.put("isSystem", account.system);
         return result;
@@ -149,6 +232,7 @@ public class IamServiceImpl implements IamService {
     private Map<String, Object> permissionItem(String perm) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("perm", perm);
+        result.put("name", permissionName(perm));
         return result;
     }
 
@@ -158,6 +242,117 @@ public class IamServiceImpl implements IamService {
             result.add(permissionItem(permission));
         }
         return result;
+    }
+
+    private Map<String, Object> page(List<Map<String, Object>> all, int pageNo, int pageSize) {
+        int safePageNo = pageNo <= 0 ? 1 : pageNo;
+        int safePageSize = pageSize <= 0 ? 10 : pageSize;
+        int from = Math.min((safePageNo - 1) * safePageSize, all.size());
+        int to = Math.min(from + safePageSize, all.size());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", new java.util.ArrayList<>(all.subList(from, to)));
+        result.put("total", (long) all.size());
+        result.put("pageNo", safePageNo);
+        result.put("pageSize", safePageSize);
+        return result;
+    }
+
+    private Map<String, Object> userInfo(DevAccount account) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", account.uid);
+        result.put("username", account.username);
+        result.put("nickname", account.username);
+        result.put("phone", "");
+        result.put("email", "");
+        result.put("gender", "");
+        result.put("remark", "development account");
+        result.put("company", "Wanwu Java");
+        result.put("createdAt", CREATED_AT);
+        result.put("creator", idName("system", "System"));
+        result.put("status", true);
+        result.put("language", language());
+        result.put("avatar", singletonMap("path", ""));
+
+        Map<String, Object> orgRole = new LinkedHashMap<>();
+        orgRole.put("org", org(DEFAULT_ORG));
+        orgRole.put("roles", roleIdNames(account.roles));
+        result.put("orgs", Collections.singletonList(orgRole));
+        return result;
+    }
+
+    private Map<String, Object> idName(String id, String name) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", id);
+        result.put("name", name);
+        return result;
+    }
+
+    private List<Map<String, Object>> roleIdNames(List<String> roleIds) {
+        java.util.ArrayList<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (String roleId : roleIds) {
+            result.add(roleIdName(roleId));
+        }
+        return result;
+    }
+
+    private Map<String, Object> roleIdName(String roleId) {
+        if ("admin".equals(roleId)) {
+            return idName("admin", "System Admin");
+        }
+        return idName("app", "App User");
+    }
+
+    private List<Map<String, Object>> roleRoutes() {
+        return Arrays.asList(
+                route("Permission", "permission", Arrays.asList(
+                        route("Users", "permission.user", Collections.<Map<String, Object>>emptyList()),
+                        route("Organizations", "permission.org", Collections.<Map<String, Object>>emptyList()),
+                        route("Roles", "permission.role", Collections.<Map<String, Object>>emptyList())
+                )),
+                route("Application", "app", Collections.singletonList(
+                        route("Agent", "app.agent", Collections.<Map<String, Object>>emptyList())
+                )),
+                route("API Key", "api_key", Collections.singletonList(
+                        route("API Key Management", "api_key.api_key_management", Collections.<Map<String, Object>>emptyList())
+                ))
+        );
+    }
+
+    private Map<String, Object> route(String name, String perm, List<Map<String, Object>> children) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("name", name);
+        result.put("perm", perm);
+        result.put("children", children);
+        return result;
+    }
+
+    private String permissionName(String perm) {
+        if ("permission".equals(perm)) {
+            return "Permission";
+        }
+        if ("permission.user".equals(perm)) {
+            return "Users";
+        }
+        if ("permission.org".equals(perm)) {
+            return "Organizations";
+        }
+        if ("permission.role".equals(perm)) {
+            return "Roles";
+        }
+        if ("app".equals(perm)) {
+            return "Application";
+        }
+        if ("app.agent".equals(perm)) {
+            return "Agent";
+        }
+        if ("api_key".equals(perm)) {
+            return "API Key";
+        }
+        if ("api_key.api_key_management".equals(perm)) {
+            return "API Key Management";
+        }
+        return perm;
     }
 
     private Map<String, Object> emailToggle(boolean status) {
