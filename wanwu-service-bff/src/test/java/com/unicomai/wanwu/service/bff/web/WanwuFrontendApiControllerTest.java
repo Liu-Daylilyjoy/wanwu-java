@@ -80,6 +80,7 @@ import com.unicomai.wanwu.api.model.dto.ProviderModelTypeInfo;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelInfo;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
+import com.unicomai.wanwu.api.safety.SafetyService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -120,11 +121,13 @@ public class WanwuFrontendApiControllerTest {
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final McpService mcpService = mock(McpService.class);
+    private final SafetyService safetyService = mock(SafetyService.class);
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(
                     new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService),
                     new WanwuResourceApiController(mcpService),
-                    new WanwuSkillApiController(mcpService))
+                    new WanwuSkillApiController(mcpService),
+                    new WanwuSafetyApiController(safetyService))
             .build();
 
     @Test
@@ -172,6 +175,7 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[15].perm").value("resource.mcp"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[16].perm").value("resource.prompt"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[17].perm").value("resource.skill"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[18].perm").value("resource.safety"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -580,6 +584,81 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"conversationId\":\"skill-conv-001\",\"skillSaveId\":\"save-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.skillId").value("skill-custom-002"));
+    }
+
+    @Test
+    public void safetyRoutesReturnFrontendContracts() throws Exception {
+        Map<String, Object> table = map("tableId", "table-001", "tableName", "Policy Guard",
+                "remark", "policy words", "reply", "blocked", "createdAt", "2026-06-30 00:00:00",
+                "type", "personal");
+        Map<String, Object> word = map("wordId", "word-001", "word", "blocked", "sensitiveType", "Other");
+
+        when(safetyService.createSensitiveWordTable(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("tableId", "table-001"));
+        when(safetyService.getSensitiveWordTable(anyString(), anyString(), anyString()))
+                .thenReturn(table);
+        when(safetyService.listSensitiveWordTables(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(listResult(table));
+        when(safetyService.selectSensitiveWordTables(anyString(), anyString()))
+                .thenReturn(listResult(table));
+        when(safetyService.listSensitiveWords(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(map("list", Collections.singletonList(word), "total", 1, "pageNo", 1, "pageSize", 10));
+
+        mockMvc.perform(post("/user/api/v1/safe/sensitive/table")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableName\":\"Policy Guard\",\"remark\":\"policy words\",\"type\":\"personal\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tableId").value("table-001"));
+        mockMvc.perform(put("/user/api/v1/safe/sensitive/table")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\",\"tableName\":\"Policy Guard Updated\",\"remark\":\"policy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/safe/sensitive/table")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("tableId", "table-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tableName").value("Policy Guard"));
+        mockMvc.perform(put("/user/api/v1/safe/sensitive/table/reply")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\",\"reply\":\"blocked\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/safe/sensitive/table/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("type", "personal"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].tableId").value("table-001"));
+        mockMvc.perform(get("/user/api/v1/safe/sensitive/table/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].tableName").value("Policy Guard"));
+        mockMvc.perform(post("/user/api/v1/safe/sensitive/word")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\",\"importType\":\"single\",\"word\":\"blocked\",\"sensitiveType\":\"Other\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/safe/sensitive/word/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("tableId", "table-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].wordId").value("word-001"));
+        mockMvc.perform(delete("/user/api/v1/safe/sensitive/word")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\",\"wordId\":\"word-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(delete("/user/api/v1/safe/sensitive/table")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
     }
 
     @Test
@@ -2563,7 +2642,8 @@ public class WanwuFrontendApiControllerTest {
                 permission("resource.tool"),
                 permission("resource.mcp"),
                 permission("resource.prompt"),
-                permission("resource.skill")
+                permission("resource.skill"),
+                permission("resource.safety")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);

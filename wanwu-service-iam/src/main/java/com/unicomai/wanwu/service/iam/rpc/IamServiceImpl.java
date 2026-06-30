@@ -41,7 +41,8 @@ public class IamServiceImpl implements IamService {
             "resource.tool",
             "resource.mcp",
             "resource.prompt",
-            "resource.skill"
+            "resource.skill",
+            "resource.safety"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -212,6 +213,7 @@ public class IamServiceImpl implements IamService {
         defaultIcon.put("mcpIcon", "");
         defaultIcon.put("promptIcon", "");
         defaultIcon.put("skillIcon", "");
+        defaultIcon.put("safetyIcon", "");
 
         config.put("login", login);
         config.put("home", home);
@@ -342,7 +344,8 @@ public class IamServiceImpl implements IamService {
                         route("Tool", "resource.tool", Collections.<Map<String, Object>>emptyList()),
                         route("MCP", "resource.mcp", Collections.<Map<String, Object>>emptyList()),
                         route("Prompt", "resource.prompt", Collections.<Map<String, Object>>emptyList()),
-                        route("Skill", "resource.skill", Collections.<Map<String, Object>>emptyList())
+                        route("Skill", "resource.skill", Collections.<Map<String, Object>>emptyList()),
+                        route("Safety", "resource.safety", Collections.<Map<String, Object>>emptyList())
                 ))
         );
     }
@@ -409,6 +412,9 @@ public class IamServiceImpl implements IamService {
         }
         if ("resource.skill".equals(perm)) {
             return "Skill";
+        }
+        if ("resource.safety".equals(perm)) {
+            return "Safety";
         }
         return perm;
     }

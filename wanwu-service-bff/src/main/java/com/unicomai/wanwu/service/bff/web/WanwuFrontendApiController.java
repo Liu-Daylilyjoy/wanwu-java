@@ -1370,11 +1370,6 @@ public class WanwuFrontendApiController {
         }
     }
 
-    @GetMapping("/safe/sensitive/table/select")
-    public FrontendResponse<Map<String, Object>> emptySelectResult() {
-        return FrontendResponse.ok(emptyListResult());
-    }
-
     @GetMapping("/assistant/select")
     public FrontendResponse<ApplicationListResult> selectAssistant(
             @RequestHeader(value = "Authorization", required = false) String authorization,
