@@ -1,20 +1,35 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.unicomai.wanwu.service.app.persistence.entity.SafetyRecordEntity;
+import com.unicomai.wanwu.service.app.persistence.mapper.SafetyRecordMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class SafetyServiceImplTest {
 
     private static final String USER_ID = "dev-admin";
     private static final String ORG_ID = "default-org";
 
-    private final SafetyServiceImpl service = new SafetyServiceImpl();
+    private SafetyServiceImpl service;
+
+    @BeforeEach
+    public void setUp() {
+        service = new SafetyServiceImpl();
+    }
 
     @Test
     public void sensitiveWordTableLifecycleMatchesFrontendContract() {
@@ -49,6 +64,59 @@ public class SafetyServiceImplTest {
         assertEquals(0, service.listSensitiveWordTables(USER_ID, ORG_ID, "personal").get("total"));
     }
 
+    @Test
+    public void sensitiveStateIsPersistedAsSnapshotRecord() {
+        SafetyRecordMapper mapper = mock(SafetyRecordMapper.class);
+        service = new SafetyServiceImpl(mapper);
+
+        String tableId = text(service.createSensitiveWordTable(USER_ID, ORG_ID,
+                map("tableName", "Persist Guard", "remark", "persist", "type", "personal")), "tableId");
+        service.updateSensitiveWordTableReply(USER_ID, ORG_ID, map("tableId", tableId, "reply", "blocked"));
+        service.uploadSensitiveWord(USER_ID, ORG_ID,
+                map("tableId", tableId, "importType", "single", "word", "secret", "sensitiveType", "Policy"));
+
+        ArgumentCaptor<SafetyRecordEntity> captor = ArgumentCaptor.forClass(SafetyRecordEntity.class);
+        verify(mapper, atLeast(3)).upsertRecord(captor.capture());
+        SafetyRecordEntity saved = captor.getValue();
+        assertEquals("snapshot", saved.getRecordType());
+        assertEquals("state", saved.getRecordId());
+        assertFalse(saved.getPayload().isEmpty());
+        assertFalse(saved.getPayload().indexOf("Persist Guard") < 0);
+        assertFalse(saved.getPayload().indexOf("secret") < 0);
+    }
+
+    @Test
+    public void persistedSnapshotIsLoadedAndWordSequenceContinuesAfterRestart() {
+        SafetyRecordMapper sourceMapper = mock(SafetyRecordMapper.class);
+        service = new SafetyServiceImpl(sourceMapper);
+
+        String tableId = text(service.createSensitiveWordTable(USER_ID, ORG_ID,
+                map("tableName", "Restart Guard", "remark", "restart", "type", "personal")), "tableId");
+        service.uploadSensitiveWord(USER_ID, ORG_ID,
+                map("tableId", tableId, "importType", "single", "word", "alpha", "sensitiveType", "Policy"));
+
+        ArgumentCaptor<SafetyRecordEntity> captor = ArgumentCaptor.forClass(SafetyRecordEntity.class);
+        verify(sourceMapper, atLeast(2)).upsertRecord(captor.capture());
+        String payload = captor.getValue().getPayload();
+
+        SafetyRecordMapper restartMapper = mock(SafetyRecordMapper.class);
+        when(restartMapper.selectByType(anyString())).thenReturn(Collections.singletonList(record(payload)));
+        SafetyServiceImpl restarted = new SafetyServiceImpl(restartMapper);
+
+        Map<String, Object> detail = restarted.getSensitiveWordTable(USER_ID, ORG_ID, tableId);
+        assertEquals("Restart Guard", text(detail, "tableName"));
+        Map<String, Object> words = restarted.listSensitiveWords(USER_ID, ORG_ID, tableId, 1, 10);
+        assertEquals(1, words.get("total"));
+        assertEquals("word-1", text(list(words.get("list")).get(0), "wordId"));
+
+        restarted.uploadSensitiveWord(USER_ID, ORG_ID,
+                map("tableId", tableId, "importType", "single", "word", "beta", "sensitiveType", "Policy"));
+        List<Map<String, Object>> after = list(restarted.listSensitiveWords(USER_ID, ORG_ID, tableId, 1, 10)
+                .get("list"));
+        assertEquals("word-2", text(after.get(1), "wordId"));
+        verify(restartMapper, atLeast(1)).upsertRecord(org.mockito.ArgumentMatchers.any(SafetyRecordEntity.class));
+    }
+
     private Map<String, Object> map(Object... pairs) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (int i = 0; i < pairs.length; i += 2) {
@@ -69,5 +137,15 @@ public class SafetyServiceImplTest {
     private String text(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private SafetyRecordEntity record(String payload) {
+        SafetyRecordEntity entity = new SafetyRecordEntity();
+        entity.setRecordType("snapshot");
+        entity.setRecordId("state");
+        entity.setPayload(payload);
+        entity.setCreatedAt(1L);
+        entity.setUpdatedAt(1L);
+        return entity;
     }
 }

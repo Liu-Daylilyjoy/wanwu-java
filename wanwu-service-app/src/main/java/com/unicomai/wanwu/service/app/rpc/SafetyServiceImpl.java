@@ -1,11 +1,16 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.app.persistence.entity.SafetyRecordEntity;
+import com.unicomai.wanwu.service.app.persistence.mapper.SafetyRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import javax.annotation.PostConstruct;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,13 +26,49 @@ import java.util.concurrent.atomic.AtomicInteger;
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class SafetyServiceImpl implements SafetyService {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final String DEFAULT_ORG = "default-org";
     private static final String TYPE_PERSONAL = "personal";
     private static final String DEFAULT_REPLY = "Your request contains sensitive content.";
+    private static final String TYPE_SNAPSHOT = "snapshot";
+    private static final String SNAPSHOT_ID = "state";
+    private static final int MAX_WORDS = 100;
 
     private final ConcurrentMap<String, Map<String, Object>> tables = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<Map<String, Object>>> words = new ConcurrentHashMap<>();
     private final AtomicInteger wordSequence = new AtomicInteger(1);
+
+    @Autowired(required = false)
+    private SafetyRecordMapper safetyRecordMapper;
+
+    public SafetyServiceImpl() {
+    }
+
+    SafetyServiceImpl(SafetyRecordMapper safetyRecordMapper) {
+        this.safetyRecordMapper = safetyRecordMapper;
+        loadPersistedSnapshot();
+    }
+
+    @PostConstruct
+    synchronized void loadPersistedSnapshot() {
+        if (safetyRecordMapper == null) {
+            return;
+        }
+        List<SafetyRecordEntity> records = safetyRecordMapper.selectByType(TYPE_SNAPSHOT);
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        SafetyRecordEntity record = records.get(records.size() - 1);
+        if (record.getPayload() == null || record.getPayload().trim().isEmpty()) {
+            return;
+        }
+        try {
+            SafetySnapshot snapshot = JSON.readValue(record.getPayload(), SafetySnapshot.class);
+            applySnapshot(snapshot);
+        } catch (Exception ignored) {
+            // A malformed development snapshot must not prevent the service from starting.
+        }
+    }
 
     @Override
     public ServiceDescriptor describe() {
@@ -44,6 +85,7 @@ public class SafetyServiceImpl implements SafetyService {
         item.put("createdAt", now());
         tables.put(scoped(orgId, tableId), item);
         words.put(scoped(orgId, tableId), Collections.synchronizedList(new ArrayList<Map<String, Object>>()));
+        saveSnapshot();
         return singleton("tableId", tableId);
     }
 
@@ -53,6 +95,7 @@ public class SafetyServiceImpl implements SafetyService {
         Map<String, Object> current = requireTable(orgId, tableId);
         current.put("tableName", defaultText(request, "tableName", text(current, "tableName")));
         current.put("remark", defaultText(request, "remark", text(current, "remark")));
+        saveSnapshot();
     }
 
     @Override
@@ -64,6 +107,8 @@ public class SafetyServiceImpl implements SafetyService {
     public void updateSensitiveWordTableReply(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> current = requireTable(orgId, text(request, "tableId"));
         current.put("reply", defaultText(request, "reply", DEFAULT_REPLY));
+        current.put("version", version());
+        saveSnapshot();
     }
 
     @Override
@@ -71,6 +116,7 @@ public class SafetyServiceImpl implements SafetyService {
         String tableId = text(request, "tableId");
         tables.remove(scoped(orgId, tableId));
         words.remove(scoped(orgId, tableId));
+        saveSnapshot();
     }
 
     @Override
@@ -110,11 +156,25 @@ public class SafetyServiceImpl implements SafetyService {
     public void uploadSensitiveWord(String userId, String orgId, Map<String, Object> request) {
         String tableId = text(request, "tableId");
         requireTable(orgId, tableId);
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("wordId", "word-" + wordSequence.getAndIncrement());
-        row.put("word", defaultText(request, "word", defaultText(request, "fileName", "imported-sensitive-word")));
-        row.put("sensitiveType", defaultText(request, "sensitiveType", "Other"));
-        wordsFor(orgId, tableId).add(row);
+        List<Map<String, Object>> currentWords = wordsFor(orgId, tableId);
+        synchronized (currentWords) {
+            if (currentWords.size() >= MAX_WORDS) {
+                throw new IllegalArgumentException("sensitive word table is full: " + tableId);
+            }
+            String word = defaultText(request, "word", defaultText(request, "fileName", "imported-sensitive-word"));
+            for (Map<String, Object> item : currentWords) {
+                if (word.equals(text(item, "word"))) {
+                    return;
+                }
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("wordId", "word-" + wordSequence.getAndIncrement());
+            row.put("word", word);
+            row.put("sensitiveType", defaultText(request, "sensitiveType", "Other"));
+            currentWords.add(row);
+        }
+        touchTableVersion(orgId, tableId);
+        saveSnapshot();
     }
 
     @Override
@@ -123,6 +183,8 @@ public class SafetyServiceImpl implements SafetyService {
         requireTable(orgId, tableId);
         String wordId = text(request, "wordId");
         wordsFor(orgId, tableId).removeIf(item -> wordId.equals(text(item, "wordId")));
+        touchTableVersion(orgId, tableId);
+        saveSnapshot();
     }
 
     private Map<String, Object> tableBase(Map<String, Object> request) {
@@ -131,6 +193,7 @@ public class SafetyServiceImpl implements SafetyService {
         item.put("remark", defaultText(request, "remark", ""));
         item.put("reply", defaultText(request, "reply", DEFAULT_REPLY));
         item.put("type", defaultText(request, "type", TYPE_PERSONAL));
+        item.put("version", version());
         return item;
     }
 
@@ -140,9 +203,14 @@ public class SafetyServiceImpl implements SafetyService {
         row.put("tableName", item.get("tableName"));
         row.put("remark", item.get("remark"));
         row.put("reply", item.get("reply"));
+        row.put("version", item.get("version"));
         row.put("createdAt", item.get("createdAt"));
         row.put("type", item.get("type"));
         return row;
+    }
+
+    private void touchTableVersion(String orgId, String tableId) {
+        requireTable(orgId, tableId).put("version", version());
     }
 
     private Map<String, Object> requireTable(String orgId, String tableId) {
@@ -207,6 +275,91 @@ public class SafetyServiceImpl implements SafetyService {
         return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
     }
 
+    private String version() {
+        return String.valueOf(System.currentTimeMillis());
+    }
+
+    private synchronized void saveSnapshot() {
+        if (safetyRecordMapper == null) {
+            return;
+        }
+        SafetyRecordEntity entity = new SafetyRecordEntity();
+        long now = System.currentTimeMillis();
+        entity.setRecordType(TYPE_SNAPSHOT);
+        entity.setRecordId(SNAPSHOT_ID);
+        try {
+            entity.setPayload(JSON.writeValueAsString(snapshot()));
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to persist safety snapshot", ex);
+        }
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
+        safetyRecordMapper.upsertRecord(entity);
+    }
+
+    private SafetySnapshot snapshot() {
+        SafetySnapshot snapshot = new SafetySnapshot();
+        snapshot.tables = new LinkedHashMap<>(tables);
+        snapshot.words = new LinkedHashMap<>(words);
+        snapshot.wordSequence = wordSequence.get();
+        return snapshot;
+    }
+
+    private void applySnapshot(SafetySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        restoreTables(snapshot.tables);
+        restoreWords(snapshot.words);
+        int next = snapshot.wordSequence == null ? 1 : snapshot.wordSequence;
+        next = Math.max(next, nextWordSequence(snapshot.words));
+        wordSequence.set(Math.max(1, next));
+    }
+
+    private void restoreTables(Map<String, Map<String, Object>> source) {
+        tables.clear();
+        if (source == null) {
+            return;
+        }
+        for (Map.Entry<String, Map<String, Object>> entry : source.entrySet()) {
+            tables.put(entry.getKey(), new LinkedHashMap<>(entry.getValue()));
+        }
+    }
+
+    private void restoreWords(Map<String, List<Map<String, Object>>> source) {
+        words.clear();
+        if (source == null) {
+            return;
+        }
+        for (Map.Entry<String, List<Map<String, Object>>> entry : source.entrySet()) {
+            List<Map<String, Object>> rows = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
+            for (Map<String, Object> item : entry.getValue()) {
+                rows.add(new LinkedHashMap<>(item));
+            }
+            words.put(entry.getKey(), rows);
+        }
+    }
+
+    private int nextWordSequence(Map<String, List<Map<String, Object>>> source) {
+        int next = 1;
+        if (source == null) {
+            return next;
+        }
+        for (List<Map<String, Object>> rows : source.values()) {
+            for (Map<String, Object> item : rows) {
+                String wordId = text(item, "wordId");
+                if (wordId.startsWith("word-")) {
+                    try {
+                        next = Math.max(next, Integer.parseInt(wordId.substring("word-".length())) + 1);
+                    } catch (NumberFormatException ignored) {
+                        // Non-numeric development IDs do not affect the generated sequence.
+                    }
+                }
+            }
+        }
+        return next;
+    }
+
     private String defaultText(Map<String, Object> map, String key, String fallback) {
         String value = text(map, key);
         return blank(value) ? fallback : value;
@@ -222,5 +375,11 @@ public class SafetyServiceImpl implements SafetyService {
 
     private boolean blank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static final class SafetySnapshot {
+        public Map<String, Map<String, Object>> tables = Collections.emptyMap();
+        public Map<String, List<Map<String, Object>>> words = Collections.emptyMap();
+        public Integer wordSequence = 1;
     }
 }

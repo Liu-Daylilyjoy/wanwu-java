@@ -13,7 +13,7 @@ Date: 2026-06-30
 ## Covered Java Behavior
 
 - `wanwu-api` exposes `SafetyService` for sensitive word table and word management.
-- `wanwu-service-app` implements a Docker development in-memory repository for:
+- `wanwu-service-app` implements a Docker MySQL snapshot-backed repository for:
   - Sensitive word table create/list/detail/update/reply/delete.
   - Personal table select for Agent/RAG safety guard configuration.
   - Sensitive word upload/list/delete.
@@ -37,11 +37,11 @@ Frontend-entry smoke target:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents the zero-change frontend Safety Guard page and Agent/RAG safety selector from receiving backend 404s.
+This slice is a frontend-compatible management loop. It prevents the zero-change frontend Safety Guard page and Agent/RAG safety selector from receiving backend 404s, and table/word changes now survive Docker restarts through `app_service.safety_records`.
 
 It does not yet implement:
 
-- MySQL persistence for sensitive tables and words.
+- Normalized Go-equivalent MySQL tables for sensitive tables and words.
 - Excel parsing for uploaded sensitive word files.
 - Global table enforcement across chat streams.
 - Aho-Corasick sensitive-word interception in Agent/RAG/Model SSE flows.
