@@ -47,7 +47,12 @@ public class IamServiceImpl implements IamService {
             "resource.safety",
             "operation",
             "operation.oauth",
-            "operation.statistic_client"
+            "operation.statistic_client",
+            "exploration",
+            "exploration.app",
+            "exploration.mcp",
+            "exploration.template",
+            "exploration.skill"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -455,6 +460,12 @@ public class IamServiceImpl implements IamService {
                 route("Operation", "operation", Arrays.asList(
                         route("OAuth", "operation.oauth", Collections.<Map<String, Object>>emptyList()),
                         route("Client Statistic", "operation.statistic_client", Collections.<Map<String, Object>>emptyList())
+                )),
+                route("Exploration", "exploration", Arrays.asList(
+                        route("Application Square", "exploration.app", Collections.<Map<String, Object>>emptyList()),
+                        route("MCP Square", "exploration.mcp", Collections.<Map<String, Object>>emptyList()),
+                        route("Template Square", "exploration.template", Collections.<Map<String, Object>>emptyList()),
+                        route("Skill Square", "exploration.skill", Collections.<Map<String, Object>>emptyList())
                 ))
         );
     }
@@ -536,6 +547,21 @@ public class IamServiceImpl implements IamService {
         }
         if ("operation.statistic_client".equals(perm)) {
             return "Client Statistic";
+        }
+        if ("exploration".equals(perm)) {
+            return "Exploration";
+        }
+        if ("exploration.app".equals(perm)) {
+            return "Application Square";
+        }
+        if ("exploration.mcp".equals(perm)) {
+            return "MCP Square";
+        }
+        if ("exploration.template".equals(perm)) {
+            return "Template Square";
+        }
+        if ("exploration.skill".equals(perm)) {
+            return "Skill Square";
         }
         return perm;
     }

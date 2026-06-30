@@ -60,10 +60,15 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("operation"));
         assertTrue(permissions.contains("operation.oauth"));
         assertTrue(permissions.contains("operation.statistic_client"));
+        assertTrue(permissions.contains("exploration"));
+        assertTrue(permissions.contains("exploration.app"));
+        assertTrue(permissions.contains("exploration.mcp"));
+        assertTrue(permissions.contains("exploration.template"));
+        assertTrue(permissions.contains("exploration.skill"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(23, permissions.size());
+        assertEquals(28, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -93,7 +98,8 @@ public class IamServiceImplTest {
                 "app", "app.rag", "app.workflow", "app.agent", "api_key", "api_key.api_key_management",
                 "resource", "resource.knowledge", "resource.tool", "resource.mcp", "resource.prompt",
                 "resource.skill", "resource.safety",
-                "operation", "operation.oauth", "operation.statistic_client"),
+                "operation", "operation.oauth", "operation.statistic_client",
+                "exploration", "exploration.app", "exploration.mcp", "exploration.template", "exploration.skill"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
@@ -151,6 +157,11 @@ public class IamServiceImplTest {
         assertEquals(2, ((List) operationRoute.get("children")).size());
         assertEquals("operation.oauth", ((Map) ((List) operationRoute.get("children")).get(0)).get("perm"));
         assertEquals("operation.statistic_client", ((Map) ((List) operationRoute.get("children")).get(1)).get("perm"));
+        Map explorationRoute = (Map) ((List) template.get("routes")).get(7);
+        assertEquals("exploration", explorationRoute.get("perm"));
+        assertEquals(4, ((List) explorationRoute.get("children")).size());
+        assertEquals("exploration.app", ((Map) ((List) explorationRoute.get("children")).get(0)).get("perm"));
+        assertEquals("exploration.skill", ((Map) ((List) explorationRoute.get("children")).get(3)).get("perm"));
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));

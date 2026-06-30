@@ -129,7 +129,8 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuSkillApiController(mcpService),
                     new WanwuSafetyApiController(safetyService),
                     new WanwuSettingApiController(iamService),
-                    new WanwuOperationApiController(iamService))
+                    new WanwuOperationApiController(iamService),
+                    new WanwuExplorationApiController(appService))
             .build();
 
     @Test
@@ -182,6 +183,11 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[20].perm").value("operation"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[21].perm").value("operation.oauth"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[22].perm").value("operation.statistic_client"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[23].perm").value("exploration"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[24].perm").value("exploration.app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[25].perm").value("exploration.mcp"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[26].perm").value("exploration.template"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[27].perm").value("exploration.skill"))
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -278,6 +284,46 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).updateOauthApp(any(Map.class));
         verify(iamService).updateOauthAppStatus(any(Map.class));
         verify(iamService).deleteOauthApp(any(Map.class));
+    }
+
+    @Test
+    public void explorationRoutesReturnAppSquareContractsAndFavoriteState() throws Exception {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("appId", "assistant-001");
+        app.put("appType", "agent");
+        app.put("name", "Agent One");
+        app.put("desc", "public agent");
+        app.put("publishType", "public");
+        app.put("createdAt", "2026-06-30 00:00:00");
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(app), 1));
+
+        mockMvc.perform(get("/user/api/v1/exploration/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "agent")
+                        .param("searchType", "all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.list[0].isFavorite").value(false))
+                .andExpect(jsonPath("$.data.list[0].user.userName").value("Wanwu"));
+
+        mockMvc.perform(post("/user/api/v1/exploration/app/favorite")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":\"assistant-001\",\"appType\":\"agent\",\"isFavorite\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/exploration/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("appType", "agent")
+                        .param("searchType", "favorite"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].isFavorite").value(true));
+        mockMvc.perform(get("/user/api/v1/exploration/app/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        verify(appService, times(2)).listApplications(any(ApplicationListQuery.class));
     }
 
     @Test
@@ -2731,7 +2777,12 @@ public class WanwuFrontendApiControllerTest {
                 permission("resource.safety"),
                 permission("operation"),
                 permission("operation.oauth"),
-                permission("operation.statistic_client")
+                permission("operation.statistic_client"),
+                permission("exploration"),
+                permission("exploration.app"),
+                permission("exploration.mcp"),
+                permission("exploration.template"),
+                permission("exploration.skill")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);
