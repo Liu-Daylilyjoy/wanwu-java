@@ -1806,6 +1806,46 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.hitKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
+    @GetMapping("/knowledge/keywords")
+    public FrontendResponse<Map<String, Object>> listKnowledgeKeywords(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.listKeywords(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/keywords")
+    public FrontendResponse<Map<String, Object>> createKnowledgeKeyword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createKeyword(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @GetMapping("/knowledge/keywords/detail")
+    public FrontendResponse<Map<String, Object>> getKnowledgeKeyword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        return knowledgeResponse(authorization, request,
+                (ctx, body) -> knowledgeService.getKeyword(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PutMapping("/knowledge/keywords")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeKeyword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateKeyword(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/keywords")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeKeyword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteKeyword(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
     @GetMapping("/knowledge/tag")
     public FrontendResponse<Map<String, Object>> listKnowledgeTags(
             @RequestHeader(value = "Authorization", required = false) String authorization,

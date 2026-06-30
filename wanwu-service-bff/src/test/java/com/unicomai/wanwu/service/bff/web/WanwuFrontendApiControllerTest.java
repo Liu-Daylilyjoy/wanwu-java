@@ -1343,6 +1343,12 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(singleton("knowledgeTagList", Collections.singletonList(tag("tag-001", "Backend", true))));
         when(knowledgeService.countTagBindings(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("tagBindCount", 1));
+        when(knowledgeService.listKeywords(anyString(), anyString(), any(Map.class)))
+                .thenReturn(keywordPage(keywordInfo(1001L, "question", "document", "knowledge-001", "Dev KB")));
+        when(knowledgeService.createKeyword(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("id", 1001L));
+        when(knowledgeService.getKeyword(anyString(), anyString(), any(Map.class)))
+                .thenReturn(keywordInfo(1001L, "question", "document", "knowledge-001", "Dev KB"));
         when(knowledgeService.listSplitters(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("knowledgeSplitterList", Collections.singletonList(splitter("splitter-001", "paragraph", "\n\n", "preset"))));
         when(knowledgeService.listDocs(anyString(), anyString(), any(Map.class)))
@@ -1385,6 +1391,42 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"knowledgeId\":\"knowledge-001\",\"name\":\"Dev KB 2\",\"description\":\"updated\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/keywords")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "question")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].id").value(1001))
+                .andExpect(jsonPath("$.data.list[0].knowledgeBaseNames[0]").value("Dev KB"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/keywords")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"question\",\"alias\":\"document\",\"knowledgeBaseIds\":[\"knowledge-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(1001));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/keywords/detail")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("id", "1001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.alias").value("document"));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/keywords")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":1001,\"name\":\"question2\",\"alias\":\"document2\",\"knowledgeBaseIds\":[\"knowledge-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/keywords")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":1001}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
@@ -1534,6 +1576,11 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).createKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).deleteKnowledge(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listKeywords(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createKeyword(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).getKeyword(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateKeyword(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteKeyword(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocs(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).analyzeDocUrls(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).importDocs(anyString(), anyString(), any(Map.class));
@@ -2767,6 +2814,27 @@ public class WanwuFrontendApiControllerTest {
         item.put("external", 0);
         item.put("avatar", singleton("path", ""));
         return item;
+    }
+
+    private Map<String, Object> keywordPage(Map<String, Object> keyword) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(keyword));
+        page.put("total", 1);
+        page.put("pageNo", 1);
+        page.put("pageSize", 10);
+        return page;
+    }
+
+    private Map<String, Object> keywordInfo(long id, String name, String alias, String knowledgeId,
+                                            String knowledgeName) {
+        Map<String, Object> keyword = new LinkedHashMap<>();
+        keyword.put("id", id);
+        keyword.put("name", name);
+        keyword.put("alias", alias);
+        keyword.put("knowledgeBaseIds", Collections.singletonList(knowledgeId));
+        keyword.put("knowledgeBaseNames", Collections.singletonList(knowledgeName));
+        keyword.put("updatedAt", "2026-06-30 00:00:00");
+        return keyword;
     }
 
     private Map<String, Object> tag(String tagId, String tagName, boolean selected) {

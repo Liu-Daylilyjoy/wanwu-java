@@ -75,6 +75,41 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void keywordLifecycleFollowsFrontendAndGoContract() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Keyword KB", 0)).get("knowledgeId");
+        String otherKnowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Other KB", 0)).get("knowledgeId");
+
+        Map<String, Object> created = service.createKeyword("dev-admin", "default-org",
+                keywordCreate("question", "document", knowledgeId));
+        assertEquals(1001L, created.get("id"));
+
+        Map<String, Object> list = service.listKeywords("dev-admin", "default-org", keywordList("question"));
+        assertEquals(1, list.get("total"));
+        assertEquals(1, list.get("pageNo"));
+        Map<String, Object> keyword = listOfMaps(list.get("list")).get(0);
+        assertEquals(1001L, keyword.get("id"));
+        assertEquals("question", keyword.get("name"));
+        assertEquals("document", keyword.get("alias"));
+        assertEquals("Keyword KB", stringList(keyword.get("knowledgeBaseNames")).get(0));
+
+        Map<String, Object> detail = service.getKeyword("dev-admin", "default-org", singleton("id", 1001));
+        assertEquals("Keyword KB", stringList(detail.get("knowledgeBaseNames")).get(0));
+        Map<String, Object> docs = service.listDocs("dev-admin", "default-org", docList(knowledgeId));
+        assertEquals("question", listOfMaps(map(docs.get("docKnowledgeInfo")).get("keywords")).get(0).get("name"));
+
+        service.updateKeyword("dev-admin", "default-org",
+                keywordUpdate(1001L, "question-updated", "document-updated", otherKnowledgeId));
+        Map<String, Object> updated = service.getKeyword("dev-admin", "default-org", singleton("id", 1001));
+        assertEquals("question-updated", updated.get("name"));
+        assertEquals("Other KB", stringList(updated.get("knowledgeBaseNames")).get(0));
+
+        service.deleteKeyword("dev-admin", "default-org", singleton("id", 1001));
+        assertEquals(0, service.listKeywords("dev-admin", "default-org", keywordList("")).get("total"));
+    }
+
+    @Test
     public void qaPairLifecycleFollowsFrontendAndGoContract() {
         Map<String, Object> createdKnowledge = service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Dev QA", 1));
@@ -184,6 +219,8 @@ public class KnowledgeServiceImplTest {
         persistent.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-persist", "Persist.txt"));
         persistent.createQaPair("dev-admin", "default-org",
                 qaPairCreate(knowledgeId, "Persist?", "Yes."));
+        persistent.createKeyword("dev-admin", "default-org",
+                keywordCreate("Persist keyword", "Persist alias", knowledgeId));
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(mapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -193,6 +230,7 @@ public class KnowledgeServiceImplTest {
         assertTrue(last.getPayload().contains("Persist KB"));
         assertTrue(last.getPayload().contains("doc-persist"));
         assertTrue(last.getPayload().contains("Persist?"));
+        assertTrue(last.getPayload().contains("Persist keyword"));
     }
 
     @Test
@@ -207,6 +245,8 @@ public class KnowledgeServiceImplTest {
         source.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-restart", "Restart.txt"));
         source.createQaPair("dev-admin", "default-org",
                 qaPairCreate(knowledgeId, "Restart?", "Loaded."));
+        source.createKeyword("dev-admin", "default-org",
+                keywordCreate("Restart keyword", "Restart alias", knowledgeId));
 
         ArgumentCaptor<KnowledgeRecordEntity> captor = ArgumentCaptor.forClass(KnowledgeRecordEntity.class);
         verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
@@ -225,10 +265,14 @@ public class KnowledgeServiceImplTest {
         assertEquals(1, restarted.listDocs("dev-admin", "default-org", docList(knowledgeId)).get("total"));
         assertEquals(1, restarted.listQaPairs("dev-admin", "default-org",
                 qaPairList(knowledgeId, "Restart", Collections.singletonList(-1))).get("total"));
+        assertEquals(1, restarted.listKeywords("dev-admin", "default-org", keywordList("Restart")).get("total"));
 
         Map<String, Object> next = restarted.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Restart Next", 0));
         assertEquals("knowledge-1002", next.get("knowledgeId"));
+        Map<String, Object> nextKeyword = restarted.createKeyword("dev-admin", "default-org",
+                keywordCreate("Restart next keyword", "Restart next alias", (String) next.get("knowledgeId")));
+        assertEquals(1002L, nextKeyword.get("id"));
         verify(restartMapper, atLeastOnce()).upsertRecord(any(KnowledgeRecordEntity.class));
     }
 
@@ -359,6 +403,28 @@ public class KnowledgeServiceImplTest {
         return request;
     }
 
+    private Map<String, Object> keywordCreate(String name, String alias, String knowledgeId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("name", name);
+        request.put("alias", alias);
+        request.put("knowledgeBaseIds", Collections.singletonList(knowledgeId));
+        return request;
+    }
+
+    private Map<String, Object> keywordUpdate(long id, String name, String alias, String knowledgeId) {
+        Map<String, Object> request = keywordCreate(name, alias, knowledgeId);
+        request.put("id", id);
+        return request;
+    }
+
+    private Map<String, Object> keywordList(String name) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("name", name);
+        request.put("pageNo", 1);
+        request.put("pageSize", 10);
+        return request;
+    }
+
     private Map<String, Object> qaPairCreate(String knowledgeId, String question, String answer) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
@@ -421,6 +487,11 @@ public class KnowledgeServiceImplTest {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
         return (List<Map<String, Object>>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> stringList(Object value) {
+        return (List<String>) value;
     }
 
     private KnowledgeRecordEntity record(String type, String id, String payload) {

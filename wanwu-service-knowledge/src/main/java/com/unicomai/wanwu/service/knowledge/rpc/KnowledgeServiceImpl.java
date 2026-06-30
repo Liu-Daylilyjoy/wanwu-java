@@ -55,6 +55,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
     private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
     private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
+    private final Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
     private final Map<String, List<Map<String, Object>>> metasByKnowledgeId = new LinkedHashMap<String, List<Map<String, Object>>>();
     private final Map<String, List<PermissionState>> permissionsByKnowledgeId = new LinkedHashMap<String, List<PermissionState>>();
 
@@ -64,6 +65,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextDocId = new AtomicLong(1000);
     private final AtomicLong nextSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
+    private final AtomicLong nextKeywordId = new AtomicLong(1000);
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
 
@@ -200,6 +202,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             qaPairsById.remove(pair.qaPairId);
         }
         qaPairsByKnowledgeId.remove(knowledgeId);
+        for (KeywordState keyword : keywords.values()) {
+            keyword.knowledgeBaseIds.remove(knowledgeId);
+        }
         metasByKnowledgeId.remove(knowledgeId);
         permissionsByKnowledgeId.remove(knowledgeId);
         saveSnapshot();
@@ -213,6 +218,95 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("score", Collections.emptyList());
         result.put("useGraph", Boolean.FALSE);
         return result;
+    }
+
+    @Override
+    public synchronized Map<String, Object> listKeywords(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String name = string(safe.get("name"));
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (KeywordState keyword : keywords.values()) {
+            if (!matchesOwner(orgId, keyword)) {
+                continue;
+            }
+            if (!isBlank(name) && !containsIgnoreCase(keyword.name, name) && !containsIgnoreCase(keyword.alias, name)) {
+                continue;
+            }
+            rows.add(toKeywordInfo(keyword));
+        }
+        Map<String, Object> result = page(rows, intValue(safe.get("pageNo"), 1), intValue(safe.get("pageSize"), 10));
+        result.put("pageNum", result.get("pageNo"));
+        return result;
+    }
+
+    @Override
+    public synchronized Map<String, Object> getKeyword(String userId, String orgId, Map<String, Object> request) {
+        KeywordState keyword = existingKeyword(string(safe(request).get("id")));
+        if (!matchesOwner(orgId, keyword)) {
+            throw new IllegalArgumentException("keyword not found");
+        }
+        return toKeywordInfo(keyword);
+    }
+
+    @Override
+    public synchronized Map<String, Object> createKeyword(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String name = string(safe.get("name"));
+        String alias = string(safe.get("alias"));
+        if (isBlank(name)) {
+            throw new IllegalArgumentException("name cannot be empty");
+        }
+        if (isBlank(alias)) {
+            throw new IllegalArgumentException("alias cannot be empty");
+        }
+        List<String> knowledgeBaseIds = validateKnowledgeIds(safe.get("knowledgeBaseIds"));
+        ensureUniqueKeywordName(orgId, name, null);
+        long id = nextKeywordId.incrementAndGet();
+        KeywordState keyword = new KeywordState();
+        keyword.id = id;
+        keyword.userId = defaultIfBlank(userId, DEFAULT_USER_ID);
+        keyword.orgId = defaultIfBlank(orgId, DEFAULT_ORG_ID);
+        keyword.name = name;
+        keyword.alias = alias;
+        keyword.knowledgeBaseIds.addAll(knowledgeBaseIds);
+        keyword.updatedAt = CREATED_AT;
+        keywords.put(String.valueOf(id), keyword);
+        saveSnapshot();
+        return singleton("id", id);
+    }
+
+    @Override
+    public synchronized void updateKeyword(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        KeywordState keyword = existingKeyword(string(safe.get("id")));
+        if (!matchesOwner(orgId, keyword)) {
+            throw new IllegalArgumentException("keyword not found");
+        }
+        String name = string(safe.get("name"));
+        String alias = string(safe.get("alias"));
+        if (isBlank(name)) {
+            throw new IllegalArgumentException("name cannot be empty");
+        }
+        if (isBlank(alias)) {
+            throw new IllegalArgumentException("alias cannot be empty");
+        }
+        ensureUniqueKeywordName(orgId, name, String.valueOf(keyword.id));
+        keyword.name = name;
+        keyword.alias = alias;
+        keyword.knowledgeBaseIds.clear();
+        keyword.knowledgeBaseIds.addAll(validateKnowledgeIds(safe.get("knowledgeBaseIds")));
+        keyword.updatedAt = CREATED_AT;
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized void deleteKeyword(String userId, String orgId, Map<String, Object> request) {
+        KeywordState keyword = existingKeyword(string(safe(request).get("id")));
+        if (!matchesOwner(orgId, keyword)) {
+            throw new IllegalArgumentException("keyword not found");
+        }
+        keywords.remove(String.valueOf(keyword.id));
+        saveSnapshot();
     }
 
     @Override
@@ -1080,7 +1174,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("graphSwitch", knowledge.graphSwitch);
         result.put("showGraphReport", knowledge.graphSwitch == 1);
         result.put("description", knowledge.description);
-        result.put("keywords", Collections.emptyList());
+        result.put("keywords", keywordsForKnowledge(knowledge.knowledgeId));
         result.put("embeddingModel", modelInfo(knowledge.embeddingModelId, "Text Embedding Small", "embedding"));
         result.put("llmModelId", knowledge.llmModelId);
         result.put("category", knowledge.category);
@@ -1104,6 +1198,63 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             result.add(toTagInfo(tag, selected.contains(tag.tagId)));
         }
         return result;
+    }
+
+    private List<Map<String, Object>> keywordsForKnowledge(String knowledgeId) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (KeywordState keyword : keywords.values()) {
+            if (keyword.knowledgeBaseIds.contains(knowledgeId)) {
+                result.add(toKeywordInfo(keyword));
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> toKeywordInfo(KeywordState keyword) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", keyword.id);
+        result.put("name", keyword.name);
+        result.put("alias", keyword.alias);
+        result.put("knowledgeBaseIds", new ArrayList<String>(keyword.knowledgeBaseIds));
+        result.put("knowledgeBaseNames", knowledgeNames(keyword.knowledgeBaseIds));
+        result.put("updatedAt", keyword.updatedAt);
+        return result;
+    }
+
+    private List<String> knowledgeNames(List<String> knowledgeBaseIds) {
+        List<String> result = new ArrayList<String>();
+        for (String knowledgeId : safeList(knowledgeBaseIds)) {
+            KnowledgeState knowledge = knowledgeBases.get(knowledgeId);
+            if (knowledge != null) {
+                result.add(knowledge.name);
+            }
+        }
+        return result;
+    }
+
+    private List<String> validateKnowledgeIds(Object raw) {
+        List<String> result = new ArrayList<String>();
+        for (String knowledgeId : stringList(raw)) {
+            KnowledgeState knowledge = existingKnowledge(knowledgeId);
+            if (!result.contains(knowledge.knowledgeId)) {
+                result.add(knowledge.knowledgeId);
+            }
+        }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException("knowledgeBaseIds cannot be empty");
+        }
+        return result;
+    }
+
+    private void ensureUniqueKeywordName(String orgId, String name, String currentId) {
+        for (KeywordState keyword : keywords.values()) {
+            if (!matchesOwner(orgId, keyword)) {
+                continue;
+            }
+            if (!String.valueOf(keyword.id).equals(currentId) && name.equals(keyword.name)) {
+                throw new IllegalArgumentException("keyword already exists");
+            }
+        }
     }
 
     private Map<String, Object> toTagInfo(TagState tag, boolean selected) {
@@ -1239,6 +1390,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return knowledgeBases.get(knowledgeId);
     }
 
+    private KeywordState existingKeyword(String keywordId) {
+        if (isBlank(keywordId) || !keywords.containsKey(keywordId)) {
+            throw new IllegalArgumentException("keyword not found");
+        }
+        return keywords.get(keywordId);
+    }
+
     private TagState existingTag(String tagId) {
         if (isBlank(tagId) || !tags.containsKey(tagId)) {
             throw new IllegalArgumentException("tag not found");
@@ -1314,6 +1472,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private boolean matchesOwner(String orgId, KnowledgeState knowledge) {
         return isBlank(orgId) || orgId.equals(knowledge.orgId);
+    }
+
+    private boolean matchesOwner(String orgId, KeywordState keyword) {
+        return isBlank(orgId) || orgId.equals(keyword.orgId);
     }
 
     private List<String> tagIds(String knowledgeId) {
@@ -1622,6 +1784,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.segmentsByDocId.putAll(segmentsByDocId);
         snapshot.qaPairsByKnowledgeId.putAll(qaPairsByKnowledgeId);
         snapshot.qaPairsById.putAll(qaPairsById);
+        snapshot.keywords.putAll(keywords);
         snapshot.metasByKnowledgeId.putAll(metasByKnowledgeId);
         snapshot.permissionsByKnowledgeId.putAll(permissionsByKnowledgeId);
         snapshot.nextKnowledgeId = nextKnowledgeId.get();
@@ -1630,6 +1793,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.nextDocId = nextDocId.get();
         snapshot.nextSegmentId = nextSegmentId.get();
         snapshot.nextQaPairId = nextQaPairId.get();
+        snapshot.nextKeywordId = nextKeywordId.get();
         snapshot.nextMetaId = nextMetaId.get();
         snapshot.nextPermissionId = nextPermissionId.get();
         return snapshot;
@@ -1659,6 +1823,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         qaPairsById.clear();
         qaPairsById.putAll(safeMap(snapshot.qaPairsById));
         rebuildQaPairIndex();
+        keywords.clear();
+        keywords.putAll(safeMap(snapshot.keywords));
         metasByKnowledgeId.clear();
         metasByKnowledgeId.putAll(safeMap(snapshot.metasByKnowledgeId));
         permissionsByKnowledgeId.clear();
@@ -1670,6 +1836,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         restoreSequence(nextDocId, snapshot.nextDocId);
         restoreSequence(nextSegmentId, snapshot.nextSegmentId);
         restoreSequence(nextQaPairId, snapshot.nextQaPairId);
+        restoreSequence(nextKeywordId, snapshot.nextKeywordId);
         restoreSequence(nextMetaId, snapshot.nextMetaId);
         restoreSequence(nextPermissionId, snapshot.nextPermissionId);
         for (KnowledgeState knowledge : knowledgeBases.values()) {
@@ -1693,6 +1860,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         for (QaPairState pair : qaPairsById.values()) {
             bumpSequence(nextQaPairId, pair.qaPairId, "qa-");
+        }
+        for (KeywordState keyword : keywords.values()) {
+            if (keyword.id > nextKeywordId.get()) {
+                nextKeywordId.set(keyword.id);
+            }
         }
         for (List<Map<String, Object>> metas : metasByKnowledgeId.values()) {
             for (Map<String, Object> meta : safeList(metas)) {
@@ -1750,6 +1922,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
         private Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
         private Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
+        private Map<String, KeywordState> keywords = new LinkedHashMap<String, KeywordState>();
         private Map<String, List<Map<String, Object>>> metasByKnowledgeId =
                 new LinkedHashMap<String, List<Map<String, Object>>>();
         private Map<String, List<PermissionState>> permissionsByKnowledgeId =
@@ -1760,6 +1933,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private long nextDocId;
         private long nextSegmentId;
         private long nextQaPairId;
+        private long nextKeywordId;
         private long nextMetaId;
         private long nextPermissionId;
     }
@@ -1817,6 +1991,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private List<String> labels = new ArrayList<String>();
         private boolean parent;
         private int childNum;
+    }
+
+    private static final class KeywordState {
+        private long id;
+        private String userId;
+        private String orgId;
+        private String name;
+        private String alias;
+        private final List<String> knowledgeBaseIds = new ArrayList<String>();
+        private String updatedAt;
     }
 
     private static final class QaPairState {

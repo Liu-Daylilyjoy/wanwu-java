@@ -18,6 +18,16 @@ public interface KnowledgeService {
 
     Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request);
 
+    Map<String, Object> listKeywords(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> getKeyword(String userId, String orgId, Map<String, Object> request);
+
+    Map<String, Object> createKeyword(String userId, String orgId, Map<String, Object> request);
+
+    void updateKeyword(String userId, String orgId, Map<String, Object> request);
+
+    void deleteKeyword(String userId, String orgId, Map<String, Object> request);
+
     Map<String, Object> listTags(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> createTag(String userId, String orgId, Map<String, Object> request);
