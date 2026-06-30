@@ -49,6 +49,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
@@ -916,6 +918,37 @@ public class AppServiceImpl implements AppService {
         publish.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
         rag.put("appPublishConfig", publish);
         return rag;
+    }
+
+    @Override
+    public RagChatResult streamRagChat(RagChatCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("rag chat command is required");
+        }
+        if (isBlank(command.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        if (isBlank(command.getQuestion())) {
+            throw new IllegalArgumentException("rag question is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord rag = applicationRepository.findRag(userId, orgId, command.getRagId());
+        if (rag == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+        if (!command.isDraft()
+                && applicationRepository.findLatestRagSnapshot(userId, orgId, command.getRagId()) == null) {
+            throw new IllegalArgumentException("rag snapshot not found");
+        }
+        RagChatResult result = new RagChatResult();
+        result.setRagId(command.getRagId());
+        result.setQuestion(command.getQuestion());
+        result.setResponse(deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo()));
+        result.setSearchList(Collections.<Map<String, Object>>emptyList());
+        result.setQaSearchList(Collections.<Map<String, Object>>emptyList());
+        result.setCreatedAt(clock.millis());
+        return result;
     }
 
     @Override
@@ -1788,6 +1821,12 @@ public class AppServiceImpl implements AppService {
 
     private String deterministicResponse(AppRecord assistant, String prompt) {
         return "Demo response from " + defaultIfBlank(assistant.getName(), "Agent") + ": " + prompt;
+    }
+
+    private String deterministicRagResponse(AppRecord rag, String question, List<Map<String, Object>> fileInfo) {
+        int fileCount = fileInfo == null ? 0 : fileInfo.size();
+        String suffix = fileCount > 0 ? " Attached files: " + fileCount + "." : "";
+        return "Demo RAG response from " + defaultIfBlank(rag.getName(), "RAG") + ": " + question + suffix;
     }
 
     private AssistantDraftConfigRecord resourceConfig(AssistantResourceCommand command) {

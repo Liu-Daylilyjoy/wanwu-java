@@ -9,7 +9,7 @@ Date: 2026-06-30
 - Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses.
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
-- RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, and published detail read.
+- RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell, and multipart upload response compatibility.
 - Assistant extension bindings:
   - `POST/DELETE/PUT /assistant/tool/workflow`
   - `POST/DELETE/PUT /assistant/tool/mcp`
@@ -36,7 +36,7 @@ RAG draft state is stored in the RAG-specific tables:
 - `rag_draft_configs`
 - `rag_snapshots`
 
-The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types.
+The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types. The RAG chat endpoints `/rag/chat/draft` and `/rag/chat` return the AG-UI SSE event sequence consumed by the current frontend, while `/rag/upload` accepts multipart `files` and returns `fileList[{fileIndex,fileUrl}]` like the Go BFF.
 
 ## Original Go Mapping
 
@@ -51,4 +51,4 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`,
 - Workflow select currently exposes development compatibility data; Coze/workflow import/export/execution is still missing.
 - Skill marketplace/custom/acquired skill flows are not implemented in this slice.
 - Prompt templates and assistant templates remain separate future slices.
-- RAG draft chat, upload, and real retrieval/generation are not implemented yet; current RAG behavior covers the frontend management and publishing loop.
+- RAG chat currently returns a deterministic local answer after validating draft/published RAG existence. Real retrieval, QA hit handling, knowledge search lists, reasoning frames, and model generation remain future slices.

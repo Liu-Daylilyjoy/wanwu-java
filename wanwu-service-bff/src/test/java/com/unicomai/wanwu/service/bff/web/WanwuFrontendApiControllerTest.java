@@ -49,6 +49,8 @@ import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagChatCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
@@ -70,6 +72,7 @@ import com.unicomai.wanwu.api.model.dto.RecommendModelInfo;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -91,6 +94,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -1464,6 +1468,66 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"test\"}"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM));
+    }
+
+    @Test
+    public void ragChatDraftReturnsAgUiSseAndMapsFrontendRequest() throws Exception {
+        RagChatResult result = new RagChatResult();
+        result.setRagId("rag-001");
+        result.setResponse("RAG local answer.");
+        when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(result);
+
+        mockMvc.perform(post("/user/api/v1/rag/chat/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\",\"history\":[{\"query\":\"q1\",\"response\":\"a1\",\"needHistory\":true}],\"fileInfo\":[{\"fileName\":\"a.txt\",\"fileSize\":3,\"fileUrl\":\"http://file/a.txt\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"type\":\"RUN_STARTED\"")))
+                .andExpect(content().string(containsString("\"type\":\"TEXT_MESSAGE_CONTENT\"")))
+                .andExpect(content().string(containsString("RAG local answer.")))
+                .andExpect(content().string(containsString("\"type\":\"RUN_FINISHED\"")));
+
+        org.mockito.ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
+        verify(appService).streamRagChat(captor.capture());
+        assertEquals("rag-001", captor.getValue().getRagId());
+        assertEquals("what is policy", captor.getValue().getQuestion());
+        assertEquals(true, captor.getValue().isDraft());
+        assertEquals(1, captor.getValue().getHistory().size());
+        assertEquals(1, captor.getValue().getFileInfo().size());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
+    public void ragPublishedChatUsesPublishedModeAndUploadReturnsGoShape() throws Exception {
+        RagChatResult result = new RagChatResult();
+        result.setRagId("rag-001");
+        result.setResponse("Published RAG answer.");
+        when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(result);
+
+        mockMvc.perform(post("/user/api/v1/rag/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\",\"question\":\"published question\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("Published RAG answer.")));
+
+        org.mockito.ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
+        verify(appService).streamRagChat(captor.capture());
+        assertEquals(false, captor.getValue().isDraft());
+
+        MockMultipartFile file = new MockMultipartFile(
+                "files", "diagram.png", "image/png", "png-data".getBytes("UTF-8"));
+        mockMvc.perform(multipart("/user/api/v1/rag/upload")
+                        .file(file)
+                        .param("markdown", "true")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.fileList[0].fileIndex").value(0))
+                .andExpect(jsonPath("$.data.fileList[0].fileUrl").value(containsString("![diagram.png](")));
     }
 
     @Test

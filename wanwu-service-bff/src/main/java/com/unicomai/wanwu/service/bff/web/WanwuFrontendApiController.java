@@ -47,6 +47,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
@@ -91,12 +93,16 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/user/api/v1")
@@ -735,6 +741,52 @@ public class WanwuFrontendApiController {
             command.setOrgId(userContext.getOrgId());
             return FrontendResponse.ok(appService.copyRag(command));
         } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping(value = "/rag/chat/draft", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> ragDraftChat(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagChatRequest request) {
+        return streamRagChat(authorization, request, true);
+    }
+
+    @PostMapping(value = "/rag/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> ragPublishedChat(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagChatRequest request) {
+        return streamRagChat(authorization, request, false);
+    }
+
+    @PostMapping("/rag/upload")
+    public FrontendResponse<Map<String, Object>> ragUpload(
+            @RequestParam(value = "files", required = false) List<MultipartFile> files,
+            @RequestParam(value = "markdown", required = false, defaultValue = "false") boolean markdown) {
+        try {
+            if (files == null || files.isEmpty()) {
+                return FrontendResponse.failure(1001, "file is empty");
+            }
+            List<Map<String, Object>> fileList = new ArrayList<>();
+            for (int i = 0; i < files.size(); i++) {
+                MultipartFile file = files.get(i);
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+                String fileName = originalFileName(file);
+                String fileUrl = dataUrl(file);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("fileIndex", i);
+                item.put("fileUrl", markdown ? markdownImage(fileName, fileUrl) : fileUrl);
+                fileList.add(item);
+            }
+            if (fileList.isEmpty()) {
+                return FrontendResponse.failure(1001, "file is empty");
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("fileList", fileList);
+            return FrontendResponse.ok(result);
+        } catch (IOException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
     }
@@ -2029,6 +2081,24 @@ public class WanwuFrontendApiController {
         return fallback;
     }
 
+    private String originalFileName(MultipartFile file) {
+        String name = defaultIfBlank(file.getOriginalFilename(), "file");
+        String normalized = name.replace("\\", "/");
+        int index = normalized.lastIndexOf('/');
+        return index >= 0 ? normalized.substring(index + 1) : normalized;
+    }
+
+    private String dataUrl(MultipartFile file) throws IOException {
+        String contentType = defaultIfBlank(file.getContentType(), "application/octet-stream");
+        return "data:" + contentType + ";base64,"
+                + Base64.getEncoder().encodeToString(file.getBytes());
+    }
+
+    private String markdownImage(String fileName, String fileUrl) {
+        String alt = defaultIfBlank(fileName, "file").replace("[", "").replace("]", "");
+        return "![" + alt + "](" + fileUrl + ")";
+    }
+
     private interface KnowledgeCall {
         Map<String, Object> execute(UserContext userContext, Map<String, Object> request);
     }
@@ -2088,6 +2158,25 @@ public class WanwuFrontendApiController {
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(toSseFrame(result));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()));
+        }
+    }
+
+    private ResponseEntity<String> streamRagChat(String authorization,
+                                                 RagChatRequest request,
+                                                 boolean draft) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagChatCommand command = request == null ? new RagChatRequest().toCommand(draft) : request.toCommand(draft);
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            RagChatResult result = appService.streamRagChat(command);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body(toRagAgUiSseFrames(result));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(400)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -2263,6 +2352,55 @@ public class WanwuFrontendApiController {
         json.append("\"responseFiles\":[]");
         json.append("}");
         return "data: " + json + "\n\n";
+    }
+
+    private String toRagAgUiSseFrames(RagChatResult result) {
+        String threadId = "rag-thread-" + UUID.randomUUID().toString();
+        String runId = "rag-run-" + UUID.randomUUID().toString();
+        String messageId = "rag-message-" + UUID.randomUUID().toString();
+        StringBuilder frames = new StringBuilder();
+        frames.append(sseEvent(agUiEvent("RUN_STARTED", threadId, runId, null, null, null)));
+        if (result.getQaSearchList() != null && !result.getQaSearchList().isEmpty()) {
+            frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_qa_search_list", result.getQaSearchList())));
+        }
+        if (result.getSearchList() != null && !result.getSearchList().isEmpty()) {
+            frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_search_list", result.getSearchList())));
+        }
+        frames.append(sseEvent(agUiEvent("TEXT_MESSAGE_START", threadId, runId, messageId, null, null)));
+        Map<String, Object> content = agUiEvent("TEXT_MESSAGE_CONTENT", threadId, runId, messageId, null, null);
+        content.put("delta", defaultIfBlank(result.getResponse(), ""));
+        frames.append(sseEvent(content));
+        frames.append(sseEvent(agUiEvent("TEXT_MESSAGE_END", threadId, runId, messageId, null, null)));
+        frames.append(sseEvent(agUiEvent("RUN_FINISHED", threadId, runId, null, null, null)));
+        return frames.toString();
+    }
+
+    private Map<String, Object> agUiEvent(String type,
+                                          String threadId,
+                                          String runId,
+                                          String messageId,
+                                          String name,
+                                          Object value) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("type", type);
+        event.put("threadId", threadId);
+        event.put("runId", runId);
+        if (!isBlank(messageId)) {
+            event.put("messageId", messageId);
+        }
+        if (!isBlank(name)) {
+            event.put("name", name);
+            event.put("value", value == null ? Collections.emptyList() : value);
+        }
+        return event;
+    }
+
+    private String sseEvent(Map<String, Object> event) {
+        try {
+            return "data: " + JSON.writeValueAsString(event) + "\n\n";
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("rag sse serialization failed", ex);
+        }
     }
 
     private String errorJson(String message) {
@@ -3499,6 +3637,55 @@ public class WanwuFrontendApiController {
 
         public void setSystemPrompt(String systemPrompt) {
             this.systemPrompt = systemPrompt;
+        }
+
+        public List<Map<String, Object>> getFileInfo() {
+            return fileInfo;
+        }
+
+        public void setFileInfo(List<Map<String, Object>> fileInfo) {
+            this.fileInfo = fileInfo;
+        }
+    }
+
+    public static class RagChatRequest {
+        private String ragId;
+        private String question;
+        private List<Map<String, Object>> history;
+        private List<Map<String, Object>> fileInfo;
+
+        public RagChatCommand toCommand(boolean draft) {
+            RagChatCommand command = new RagChatCommand();
+            command.setRagId(ragId);
+            command.setQuestion(question);
+            command.setDraft(draft);
+            command.setHistory(history == null ? Collections.<Map<String, Object>>emptyList() : history);
+            command.setFileInfo(fileInfo == null ? Collections.<Map<String, Object>>emptyList() : fileInfo);
+            return command;
+        }
+
+        public String getRagId() {
+            return ragId;
+        }
+
+        public void setRagId(String ragId) {
+            this.ragId = ragId;
+        }
+
+        public String getQuestion() {
+            return question;
+        }
+
+        public void setQuestion(String question) {
+            this.question = question;
+        }
+
+        public List<Map<String, Object>> getHistory() {
+            return history;
+        }
+
+        public void setHistory(List<Map<String, Object>> history) {
+            this.history = history;
         }
 
         public List<Map<String, Object>> getFileInfo() {

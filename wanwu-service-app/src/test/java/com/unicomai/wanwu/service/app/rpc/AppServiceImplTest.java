@@ -45,6 +45,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
@@ -223,6 +225,41 @@ public class AppServiceImplTest {
         service.deleteRag(delete);
         assertThrows(IllegalArgumentException.class, () -> service.getRagDraft(
                 new RagDetailQuery(created.getRagId(), "", "dev-admin", "default-org")));
+    }
+
+    @Test
+    public void ragChatValidatesDraftAndPublishedSnapshot() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("PolicyRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagChatCommand draft = ragChatCommand(created.getRagId(), "what is policy", true);
+        RagChatResult draftResult = service.streamRagChat(draft);
+        assertEquals(created.getRagId(), draftResult.getRagId());
+        assertEquals("what is policy", draftResult.getQuestion());
+        assertEquals(true, draftResult.getResponse().contains("PolicyRag"));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.streamRagChat(ragChatCommand(created.getRagId(), "published", false)));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getRagId());
+        publish.setAppType("rag");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        RagChatResult published = service.streamRagChat(
+                ragChatCommand(created.getRagId(), "published", false));
+        assertEquals("published", published.getQuestion());
+        assertEquals(true, published.getResponse().contains("Demo RAG response"));
     }
 
     @Test
@@ -1072,6 +1109,16 @@ public class AppServiceImplTest {
         command.setAssistantId(assistantId);
         command.setConversationId(conversationId);
         command.setPrompt(prompt);
+        command.setDraft(draft);
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private RagChatCommand ragChatCommand(String ragId, String question, boolean draft) {
+        RagChatCommand command = new RagChatCommand();
+        command.setRagId(ragId);
+        command.setQuestion(question);
         command.setDraft(draft);
         command.setUserId("dev-admin");
         command.setOrgId("default-org");

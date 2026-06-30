@@ -45,6 +45,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatCommand;
+import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
@@ -102,6 +104,8 @@ public interface AppService {
     Map<String, Object> getRagDraft(RagDetailQuery query);
 
     Map<String, Object> getPublishedRag(RagDetailQuery query);
+
+    RagChatResult streamRagChat(RagChatCommand command);
 
     void addAssistantWorkflow(AssistantResourceCommand command);
 

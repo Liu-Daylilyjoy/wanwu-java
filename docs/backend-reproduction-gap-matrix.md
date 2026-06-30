@@ -39,7 +39,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
 | `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
-| `v1/rag.go` | 10 | Partially covered; RAG app draft/create/update/config/copy/delete/list/publish/version covered for frontend compatibility; draft chat, upload, and real RAG retrieval/generation still missing |
+| `v1/rag.go` | 10 | Partially covered; RAG app draft/create/update/config/copy/delete/list/publish/version, AG-UI draft/published chat shell, and multipart upload compatibility covered for frontend access; real RAG retrieval/generation still missing |
 | `v1/safety.go` | 9 | Missing |
 | `v1/setting.go` | 3 | Missing |
 | `v1/skill.go` | 28 | Missing |
@@ -53,7 +53,7 @@ Measured from this Java repo before the full reproduction pass:
 
 | Proto service | RPC count | Java status |
 | --- | ---: | --- |
-| `AppService` | 41 | Partially covered for assistant CRUD/config, publish/version/OpenURL, app keys/API keys, and persisted local assistant resource bindings; explore/statistics/RAG apps missing |
+| `AppService` | 41 | Partially covered for assistant CRUD/config, publish/version/OpenURL, app keys/API keys, persisted local assistant resource bindings, RAG app lifecycle, and RAG chat shell; explore/statistics and real RAG orchestration missing |
 | `AssistantService` | 67 | Partially covered through Java `AppService`; local workflow/MCP/tool/skill/multi-agent binding state covered, while real assistant-side orchestration, templates, prompt, WGA, and skill conversations remain missing |
 | `IAMService` | 49 | Development login, frontend permission split, and IAM user/role/org read compatibility covered; persisted user/org/role/OAuth writes still missing |
 | `KnowledgeBaseDocService` | 26 | Partially covered with in-memory doc import/list/delete/url-analysis/default segment and segment create/update/delete/status/labels; real file parsing, chunk indexing, export records, reimport, child segment persistence, and async status callbacks missing |
@@ -68,7 +68,7 @@ Measured from this Java repo before the full reproduction pass:
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
-| `RagService` | 15 | Partially covered through Java `AppService` for appspace RAG lifecycle/config/publish/version/copy; standalone RAG chat/upload/retrieval RPC behavior still missing |
+| `RagService` | 15 | Partially covered through Java `AppService` and BFF for appspace RAG lifecycle/config/publish/version/copy, frontend AG-UI chat shell, and upload response shape; standalone retrieval/QA/knowledge stream behavior still missing |
 | `SafetyService` | 12 | Missing |
 
 ## Reproduction Order
@@ -78,7 +78,7 @@ Measured from this Java repo before the full reproduction pass:
 3. Model: model import/list/select/status/delete and model experience dialog.
 4. Knowledge: knowledge base CRUD, docs, QA, tags, splitters, permissions, reports, callback status updates.
 5. MCP/tool/prompt/skill: custom tools, MCP servers/tools, prompt templates, built-in/custom/acquired skills.
-6. RAG: draft/publish/chat/copy/version and knowledge integration. Management lifecycle is covered; chat/upload/retrieval remain next.
+6. RAG: draft/publish/chat/copy/version and knowledge integration. Management lifecycle, frontend chat shell, and upload response shape are covered; retrieval/search-list generation remains next.
 7. Assistant full surface: workflows, MCP tools, custom tools, skills, multi-agent, templates, select endpoints.
 8. Explore/guest/statistics/callback/openapi: marketplace, public API, API usage metrics, callback compatibility.
 9. WGA/general agent and sandbox integrations.
@@ -87,10 +87,10 @@ Measured from this Java repo before the full reproduction pass:
 
 The Java IAM service currently exposes two Docker development accounts:
 
-- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.agent`, `api_key`, `api_key.api_key_management`, `resource.knowledge`.
-- `app` / token `dev-token-app`: `app` and `app.agent` only.
+- `admin` / token `dev-token`: implemented stable permissions only: `permission`, `permission.user`, `permission.org`, `permission.role`, `model`, `model.model_management`, `app`, `app.rag`, `app.agent`, `api_key`, `api_key.api_key_management`, `resource.knowledge`.
+- `app` / token `dev-token-app`: `app`, `app.rag`, and `app.agent` only.
 
-Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. Knowledge is exposed because the frontend can now create/list/update/delete a knowledge base and enter the main empty-state detail views without 404s; document import/indexing, QA, report generation, external knowledge, and RAG integration remain later slices. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model/knowledge persistence model.
+Unreproduced frontend modules are intentionally not exposed to avoid `Not Found` toasts from pages whose Java backend routes are not implemented yet. Permission management currently exposes read paths only; create/update/delete/status/batch operations still belong to the persisted IAM slice. Model Management is exposed because its Docker development backend is implemented and verified, but it still uses in-memory storage until the model persistence slice is promoted to MySQL. Knowledge is exposed because the frontend can now create/list/update/delete a knowledge base and enter the main empty-state detail views without 404s; document import/indexing, QA, report generation, external knowledge, and real RAG retrieval integration remain later slices. RAG is exposed because management plus draft/published chat shell and upload response shape are now available. The ontology agent menu has been removed from this Java reproduction scope. Details are tracked in `docs/development-login-accounts.md`. This is a development compatibility slice, not the final reproduced Go IAM/model/knowledge persistence model.
 
 ## Operating Rule
 
