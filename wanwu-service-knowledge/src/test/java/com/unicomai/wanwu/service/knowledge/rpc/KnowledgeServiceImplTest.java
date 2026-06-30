@@ -106,6 +106,56 @@ public class KnowledgeServiceImplTest {
                 qaPairList(knowledgeId, "", Collections.singletonList(-1))).get("total"));
     }
 
+    @Test
+    public void documentImportAndSegmentsFollowFrontendAndGoContract() {
+        Map<String, Object> created = service.createKnowledge("dev-admin", "default-org", createKnowledge("Dev Docs", 0));
+        String knowledgeId = (String) created.get("knowledgeId");
+
+        Map<String, Object> analyzed = service.analyzeDocUrls("dev-admin", "default-org",
+                urlAnalysis(knowledgeId, "https://example.com/files/guide.txt"));
+        assertEquals("guide.txt", listOfMaps(analyzed.get("urlList")).get(0).get("fileName"));
+
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-guide", "Guide.txt"));
+        Map<String, Object> docPage = service.listDocs("dev-admin", "default-org", docList(knowledgeId));
+        assertEquals(1, docPage.get("total"));
+        Map<String, Object> doc = listOfMaps(docPage.get("list")).get(0);
+        assertEquals("doc-guide", doc.get("docId"));
+        assertEquals("Guide.txt", doc.get("docName"));
+        assertEquals(1, doc.get("status"));
+        assertEquals("admin", doc.get("author"));
+
+        Map<String, Object> firstSegments = service.listDocSegments("dev-admin", "default-org", segmentList("doc-guide", ""));
+        assertEquals(1, firstSegments.get("segmentTotalNum"));
+        Map<String, Object> defaultSegment = listOfMaps(firstSegments.get("contentList")).get(0);
+        assertEquals(true, defaultSegment.get("available"));
+        assertTrue(((String) defaultSegment.get("content")).contains("Guide.txt"));
+
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-guide", "Extra segment", Collections.singletonList("manual")));
+        Map<String, Object> twoSegments = service.listDocSegments("dev-admin", "default-org", segmentList("doc-guide", "Extra"));
+        assertEquals(1, twoSegments.get("segmentTotalNum"));
+        Map<String, Object> extraSegment = listOfMaps(twoSegments.get("contentList")).get(0);
+        assertEquals("Extra segment", extraSegment.get("content"));
+        assertEquals("manual", ((List) extraSegment.get("labels")).get(0));
+
+        String contentId = (String) extraSegment.get("contentId");
+        service.updateDocSegment("dev-admin", "default-org", updateSegment("doc-guide", contentId, "Updated segment"));
+        service.updateDocSegmentStatus("dev-admin", "default-org", segmentStatus("doc-guide", contentId, "false"));
+        Map<String, Object> updatedSegments = service.listDocSegments("dev-admin", "default-org", segmentList("doc-guide", "Updated"));
+        Map<String, Object> updated = listOfMaps(updatedSegments.get("contentList")).get(0);
+        assertEquals("Updated segment", updated.get("content"));
+        assertEquals(false, updated.get("available"));
+
+        service.deleteDocSegment("dev-admin", "default-org", deleteSegment("doc-guide", contentId));
+        assertEquals(1, service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-guide", "")).get("segmentTotalNum"));
+
+        service.deleteDocs("dev-admin", "default-org", deleteDocs(knowledgeId, "doc-guide"));
+        assertEquals(0, service.listDocs("dev-admin", "default-org", docList(knowledgeId)).get("total"));
+        assertEquals(0, service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-guide", "")).get("segmentTotalNum"));
+    }
+
     private Map<String, Object> createKnowledge(String name, int category) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("name", name);
@@ -140,6 +190,82 @@ public class KnowledgeServiceImplTest {
         request.put("knowledgeId", knowledgeId);
         request.put("pageNo", 1);
         request.put("pageSize", 10);
+        return request;
+    }
+
+    private Map<String, Object> docImport(String knowledgeId, String docId, String docName) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docInfoList", Collections.singletonList(docInfo(docId, docName)));
+        Map<String, Object> segment = new LinkedHashMap<String, Object>();
+        segment.put("segmentMethod", "0");
+        segment.put("segmentType", "0");
+        segment.put("maxSplitter", 500);
+        request.put("docSegment", segment);
+        request.put("docAnalyzer", Collections.singletonList("text"));
+        return request;
+    }
+
+    private Map<String, Object> docInfo(String docId, String docName) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("docName", docName);
+        request.put("docType", "txt");
+        request.put("docSize", 42);
+        return request;
+    }
+
+    private Map<String, Object> deleteDocs(String knowledgeId, String docId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docIdList", Collections.singletonList(docId));
+        return request;
+    }
+
+    private Map<String, Object> urlAnalysis(String knowledgeId, String url) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("urlList", Collections.singletonList(url));
+        return request;
+    }
+
+    private Map<String, Object> segmentList(String docId, String keyword) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("keyword", keyword);
+        request.put("pageNo", 1);
+        request.put("pageSize", 10);
+        return request;
+    }
+
+    private Map<String, Object> createSegment(String docId, String content, List<String> labels) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("content", content);
+        request.put("labels", labels);
+        return request;
+    }
+
+    private Map<String, Object> updateSegment(String docId, String contentId, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("contentId", contentId);
+        request.put("content", content);
+        return request;
+    }
+
+    private Map<String, Object> segmentStatus(String docId, String contentId, String status) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("contentId", contentId);
+        request.put("contentStatus", status);
+        return request;
+    }
+
+    private Map<String, Object> deleteSegment(String docId, String contentId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("contentId", contentId);
         return request;
     }
 

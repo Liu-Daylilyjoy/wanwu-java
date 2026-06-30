@@ -387,6 +387,10 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(docImportTip("knowledge-001", "Dev KB"));
         when(knowledgeService.getDocUploadLimit(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("uploadLimitList", Collections.singletonList(uploadLimit("document", 50, "txt", "pdf", "docx"))));
+        when(knowledgeService.analyzeDocUrls(anyString(), anyString(), any(Map.class)))
+                .thenReturn(urlAnalysis("https://example.com/files/guide.txt", "guide.txt"));
+        when(knowledgeService.listDocSegments(anyString(), anyString(), any(Map.class)))
+                .thenReturn(segmentPage("Guide.txt", segment("segment-001", "Guide content", true)));
         when(knowledgeService.listKnowledgeUsers(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("knowledgeUserInfoList", Collections.singletonList(knowledgeUser("perm-001", "dev-admin", 20))));
         when(knowledgeService.listKnowledgeOrgs(anyString(), anyString(), any(Map.class)))
@@ -477,6 +481,63 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.uploadLimitList[0].fileType").value("document"));
 
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/url/analysis")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"urlList\":[\"https://example.com/files/guide.txt\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.urlList[0].fileName").value("guide.txt"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"docInfoList\":[{\"docId\":\"doc-guide\",\"docName\":\"Guide.txt\",\"docType\":\"txt\",\"docSize\":42}],\"docSegment\":{\"segmentMethod\":\"0\",\"segmentType\":\"0\"},\"docAnalyzer\":[\"text\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/segment/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("docId", "doc-guide")
+                        .param("keyword", "Guide"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.fileName").value("Guide.txt"))
+                .andExpect(jsonPath("$.data.contentList[0].contentId").value("segment-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/create")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"content\":\"Extra segment\",\"labels\":[\"manual\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"contentId\":\"segment-001\",\"content\":\"Updated\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/status/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"contentId\":\"segment-001\",\"contentStatus\":\"false\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/labels")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"contentId\":\"segment-001\",\"labels\":[\"manual\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/doc/segment/delete")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"contentId\":\"segment-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
         mockMvc.perform(get("/user/api/v1/knowledge/user")
                         .header("Authorization", "Bearer dev-token")
                         .param("knowledgeId", "knowledge-001"))
@@ -508,6 +569,14 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).updateKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).deleteKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).analyzeDocUrls(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).importDocs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listDocSegments(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createDocSegment(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateDocSegment(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateDocSegmentStatus(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateDocSegmentLabels(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteDocSegment(anyString(), anyString(), any(Map.class));
     }
 
     @Test
@@ -1564,6 +1633,43 @@ public class WanwuFrontendApiControllerTest {
         limit.put("maxSize", maxSize);
         limit.put("extList", java.util.Arrays.asList(ext));
         return limit;
+    }
+
+    private Map<String, Object> urlAnalysis(String url, String fileName) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("url", url);
+        item.put("fileName", fileName);
+        item.put("fileSize", 0);
+        return singleton("urlList", Collections.singletonList(item));
+    }
+
+    private Map<String, Object> segmentPage(String fileName, Map<String, Object> segment) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("fileName", fileName);
+        page.put("pageTotal", 1);
+        page.put("segmentTotalNum", 1);
+        page.put("maxSegmentSize", 500);
+        page.put("segmentType", "0");
+        page.put("uploadTime", "2026-06-30 00:00:00");
+        page.put("splitter", "");
+        page.put("metaDataList", Collections.emptyList());
+        page.put("contentList", Collections.singletonList(segment));
+        page.put("segmentImportStatus", "");
+        page.put("segmentMethod", "0");
+        page.put("docAnalyzerText", Collections.singletonList(singleton("text", "text")));
+        return page;
+    }
+
+    private Map<String, Object> segment(String contentId, String content, boolean available) {
+        Map<String, Object> segment = new LinkedHashMap<>();
+        segment.put("contentId", contentId);
+        segment.put("content", content);
+        segment.put("contentNum", 1);
+        segment.put("available", available);
+        segment.put("labels", Collections.emptyList());
+        segment.put("isParent", false);
+        segment.put("childNum", 0);
+        return segment;
     }
 
     private Map<String, Object> knowledgeUser(String permissionId, String userId, int permissionType) {

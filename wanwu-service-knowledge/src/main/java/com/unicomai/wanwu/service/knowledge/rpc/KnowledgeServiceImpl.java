@@ -38,6 +38,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final Map<String, SplitterState> splitters = new LinkedHashMap<String, SplitterState>();
     private final Map<String, List<String>> tagIdsByKnowledgeId = new LinkedHashMap<String, List<String>>();
     private final Map<String, List<DocState>> docsByKnowledgeId = new LinkedHashMap<String, List<DocState>>();
+    private final Map<String, List<SegmentState>> segmentsByDocId = new LinkedHashMap<String, List<SegmentState>>();
     private final Map<String, List<QaPairState>> qaPairsByKnowledgeId = new LinkedHashMap<String, List<QaPairState>>();
     private final Map<String, QaPairState> qaPairsById = new LinkedHashMap<String, QaPairState>();
     private final Map<String, List<Map<String, Object>>> metasByKnowledgeId = new LinkedHashMap<String, List<Map<String, Object>>>();
@@ -47,6 +48,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextTagId = new AtomicLong(1000);
     private final AtomicLong nextSplitterId = new AtomicLong(1000);
     private final AtomicLong nextDocId = new AtomicLong(1000);
+    private final AtomicLong nextSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
     private final AtomicLong nextMetaId = new AtomicLong(1000);
     private final AtomicLong nextPermissionId = new AtomicLong(1000);
@@ -147,6 +149,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         existingKnowledge(knowledgeId);
         knowledgeBases.remove(knowledgeId);
         tagIdsByKnowledgeId.remove(knowledgeId);
+        for (DocState doc : docs(knowledgeId)) {
+            segmentsByDocId.remove(doc.docId);
+        }
         docsByKnowledgeId.remove(knowledgeId);
         for (QaPairState pair : qaPairs(knowledgeId)) {
             qaPairsById.remove(pair.qaPairId);
@@ -360,18 +365,31 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public synchronized Map<String, Object> listDocSegments(String userId, String orgId, Map<String, Object> request) {
-        String docId = string(safe(request).get("docId"));
+        Map<String, Object> safe = safe(request);
+        String docId = string(safe.get("docId"));
+        String keyword = string(safe.get("keyword"));
         DocState doc = findDoc(docId);
+        List<Map<String, Object>> filtered = new ArrayList<Map<String, Object>>();
+        if (doc != null) {
+            for (SegmentState segment : segments(docId)) {
+                if (!isBlank(keyword) && !containsIgnoreCase(segment.content, keyword)) {
+                    continue;
+                }
+                filtered.add(toSegmentInfo(segment));
+            }
+        }
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("fileName", doc == null ? "" : doc.docName);
-        result.put("pageTotal", 0);
-        result.put("segmentTotalNum", 0);
-        result.put("maxSegmentSize", 0);
+        result.put("pageTotal", 1);
+        result.put("segmentTotalNum", filtered.size());
+        result.put("maxSegmentSize", 500);
         result.put("segmentType", "0");
         result.put("uploadTime", doc == null ? CREATED_AT : doc.uploadTime);
         result.put("splitter", "");
         result.put("metaDataList", Collections.emptyList());
-        result.put("contentList", Collections.emptyList());
+        result.put("contentList", page(filtered,
+                intValue(safe.get("pageNo"), 1),
+                intValue(safe.get("pageSize"), 10)).get("list"));
         result.put("segmentImportStatus", "");
         result.put("segmentMethod", doc == null ? "0" : doc.segmentMethod);
         result.put("docAnalyzerText", Collections.singletonList(singleton("text", "text")));
@@ -389,7 +407,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         for (String url : stringList(safe(request).get("urlList"))) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("url", url);
-            item.put("fileName", url);
+            item.put("fileName", fileNameFromUrl(url));
             item.put("fileSize", 0);
             urls.add(item);
         }
@@ -416,9 +434,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             doc.status = DOC_STATUS_FINISHED;
             doc.fileSize = longValue(docInfo.get("docSize"), 0L);
             doc.segmentMethod = segmentMethod;
-            doc.author = defaultIfBlank(userId, DEFAULT_USER_ID);
+            doc.author = displayUserName(defaultIfBlank(userId, DEFAULT_USER_ID));
             doc.graphStatus = 0;
             docs(knowledgeId).add(doc);
+            createDefaultSegment(doc);
         }
     }
 
@@ -437,6 +456,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         List<DocState> docs = docs(knowledgeId);
         for (int i = docs.size() - 1; i >= 0; i--) {
             if (docIds.contains(docs.get(i).docId)) {
+                segmentsByDocId.remove(docs.get(i).docId);
                 docs.remove(i);
             }
         }
@@ -468,15 +488,49 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public void updateDocSegmentStatus(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateDocSegmentStatus(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String docId = string(safe.get("docId"));
+        boolean all = booleanValue(safe.get("all"), false);
+        boolean available = segmentAvailable(safe.get("contentStatus"));
+        if (all) {
+            for (SegmentState segment : segments(docId)) {
+                segment.available = available;
+            }
+            return;
+        }
+        SegmentState segment = findSegment(docId, string(safe.get("contentId")));
+        if (segment != null) {
+            segment.available = available;
+        }
     }
 
     @Override
-    public void updateDocSegmentLabels(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateDocSegmentLabels(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState segment = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
+        if (segment != null) {
+            segment.labels = stringList(safe.get("labels"));
+        }
     }
 
     @Override
-    public void createDocSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void createDocSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String docId = string(safe.get("docId"));
+        if (findDoc(docId) == null) {
+            throw new IllegalArgumentException("doc not found: " + docId);
+        }
+        SegmentState segment = new SegmentState();
+        segment.contentId = "segment-" + nextSegmentId.incrementAndGet();
+        segment.docId = docId;
+        segment.content = string(safe.get("content"));
+        segment.available = true;
+        segment.contentNum = segments(docId).size() + 1;
+        segment.labels = stringList(safe.get("labels"));
+        segment.parent = false;
+        segment.childNum = 0;
+        segments(docId).add(segment);
     }
 
     @Override
@@ -484,11 +538,25 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public void deleteDocSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void deleteDocSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        List<SegmentState> segments = segments(string(safe.get("docId")));
+        String contentId = string(safe.get("contentId"));
+        for (int i = segments.size() - 1; i >= 0; i--) {
+            if (contentId.equals(segments.get(i).contentId)) {
+                segments.remove(i);
+            }
+        }
+        renumberSegments(segments);
     }
 
     @Override
-    public void updateDocSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateDocSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState segment = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
+        if (segment != null) {
+            segment.content = string(safe.get("content"));
+        }
     }
 
     @Override
@@ -1005,6 +1073,18 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private Map<String, Object> toSegmentInfo(SegmentState segment) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("content", segment.content);
+        result.put("available", segment.available);
+        result.put("contentId", segment.contentId);
+        result.put("contentNum", segment.contentNum);
+        result.put("labels", new ArrayList<String>(segment.labels));
+        result.put("isParent", segment.parent);
+        result.put("childNum", segment.childNum);
+        return result;
+    }
+
     private Map<String, Object> toQaPairInfo(QaPairState pair) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("qaPairId", pair.qaPairId);
@@ -1119,6 +1199,18 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return null;
     }
 
+    private SegmentState findSegment(String docId, String contentId) {
+        if (isBlank(docId) || isBlank(contentId)) {
+            return null;
+        }
+        for (SegmentState segment : segments(docId)) {
+            if (contentId.equals(segment.contentId)) {
+                return segment;
+            }
+        }
+        return null;
+    }
+
     private QaPairState existingQaPair(String qaPairId) {
         QaPairState pair = qaPairsById.get(qaPairId);
         if (pair == null) {
@@ -1174,6 +1266,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return docs;
     }
 
+    private List<SegmentState> segments(String docId) {
+        List<SegmentState> segments = segmentsByDocId.get(docId);
+        if (segments == null) {
+            segments = new ArrayList<SegmentState>();
+            segmentsByDocId.put(docId, segments);
+        }
+        return segments;
+    }
+
     private List<QaPairState> qaPairs(String knowledgeId) {
         List<QaPairState> pairs = qaPairsByKnowledgeId.get(knowledgeId);
         if (pairs == null) {
@@ -1219,6 +1320,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    private void createDefaultSegment(DocState doc) {
+        List<SegmentState> segments = segments(doc.docId);
+        if (!segments.isEmpty()) {
+            return;
+        }
+        SegmentState segment = new SegmentState();
+        segment.contentId = "segment-" + nextSegmentId.incrementAndGet();
+        segment.docId = doc.docId;
+        segment.content = "Imported document: " + doc.docName;
+        segment.available = true;
+        segment.contentNum = 1;
+        segment.labels = new ArrayList<String>();
+        segment.parent = false;
+        segment.childNum = 0;
+        segments.add(segment);
+    }
+
+    private void renumberSegments(List<SegmentState> segments) {
+        for (int i = 0; i < segments.size(); i++) {
+            segments.get(i).contentNum = i + 1;
+        }
+    }
+
     private boolean qaMetaContains(QaPairState pair, String expected) {
         for (Map<String, Object> meta : pair.metaDataList) {
             for (Object value : meta.values()) {
@@ -1255,6 +1379,23 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String fileType(String docName) {
         int dot = docName == null ? -1 : docName.lastIndexOf('.');
         return dot >= 0 ? docName.substring(dot + 1).toLowerCase(Locale.ENGLISH) : "";
+    }
+
+    private String fileNameFromUrl(String url) {
+        if (isBlank(url)) {
+            return "";
+        }
+        String clean = url;
+        int query = clean.indexOf('?');
+        if (query >= 0) {
+            clean = clean.substring(0, query);
+        }
+        int hash = clean.indexOf('#');
+        if (hash >= 0) {
+            clean = clean.substring(0, hash);
+        }
+        int slash = clean.lastIndexOf('/');
+        return slash >= 0 && slash < clean.length() - 1 ? clean.substring(slash + 1) : clean;
     }
 
     private Map<String, Object> singleton(String key, Object value) {
@@ -1337,6 +1478,17 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return fallback;
     }
 
+    private boolean segmentAvailable(Object value) {
+        String raw = string(value);
+        if ("false".equalsIgnoreCase(raw) || "0".equals(raw) || "disable".equalsIgnoreCase(raw)) {
+            return false;
+        }
+        if ("true".equalsIgnoreCase(raw) || "1".equals(raw) || "enable".equalsIgnoreCase(raw)) {
+            return true;
+        }
+        return booleanValue(value, true);
+    }
+
     private long longValue(Object value, long fallback) {
         if (value instanceof Number) {
             return ((Number) value).longValue();
@@ -1416,6 +1568,17 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String segmentMethod;
         private String author;
         private int graphStatus;
+    }
+
+    private static final class SegmentState {
+        private String contentId;
+        private String docId;
+        private String content;
+        private boolean available;
+        private int contentNum;
+        private List<String> labels = new ArrayList<String>();
+        private boolean parent;
+        private int childNum;
     }
 
     private static final class QaPairState {

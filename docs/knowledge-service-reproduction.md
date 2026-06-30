@@ -16,7 +16,7 @@ Date: 2026-06-30
   - Knowledge base create/list/update/delete and hit shell.
   - Knowledge tag CRUD, bind, and bind-count.
   - Knowledge splitter preset list and custom CRUD.
-  - Document list empty state, document config, import tip, upload limit, segment list shell, URL analysis shell, import shell, reimport shell, and delete shell.
+  - Document URL analysis, local document import/list/delete, document config, import tip, upload limit, default segment generation, and segment create/update/delete/status/labels.
   - Metadata key/value shells.
   - Permission owner/admin/user/org compatibility.
   - QA pair create/list/update/switch/delete, import-tip, export shell, and local text hit.
@@ -33,14 +33,16 @@ The Java knowledge service currently uses an in-memory repository. It preserves 
 - Document pages include `list`, `total`, `pageNo`, `pageSize`, and `docKnowledgeInfo`.
 - Permission pages return `knowledgeUserInfoList`, `knowOrgInfoList`, and `userInfoList`.
 
-This is enough for the frontend to open the Knowledge module, create a knowledge base, bind tags, view splitters, enter the document empty state, and open permission-related panels without backend 404s. It is not the final Go-equivalent storage or indexing model.
+This is enough for the frontend to open the Knowledge module, create a knowledge base, bind tags, view splitters, import local development document descriptors, see the document list, inspect and edit local segments, and open permission-related panels without backend 404s. It is not the final Go-equivalent storage or indexing model.
 
 The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, and run a deterministic hit test over enabled finished pairs. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous import or retrieval engine.
+
+The document path stores imported `docInfoList` entries in memory, derives a default segment for each imported document, supports URL basename analysis, and lets the frontend create/update/delete/enable/disable/tag segments. The implementation deliberately does not parse file bytes or build embeddings yet.
 
 ## Still Missing
 
 - MySQL persistence for knowledge bases, tags, splitters, docs, metadata, permissions, QA pairs, reports, and external knowledge.
-- Real document upload, file parsing, chunking, vector indexing, reimport, and export.
+- Real document upload byte handling, file parsing, chunking, vector indexing, reimport, export records, child segment persistence, and asynchronous callback status updates.
 - Real QA file import parsing, persisted export records, and vector/keyword/rerank retrieval for QA hit tests.
 - Real keyword extraction, graph generation, report generation, and RAG query integration.
 - Callback status updates from asynchronous document processing.

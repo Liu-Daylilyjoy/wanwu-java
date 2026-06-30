@@ -1291,28 +1291,76 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.listMetaValues(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PostMapping({
-            "/knowledge/doc/segment/status/update",
-            "/knowledge/doc/segment/labels",
-            "/knowledge/doc/segment/create",
-            "/knowledge/doc/segment/batch/create",
-            "/knowledge/doc/segment/update",
-            "/knowledge/doc/segment/child/create",
-            "/knowledge/doc/segment/child/update"
-    })
-    public FrontendResponse<Map<String, Object>> mutateKnowledgeSegments(
+    @PostMapping("/knowledge/doc/segment/status/update")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocSegmentStatus(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
-        });
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocSegmentStatus(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @DeleteMapping({"/knowledge/doc/segment/delete", "/knowledge/doc/segment/child/delete"})
-    public FrontendResponse<Map<String, Object>> deleteKnowledgeSegments(
+    @PostMapping("/knowledge/doc/segment/labels")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocSegmentLabels(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request, (ctx, body) -> {
-        });
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocSegmentLabels(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/segment/create")
+    public FrontendResponse<Map<String, Object>> createKnowledgeDocSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/segment/batch/create")
+    public FrontendResponse<Map<String, Object>> batchCreateKnowledgeDocSegments(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.batchCreateDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/segment/update")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/doc/segment/delete")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeDocSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/segment/child/create")
+    public FrontendResponse<Map<String, Object>> createKnowledgeDocChildSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.createDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/doc/segment/child/update")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeDocChildSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @DeleteMapping("/knowledge/doc/segment/child/delete")
+    public FrontendResponse<Map<String, Object>> deleteKnowledgeDocChildSegment(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.deleteDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @GetMapping("/knowledge/graph")
