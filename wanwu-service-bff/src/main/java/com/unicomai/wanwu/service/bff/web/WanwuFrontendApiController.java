@@ -45,6 +45,13 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateResult;
+import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
@@ -98,6 +105,7 @@ public class WanwuFrontendApiController {
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String AGENT_APP_TYPE = "agent";
+    private static final String RAG_APP_TYPE = "rag";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
@@ -611,12 +619,144 @@ public class WanwuFrontendApiController {
         }
     }
 
+    @GetMapping("/appspace/rag/list")
+    public FrontendResponse<ApplicationListResult> ragList(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.listApplications(
+                    new ApplicationListQuery(RAG_APP_TYPE, name, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/rag")
+    public FrontendResponse<RagCreateResult> createRag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagCreateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagCreateCommand command = request == null ? new RagCreateRequest().toCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.createRag(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/appspace/rag")
+    public FrontendResponse<Map<String, Object>> updateRag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagUpdateRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagUpdateCommand command = request == null ? new RagUpdateRequest().toCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateRag(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PutMapping("/appspace/rag/config")
+    public FrontendResponse<Map<String, Object>> updateRagConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagConfigRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagConfigUpdateCommand command = request == null ? new RagConfigRequest().toCommand() : request.toCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.updateRagConfig(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/appspace/rag")
+    public FrontendResponse<Map<String, Object>> deleteRag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagDeleteCommand command = new RagDeleteCommand();
+            command.setRagId(request == null ? null : request.getRagId());
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            appService.deleteRag(command);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/rag/draft")
+    public FrontendResponse<Map<String, Object>> ragDraft(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("ragId") String ragId) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.getRagDraft(
+                    new RagDetailQuery(ragId, "", userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/appspace/rag")
+    public FrontendResponse<Map<String, Object>> ragPublished(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("ragId") String ragId,
+            @RequestParam(value = "version", required = false) String version) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(appService.getPublishedRag(
+                    new RagDetailQuery(ragId, version, userContext.getUserId(), userContext.getOrgId())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/appspace/rag/copy")
+    public FrontendResponse<RagCreateResult> copyRag(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody RagIdRequest request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            RagCopyCommand command = new RagCopyCommand();
+            command.setRagId(request == null ? null : request.getRagId());
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            return FrontendResponse.ok(appService.copyRag(command));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     @DeleteMapping("/appspace/app")
     public FrontendResponse<Map<String, Object>> deleteAppspaceApp(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody AppspaceAppDeleteRequest request) {
         try {
-            if (request == null || !AGENT_APP_TYPE.equals(request.getAppType())) {
+            if (request == null) {
+                return FrontendResponse.failure(1001, "unsupported app type");
+            }
+            if (RAG_APP_TYPE.equals(request.getAppType())) {
+                RagDeleteCommand command = new RagDeleteCommand();
+                command.setRagId(request.getAppId());
+                UserContext userContext = userContext(authorization);
+                command.setUserId(userContext.getUserId());
+                command.setOrgId(userContext.getOrgId());
+                appService.deleteRag(command);
+                return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+            }
+            if (!AGENT_APP_TYPE.equals(request.getAppType())) {
                 return FrontendResponse.failure(1001, "unsupported app type");
             }
             return deleteAssistant(userContext(authorization), request.getAppId());
@@ -2643,6 +2783,198 @@ public class WanwuFrontendApiController {
 
         public void setAvatar(AvatarRequest avatar) {
             this.avatar = avatar;
+        }
+    }
+
+    public static class RagCreateRequest {
+        private String name;
+        private String desc;
+        private AvatarRequest avatar = new AvatarRequest();
+
+        public RagCreateCommand toCommand() {
+            RagCreateCommand command = new RagCreateCommand();
+            command.setName(name);
+            command.setDesc(desc);
+            if (avatar != null) {
+                command.setAvatarKey(avatar.getKey());
+                command.setAvatarPath(avatar.getPath());
+            }
+            return command;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public AvatarRequest getAvatar() {
+            return avatar;
+        }
+
+        public void setAvatar(AvatarRequest avatar) {
+            this.avatar = avatar;
+        }
+    }
+
+    public static class RagUpdateRequest {
+        private String ragId;
+        private String name;
+        private String desc;
+        private AvatarRequest avatar = new AvatarRequest();
+
+        public RagUpdateCommand toCommand() {
+            RagUpdateCommand command = new RagUpdateCommand();
+            command.setRagId(ragId);
+            command.setName(name);
+            command.setDesc(desc);
+            if (avatar != null) {
+                command.setAvatarKey(avatar.getKey());
+                command.setAvatarPath(avatar.getPath());
+            }
+            return command;
+        }
+
+        public String getRagId() {
+            return ragId;
+        }
+
+        public void setRagId(String ragId) {
+            this.ragId = ragId;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public AvatarRequest getAvatar() {
+            return avatar;
+        }
+
+        public void setAvatar(AvatarRequest avatar) {
+            this.avatar = avatar;
+        }
+    }
+
+    public static class RagConfigRequest {
+        private String ragId;
+        private Map<String, Object> modelConfig;
+        private Map<String, Object> rerankConfig;
+        private Map<String, Object> qaRerankConfig;
+        private Map<String, Object> knowledgeBaseConfig;
+        private Map<String, Object> qaKnowledgeBaseConfig;
+        private Map<String, Object> safetyConfig;
+        private Map<String, Object> visionConfig;
+
+        public RagConfigUpdateCommand toCommand() {
+            RagConfigUpdateCommand command = new RagConfigUpdateCommand();
+            command.setRagId(ragId);
+            command.setModelConfig(modelConfig);
+            command.setRerankConfig(rerankConfig);
+            command.setQaRerankConfig(qaRerankConfig);
+            command.setKnowledgeBaseConfig(knowledgeBaseConfig);
+            command.setQaKnowledgeBaseConfig(qaKnowledgeBaseConfig);
+            command.setSafetyConfig(safetyConfig);
+            command.setVisionConfig(visionConfig);
+            return command;
+        }
+
+        public String getRagId() {
+            return ragId;
+        }
+
+        public void setRagId(String ragId) {
+            this.ragId = ragId;
+        }
+
+        public Map<String, Object> getModelConfig() {
+            return modelConfig;
+        }
+
+        public void setModelConfig(Map<String, Object> modelConfig) {
+            this.modelConfig = modelConfig;
+        }
+
+        public Map<String, Object> getRerankConfig() {
+            return rerankConfig;
+        }
+
+        public void setRerankConfig(Map<String, Object> rerankConfig) {
+            this.rerankConfig = rerankConfig;
+        }
+
+        public Map<String, Object> getQaRerankConfig() {
+            return qaRerankConfig;
+        }
+
+        public void setQaRerankConfig(Map<String, Object> qaRerankConfig) {
+            this.qaRerankConfig = qaRerankConfig;
+        }
+
+        public Map<String, Object> getKnowledgeBaseConfig() {
+            return knowledgeBaseConfig;
+        }
+
+        public void setKnowledgeBaseConfig(Map<String, Object> knowledgeBaseConfig) {
+            this.knowledgeBaseConfig = knowledgeBaseConfig;
+        }
+
+        public Map<String, Object> getQaKnowledgeBaseConfig() {
+            return qaKnowledgeBaseConfig;
+        }
+
+        public void setQaKnowledgeBaseConfig(Map<String, Object> qaKnowledgeBaseConfig) {
+            this.qaKnowledgeBaseConfig = qaKnowledgeBaseConfig;
+        }
+
+        public Map<String, Object> getSafetyConfig() {
+            return safetyConfig;
+        }
+
+        public void setSafetyConfig(Map<String, Object> safetyConfig) {
+            this.safetyConfig = safetyConfig;
+        }
+
+        public Map<String, Object> getVisionConfig() {
+            return visionConfig;
+        }
+
+        public void setVisionConfig(Map<String, Object> visionConfig) {
+            this.visionConfig = visionConfig;
+        }
+    }
+
+    public static class RagIdRequest {
+        private String ragId;
+
+        public String getRagId() {
+            return ragId;
+        }
+
+        public void setRagId(String ragId) {
+            this.ragId = ragId;
         }
     }
 

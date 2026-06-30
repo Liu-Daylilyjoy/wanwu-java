@@ -38,6 +38,38 @@ public interface ApplicationRepository {
 
     boolean rollbackAssistant(AppRecord record, AssistantDraftConfigRecord config);
 
+    AppRecord saveRag(AppRecord record);
+
+    AppRecord updateRag(AppRecord record);
+
+    List<AppRecord> listRags(String userId, String orgId, String name);
+
+    AppRecord findRag(String userId, String orgId, String ragId);
+
+    boolean deleteRag(String userId, String orgId, String ragId);
+
+    List<String> listRagNamesByPrefix(String userId, String orgId, String prefix);
+
+    AppRecord copyRag(AppRecord record, RagDraftConfigRecord config);
+
+    RagDraftConfigRecord saveRagConfig(RagDraftConfigRecord record);
+
+    RagDraftConfigRecord findRagConfig(String userId, String orgId, String ragId);
+
+    RagSnapshotRecord saveRagSnapshot(RagSnapshotRecord snapshot);
+
+    List<RagSnapshotRecord> listRagSnapshots(String userId, String orgId, String ragId);
+
+    RagSnapshotRecord findLatestRagSnapshot(String userId, String orgId, String ragId);
+
+    RagSnapshotRecord findRagSnapshotByVersion(String userId, String orgId, String ragId, String version);
+
+    boolean updateLatestRagSnapshot(String userId, String orgId, String ragId, String desc, long updatedAt);
+
+    boolean updateRagPublishType(String userId, String orgId, String ragId, String publishType, long updatedAt);
+
+    boolean rollbackRag(AppRecord record, RagDraftConfigRecord config);
+
     ApiKeyRecord saveApiKey(ApiKeyRecord record);
 
     ApiKeyRecord updateApiKey(ApiKeyRecord record);

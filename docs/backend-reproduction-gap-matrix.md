@@ -39,7 +39,7 @@ Measured from this Java repo before the full reproduction pass:
 | `v1/model.go` | 15 | Partially covered; model list/detail/import/update/delete/status, recommend, validate-thinking stub, provider list, select endpoints, and model experience dialog/list/records/delete/local SSE covered; ASR stream and real provider inference missing |
 | `v1/oauth.go` | 5 | Missing |
 | `v1/permission.go` | 23 | Partially covered; user/role/org list, role select, role template, org select/info read paths covered; writes and batch import missing |
-| `v1/rag.go` | 10 | Missing |
+| `v1/rag.go` | 10 | Partially covered; RAG app draft/create/update/config/copy/delete/list/publish/version covered for frontend compatibility; draft chat, upload, and real RAG retrieval/generation still missing |
 | `v1/safety.go` | 9 | Missing |
 | `v1/setting.go` | 3 | Missing |
 | `v1/skill.go` | 28 | Missing |
@@ -68,7 +68,7 @@ Measured from this Java repo before the full reproduction pass:
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker in-memory repository for model management/select/recommend/provider flows plus model experience dialog/record persistence; real provider inference and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
-| `RagService` | 15 | Placeholder-level |
+| `RagService` | 15 | Partially covered through Java `AppService` for appspace RAG lifecycle/config/publish/version/copy; standalone RAG chat/upload/retrieval RPC behavior still missing |
 | `SafetyService` | 12 | Missing |
 
 ## Reproduction Order
@@ -78,7 +78,7 @@ Measured from this Java repo before the full reproduction pass:
 3. Model: model import/list/select/status/delete and model experience dialog.
 4. Knowledge: knowledge base CRUD, docs, QA, tags, splitters, permissions, reports, callback status updates.
 5. MCP/tool/prompt/skill: custom tools, MCP servers/tools, prompt templates, built-in/custom/acquired skills.
-6. RAG: draft/publish/chat/copy/version and knowledge integration.
+6. RAG: draft/publish/chat/copy/version and knowledge integration. Management lifecycle is covered; chat/upload/retrieval remain next.
 7. Assistant full surface: workflows, MCP tools, custom tools, skills, multi-agent, templates, select endpoints.
 8. Explore/guest/statistics/callback/openapi: marketplace, public API, API usage metrics, callback compatibility.
 9. WGA/general agent and sandbox integrations.

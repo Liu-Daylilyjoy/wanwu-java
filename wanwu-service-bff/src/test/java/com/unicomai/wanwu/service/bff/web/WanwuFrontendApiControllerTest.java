@@ -43,6 +43,13 @@ import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateResult;
+import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
@@ -1060,6 +1067,107 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1001))
                 .andExpect(jsonPath("$.msg").value("assistant draft not found"));
+    }
+
+    @Test
+    public void ragRoutesMapFrontendCrudConfigCopyAndDetailRequests() throws Exception {
+        when(appService.createRag(any(RagCreateCommand.class))).thenReturn(new RagCreateResult("rag-001"));
+        when(appService.copyRag(any(RagCopyCommand.class))).thenReturn(new RagCreateResult("rag-002"));
+
+        Map<String, Object> avatar = new LinkedHashMap<>();
+        avatar.put("key", "avatars/rag.png");
+        avatar.put("path", "/static/rag.png");
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("ragId", "rag-001");
+        rag.put("avatar", avatar);
+        rag.put("name", "PolicyRag");
+        rag.put("desc", "policy qa");
+        rag.put("modelConfig", Collections.singletonMap("modelId", "llm-001"));
+        rag.put("rerankConfig", Collections.singletonMap("modelId", "rerank-001"));
+        rag.put("qaRerankConfig", Collections.singletonMap("modelId", "qa-rerank-001"));
+        rag.put("knowledgeBaseConfig", Collections.singletonMap("knowledgebases", Collections.emptyList()));
+        rag.put("qaKnowledgeBaseConfig", Collections.singletonMap("knowledgebases", Collections.emptyList()));
+        rag.put("safetyConfig", Collections.singletonMap("enable", false));
+        rag.put("visionConfig", Collections.singletonMap("picNum", 0));
+        rag.put("appPublishConfig", Collections.singletonMap("publishType", "public"));
+        when(appService.getRagDraft(any(RagDetailQuery.class))).thenReturn(rag);
+        when(appService.getPublishedRag(any(RagDetailQuery.class))).thenReturn(rag);
+
+        Map<String, Object> card = new LinkedHashMap<>();
+        card.put("appId", "rag-001");
+        card.put("appType", "rag");
+        card.put("name", "PolicyRag");
+        card.put("avatar", avatar);
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(card)));
+
+        mockMvc.perform(post("/user/api/v1/appspace/rag")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"PolicyRag\",\"desc\":\"policy qa\",\"avatar\":{\"key\":\"avatars/rag.png\",\"path\":\"/static/rag.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ragId").value("rag-001"));
+
+        mockMvc.perform(get("/user/api/v1/appspace/rag/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appType").value("rag"));
+
+        mockMvc.perform(get("/user/api/v1/appspace/rag/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("ragId", "rag-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ragId").value("rag-001"))
+                .andExpect(jsonPath("$.data.modelConfig.modelId").value("llm-001"));
+
+        mockMvc.perform(put("/user/api/v1/appspace/rag")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\",\"name\":\"PolicyRag2\",\"desc\":\"updated\",\"avatar\":{\"key\":\"avatars/rag2.png\",\"path\":\"/static/rag2.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(put("/user/api/v1/appspace/rag/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\",\"modelConfig\":{\"modelId\":\"llm-001\"},\"rerankConfig\":{\"modelId\":\"rerank-001\"},\"qaRerankConfig\":{\"modelId\":\"qa-rerank-001\"},\"knowledgeBaseConfig\":{\"knowledgebases\":[]},\"qaKnowledgeBaseConfig\":{\"knowledgebases\":[]},\"safetyConfig\":{\"enable\":false},\"visionConfig\":{\"picNum\":0}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/appspace/rag")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("ragId", "rag-001")
+                        .param("version", "v1.0.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.appPublishConfig.publishType").value("public"));
+
+        mockMvc.perform(post("/user/api/v1/appspace/rag/copy")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ragId").value("rag-002"));
+
+        mockMvc.perform(delete("/user/api/v1/appspace/rag")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        org.mockito.ArgumentCaptor<RagCreateCommand> createCaptor = forClass(RagCreateCommand.class);
+        verify(appService).createRag(createCaptor.capture());
+        assertEquals("PolicyRag", createCaptor.getValue().getName());
+        assertEquals("dev-admin", createCaptor.getValue().getUserId());
+
+        verify(appService).updateRag(any(RagUpdateCommand.class));
+        verify(appService).updateRagConfig(any(RagConfigUpdateCommand.class));
+        verify(appService).getRagDraft(any(RagDetailQuery.class));
+        verify(appService).getPublishedRag(any(RagDetailQuery.class));
+        verify(appService).copyRag(any(RagCopyCommand.class));
+        verify(appService).deleteRag(any(RagDeleteCommand.class));
     }
 
     @Test

@@ -9,6 +9,7 @@ Date: 2026-06-30
 - Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses.
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
+- RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, and published detail read.
 - Assistant extension bindings:
   - `POST/DELETE/PUT /assistant/tool/workflow`
   - `POST/DELETE/PUT /assistant/tool/mcp`
@@ -29,12 +30,20 @@ The binding state is stored with the assistant draft config in JSON columns:
 
 These fields are returned through `GET /assistant/draft` as `workFlowInfos`, `mcpInfos`, `toolInfos`, `skillInfos`, and `multiAgentInfos`, matching the original Go BFF response shape.
 
+RAG draft state is stored in the RAG-specific tables:
+
+- `rag_drafts`
+- `rag_draft_configs`
+- `rag_snapshots`
+
+The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types.
+
 ## Original Go Mapping
 
 - Go request contracts came from `internal/bff-service/model/request/assistant.go`.
 - Go response contracts came from `internal/bff-service/model/response/assistant.go`.
-- Go routes came from `internal/bff-service/server/http/handler/router/v1/assistant.go`, `tool.go`, and `workflow.go`.
-- Go RPC boundaries came from `proto/assistant-service/assistant-service.proto`.
+- Go routes came from `internal/bff-service/server/http/handler/router/v1/assistant.go`, `tool.go`, `workflow.go`, and `rag.go`.
+- Go RPC boundaries came from `proto/assistant-service/assistant-service.proto` and `proto/rag-service/rag-service.proto`.
 
 ## Known Gaps
 
@@ -42,3 +51,4 @@ These fields are returned through `GET /assistant/draft` as `workFlowInfos`, `mc
 - Workflow select currently exposes development compatibility data; Coze/workflow import/export/execution is still missing.
 - Skill marketplace/custom/acquired skill flows are not implemented in this slice.
 - Prompt templates and assistant templates remain separate future slices.
+- RAG draft chat, upload, and real retrieval/generation are not implemented yet; current RAG behavior covers the frontend management and publishing loop.

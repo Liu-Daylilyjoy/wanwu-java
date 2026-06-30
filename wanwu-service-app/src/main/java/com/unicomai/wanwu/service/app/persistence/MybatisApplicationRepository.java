@@ -9,6 +9,8 @@ import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
@@ -18,6 +20,9 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMe
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
@@ -27,6 +32,9 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMe
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +47,9 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantDraftMapper assistantDraftMapper;
     private final AssistantDraftConfigMapper assistantDraftConfigMapper;
     private final AssistantSnapshotMapper assistantSnapshotMapper;
+    private final RagDraftMapper ragDraftMapper;
+    private final RagDraftConfigMapper ragDraftConfigMapper;
+    private final RagSnapshotMapper ragSnapshotMapper;
     private final ApiKeyMapper apiKeyMapper;
     private final AppKeyMapper appKeyMapper;
     private final AppUrlMapper appUrlMapper;
@@ -49,6 +60,9 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantDraftMapper assistantDraftMapper,
                                         AssistantDraftConfigMapper assistantDraftConfigMapper,
                                         AssistantSnapshotMapper assistantSnapshotMapper,
+                                        RagDraftMapper ragDraftMapper,
+                                        RagDraftConfigMapper ragDraftConfigMapper,
+                                        RagSnapshotMapper ragSnapshotMapper,
                                         ApiKeyMapper apiKeyMapper,
                                         AppKeyMapper appKeyMapper,
                                         AppUrlMapper appUrlMapper,
@@ -58,6 +72,9 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
         this.assistantSnapshotMapper = assistantSnapshotMapper;
+        this.ragDraftMapper = ragDraftMapper;
+        this.ragDraftConfigMapper = ragDraftConfigMapper;
+        this.ragSnapshotMapper = ragSnapshotMapper;
         this.apiKeyMapper = apiKeyMapper;
         this.appKeyMapper = appKeyMapper;
         this.appUrlMapper = appUrlMapper;
@@ -215,6 +232,143 @@ public class MybatisApplicationRepository implements ApplicationRepository {
             return false;
         }
         assistantDraftConfigMapper.upsert(toEntity(config));
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public AppRecord saveRag(AppRecord record) {
+        AppEntity app = new AppEntity();
+        app.setCreatedAt(record.getCreatedAt());
+        app.setUpdatedAt(record.getUpdatedAt());
+        app.setUserId(record.getUserId());
+        app.setOrgId(record.getOrgId());
+        app.setAppId(record.getAppId());
+        app.setAppType(record.getAppType());
+        app.setPublishType(record.getPublishType());
+        appMapper.insert(app);
+
+        RagDraftEntity draft = new RagDraftEntity();
+        draft.setCreatedAt(record.getCreatedAt());
+        draft.setUpdatedAt(record.getUpdatedAt());
+        draft.setUserId(record.getUserId());
+        draft.setOrgId(record.getOrgId());
+        draft.setRagId(record.getAppId());
+        draft.setName(record.getName());
+        draft.setDescription(record.getDesc());
+        draft.setAvatarKey(record.getAvatarKey());
+        draft.setAvatarPath(record.getAvatarPath());
+        draft.setCategory(record.getCategory());
+        ragDraftMapper.insert(draft);
+        ragDraftConfigMapper.upsert(newDefaultRagConfig(record));
+
+        record.setId(app.getId());
+        return record;
+    }
+
+    @Override
+    @Transactional
+    public AppRecord updateRag(AppRecord record) {
+        appMapper.updateRagUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getUpdatedAt());
+        int updated = ragDraftMapper.updateDraft(record);
+        return updated > 0 ? record : null;
+    }
+
+    @Override
+    public List<AppRecord> listRags(String userId, String orgId, String name) {
+        return appMapper.selectRagRecords(userId, orgId, name);
+    }
+
+    @Override
+    public AppRecord findRag(String userId, String orgId, String ragId) {
+        return appMapper.selectRagRecord(userId, orgId, ragId);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteRag(String userId, String orgId, String ragId) {
+        appUrlMapper.deleteByAssistant(userId, orgId, ragId);
+        ragSnapshotMapper.deleteByRag(userId, orgId, ragId);
+        ragDraftConfigMapper.deleteByRag(userId, orgId, ragId);
+        int draftDeleted = ragDraftMapper.deleteDraft(userId, orgId, ragId);
+        int appDeleted = appMapper.deleteRagApp(userId, orgId, ragId);
+        return draftDeleted > 0 && appDeleted > 0;
+    }
+
+    @Override
+    public List<String> listRagNamesByPrefix(String userId, String orgId, String prefix) {
+        return appMapper.selectRagNamesByPrefix(userId, orgId, prefix);
+    }
+
+    @Override
+    @Transactional
+    public AppRecord copyRag(AppRecord record, RagDraftConfigRecord config) {
+        saveRag(record);
+        if (config != null) {
+            ragDraftConfigMapper.upsert(toEntity(config));
+        }
+        return record;
+    }
+
+    @Override
+    @Transactional
+    public RagDraftConfigRecord saveRagConfig(RagDraftConfigRecord record) {
+        ragDraftConfigMapper.upsert(toEntity(record));
+        appMapper.updateRagUpdatedAt(record.getUserId(), record.getOrgId(), record.getRagId(), record.getUpdatedAt());
+        return record;
+    }
+
+    @Override
+    public RagDraftConfigRecord findRagConfig(String userId, String orgId, String ragId) {
+        return toRecord(ragDraftConfigMapper.selectByRag(userId, orgId, ragId));
+    }
+
+    @Override
+    public RagSnapshotRecord saveRagSnapshot(RagSnapshotRecord snapshot) {
+        RagSnapshotEntity entity = toEntity(snapshot);
+        ragSnapshotMapper.insert(entity);
+        snapshot.setId(entity.getId());
+        return snapshot;
+    }
+
+    @Override
+    public List<RagSnapshotRecord> listRagSnapshots(String userId, String orgId, String ragId) {
+        return toRagSnapshotRecords(ragSnapshotMapper.selectByRag(userId, orgId, ragId));
+    }
+
+    @Override
+    public RagSnapshotRecord findLatestRagSnapshot(String userId, String orgId, String ragId) {
+        return toRecord(ragSnapshotMapper.selectLatest(userId, orgId, ragId));
+    }
+
+    @Override
+    public RagSnapshotRecord findRagSnapshotByVersion(String userId, String orgId, String ragId, String version) {
+        return toRecord(ragSnapshotMapper.selectByVersion(userId, orgId, ragId, version));
+    }
+
+    @Override
+    public boolean updateLatestRagSnapshot(String userId, String orgId, String ragId, String desc, long updatedAt) {
+        RagSnapshotEntity latest = ragSnapshotMapper.selectLatest(userId, orgId, ragId);
+        if (latest == null) {
+            return false;
+        }
+        return ragSnapshotMapper.updateLatestDescription(latest.getId(), desc, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean updateRagPublishType(String userId, String orgId, String ragId, String publishType, long updatedAt) {
+        return appMapper.updateRagPublishType(userId, orgId, ragId, publishType, updatedAt) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean rollbackRag(AppRecord record, RagDraftConfigRecord config) {
+        appMapper.updateRagUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getUpdatedAt());
+        int updated = ragDraftMapper.updateDraft(record);
+        if (updated <= 0) {
+            return false;
+        }
+        ragDraftConfigMapper.upsert(toEntity(config));
         return true;
     }
 
@@ -490,6 +644,55 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         return record;
     }
 
+    private RagDraftConfigEntity newDefaultRagConfig(AppRecord record) {
+        RagDraftConfigEntity entity = new RagDraftConfigEntity();
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setRagId(record.getAppId());
+        return entity;
+    }
+
+    private RagDraftConfigEntity toEntity(RagDraftConfigRecord record) {
+        RagDraftConfigEntity entity = new RagDraftConfigEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setRagId(record.getRagId());
+        entity.setModelConfigJson(record.getModelConfigJson());
+        entity.setRerankConfigJson(record.getRerankConfigJson());
+        entity.setQaRerankConfigJson(record.getQaRerankConfigJson());
+        entity.setKnowledgeBaseConfigJson(record.getKnowledgeBaseConfigJson());
+        entity.setQaKnowledgeBaseConfigJson(record.getQaKnowledgeBaseConfigJson());
+        entity.setSafetyConfigJson(record.getSafetyConfigJson());
+        entity.setVisionConfigJson(record.getVisionConfigJson());
+        return entity;
+    }
+
+    private RagDraftConfigRecord toRecord(RagDraftConfigEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        RagDraftConfigRecord record = new RagDraftConfigRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setRagId(entity.getRagId());
+        record.setModelConfigJson(entity.getModelConfigJson());
+        record.setRerankConfigJson(entity.getRerankConfigJson());
+        record.setQaRerankConfigJson(entity.getQaRerankConfigJson());
+        record.setKnowledgeBaseConfigJson(entity.getKnowledgeBaseConfigJson());
+        record.setQaKnowledgeBaseConfigJson(entity.getQaKnowledgeBaseConfigJson());
+        record.setSafetyConfigJson(entity.getSafetyConfigJson());
+        record.setVisionConfigJson(entity.getVisionConfigJson());
+        return record;
+    }
+
     private AssistantSnapshotEntity toEntity(AssistantSnapshotRecord record) {
         AssistantSnapshotEntity entity = new AssistantSnapshotEntity();
         entity.setId(record.getId());
@@ -530,6 +733,49 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setAssistantInfoJson(entity.getAssistantInfoJson());
         record.setAssistantConfigJson(entity.getAssistantConfigJson());
+        return record;
+    }
+
+    private RagSnapshotEntity toEntity(RagSnapshotRecord record) {
+        RagSnapshotEntity entity = new RagSnapshotEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setRagId(record.getRagId());
+        entity.setVersion(record.getVersion());
+        entity.setDesc(record.getDesc());
+        entity.setCategory(record.getCategory());
+        entity.setRagInfoJson(record.getRagInfoJson());
+        entity.setRagConfigJson(record.getRagConfigJson());
+        return entity;
+    }
+
+    private List<RagSnapshotRecord> toRagSnapshotRecords(List<RagSnapshotEntity> entities) {
+        List<RagSnapshotRecord> records = new java.util.ArrayList<>();
+        for (RagSnapshotEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private RagSnapshotRecord toRecord(RagSnapshotEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        RagSnapshotRecord record = new RagSnapshotRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setRagId(entity.getRagId());
+        record.setVersion(entity.getVersion());
+        record.setDesc(entity.getDesc());
+        record.setCategory(entity.getCategory());
+        record.setRagInfoJson(entity.getRagInfoJson());
+        record.setRagConfigJson(entity.getRagConfigJson());
         return record;
     }
 

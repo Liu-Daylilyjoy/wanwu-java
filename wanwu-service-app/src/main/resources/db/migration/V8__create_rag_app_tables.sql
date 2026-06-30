@@ -1,0 +1,60 @@
+CREATE TABLE IF NOT EXISTS rag_drafts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  rag_id VARCHAR(64) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(512) NOT NULL,
+  avatar_key VARCHAR(512) NOT NULL,
+  avatar_path VARCHAR(512) NOT NULL,
+  category INT NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rag_draft_rag_id (rag_id),
+  KEY idx_rag_draft_user_id (user_id),
+  KEY idx_rag_draft_org_id (org_id),
+  KEY idx_rag_draft_name (name),
+  KEY idx_rag_draft_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS rag_draft_configs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  rag_id VARCHAR(64) NOT NULL,
+  model_config JSON NULL,
+  rerank_config JSON NULL,
+  qa_rerank_config JSON NULL,
+  knowledge_base_config JSON NULL,
+  qa_knowledge_base_config JSON NULL,
+  safety_config JSON NULL,
+  vision_config JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rag_draft_config_rag_id (rag_id),
+  KEY idx_rag_draft_config_user_id (user_id),
+  KEY idx_rag_draft_config_org_id (org_id),
+  KEY idx_rag_draft_config_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS rag_snapshots (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  rag_id VARCHAR(64) NOT NULL,
+  version VARCHAR(64) NOT NULL,
+  snapshot_desc VARCHAR(512) NOT NULL DEFAULT '',
+  category INT NOT NULL,
+  rag_info_json JSON NULL,
+  rag_config_json JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rag_snapshot_version (user_id, org_id, rag_id, version),
+  KEY idx_rag_snapshot_rag_id (rag_id),
+  KEY idx_rag_snapshot_user_id (user_id),
+  KEY idx_rag_snapshot_org_id (org_id),
+  KEY idx_rag_snapshot_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

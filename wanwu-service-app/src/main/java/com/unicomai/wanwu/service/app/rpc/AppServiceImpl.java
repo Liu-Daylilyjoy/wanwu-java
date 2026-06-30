@@ -47,6 +47,13 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateResult;
+import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -59,6 +66,8 @@ import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -81,6 +90,7 @@ public class AppServiceImpl implements AppService {
 
     private static final String APP_TYPE_AGENT = "agent";
     private static final String APP_TYPE_ASSISTANT = "assistant";
+    private static final String APP_TYPE_RAG = "rag";
     private static final String PUBLISH_TYPE_UNPUBLISHED = "";
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
@@ -287,27 +297,165 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public RagCreateResult createRag(RagCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("rag create command is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("rag name is required");
+        }
+        long now = clock.millis();
+        AppRecord record = new AppRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(defaultIfBlank(command.getUserId(), DEV_USER_ID));
+        record.setOrgId(defaultIfBlank(command.getOrgId(), DEV_ORG_ID));
+        record.setAppId(newRagId());
+        record.setAppType(APP_TYPE_RAG);
+        record.setPublishType(PUBLISH_TYPE_UNPUBLISHED);
+        record.setName(command.getName().trim());
+        record.setDesc(defaultIfBlank(command.getDesc(), ""));
+        record.setAvatarKey(defaultIfBlank(command.getAvatarKey(), ""));
+        record.setAvatarPath(defaultIfBlank(command.getAvatarPath(), ""));
+        record.setCategory(0);
+        applicationRepository.saveRag(record);
+        return new RagCreateResult(record.getAppId());
+    }
+
+    @Override
+    public void updateRag(RagUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("rag update command is required");
+        }
+        if (isBlank(command.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        if (isBlank(command.getName())) {
+            throw new IllegalArgumentException("rag name is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord existing = applicationRepository.findRag(userId, orgId, command.getRagId());
+        if (existing == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+
+        AppRecord record = new AppRecord();
+        record.setId(existing.getId());
+        record.setCreatedAt(existing.getCreatedAt());
+        record.setUpdatedAt(clock.millis());
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAppId(command.getRagId());
+        record.setAppType(APP_TYPE_RAG);
+        record.setPublishType(existing.getPublishType());
+        record.setName(command.getName().trim());
+        record.setDesc(defaultIfBlank(command.getDesc(), ""));
+        record.setAvatarKey(defaultIfBlank(command.getAvatarKey(), ""));
+        record.setAvatarPath(defaultIfBlank(command.getAvatarPath(), ""));
+        record.setCategory(existing.getCategory() == null ? 0 : existing.getCategory());
+        if (applicationRepository.updateRag(record) == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+    }
+
+    @Override
+    public void updateRagConfig(RagConfigUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("rag config command is required");
+        }
+        if (isBlank(command.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (applicationRepository.findRag(userId, orgId, command.getRagId()) == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+
+        long now = clock.millis();
+        RagDraftConfigRecord record = new RagDraftConfigRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setRagId(command.getRagId());
+        record.setModelConfigJson(toJsonOrNull(command.getModelConfig()));
+        record.setRerankConfigJson(toJsonOrNull(command.getRerankConfig()));
+        record.setQaRerankConfigJson(toJsonOrNull(command.getQaRerankConfig()));
+        record.setKnowledgeBaseConfigJson(toJsonOrNull(command.getKnowledgeBaseConfig()));
+        record.setQaKnowledgeBaseConfigJson(toJsonOrNull(command.getQaKnowledgeBaseConfig()));
+        record.setSafetyConfigJson(toJsonOrNull(command.getSafetyConfig()));
+        record.setVisionConfigJson(toJsonOrNull(command.getVisionConfig()));
+        applicationRepository.saveRagConfig(record);
+    }
+
+    @Override
+    public void deleteRag(RagDeleteCommand command) {
+        if (command == null || isBlank(command.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (applicationRepository.findRag(userId, orgId, command.getRagId()) == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+        if (!applicationRepository.deleteRag(userId, orgId, command.getRagId())) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+    }
+
+    @Override
+    public RagCreateResult copyRag(RagCopyCommand command) {
+        if (command == null || isBlank(command.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord source = applicationRepository.findRag(userId, orgId, command.getRagId());
+        if (source == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+
+        long now = clock.millis();
+        String newRagId = newRagId();
+        AppRecord copied = copyBaseRecord(source, newRagId, nextRagCopyName(userId, orgId, source.getName()), now);
+        RagDraftConfigRecord copiedConfig = copyRagConfig(
+                applicationRepository.findRagConfig(userId, orgId, command.getRagId()),
+                userId,
+                orgId,
+                newRagId,
+                now);
+        applicationRepository.copyRag(copied, copiedConfig);
+        return new RagCreateResult(newRagId);
+    }
+
+    @Override
     public void publishApp(AppPublishCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("app publish command is required");
         }
-        String appType = normalizeAgentAppType(command.getAppType());
-        if (!APP_TYPE_AGENT.equals(appType)) {
-            throw new IllegalArgumentException("only agent publish is supported");
-        }
+        String appType = normalizeAppType(command.getAppType());
         if (isBlank(command.getAppId())) {
             throw new IllegalArgumentException("app id is required");
         }
         String publishType = normalizePublishType(command.getPublishType(), PUBLISH_TYPE_PRIVATE);
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (APP_TYPE_RAG.equals(appType)) {
+            publishRag(command, userId, orgId, publishType);
+            return;
+        }
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("unsupported app type");
+        }
         AppRecord record = applicationRepository.findAssistant(userId, orgId, command.getAppId());
         if (record == null) {
             throw new IllegalArgumentException("assistant draft not found");
         }
 
         AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(userId, orgId, command.getAppId());
-        String version = isBlank(command.getVersion()) ? nextVersion(latest) : command.getVersion().trim();
+        String version = isBlank(command.getVersion()) ? nextVersion(latestVersion(latest)) : command.getVersion().trim();
         validateVersion(version);
         if (latest != null && compareVersion(version, latest.getVersion()) <= 0) {
             throw new IllegalArgumentException("app version must be greater than latest version");
@@ -338,15 +486,22 @@ public class AppServiceImpl implements AppService {
         if (command == null) {
             throw new IllegalArgumentException("app publish command is required");
         }
-        String appType = normalizeAgentAppType(command.getAppType());
-        if (!APP_TYPE_AGENT.equals(appType)) {
-            throw new IllegalArgumentException("only agent publish is supported");
-        }
+        String appType = normalizeAppType(command.getAppType());
         if (isBlank(command.getAppId())) {
             throw new IllegalArgumentException("app id is required");
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (APP_TYPE_RAG.equals(appType)) {
+            if (!applicationRepository.updateRagPublishType(
+                    userId, orgId, command.getAppId(), PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
+                throw new IllegalArgumentException("rag draft not found");
+            }
+            return;
+        }
+        if (!APP_TYPE_AGENT.equals(appType)) {
+            throw new IllegalArgumentException("unsupported app type");
+        }
         if (!applicationRepository.updateAssistantPublishType(
                 userId, orgId, command.getAppId(), PUBLISH_TYPE_UNPUBLISHED, clock.millis())) {
             throw new IllegalArgumentException("assistant draft not found");
@@ -356,6 +511,18 @@ public class AppServiceImpl implements AppService {
     @Override
     public AppVersionInfo getLatestAppVersion(AppVersionQuery query) {
         VersionContext context = versionContext(query);
+        if (APP_TYPE_RAG.equals(context.appType)) {
+            AppRecord record = applicationRepository.findRag(context.userId, context.orgId, context.appId);
+            if (record == null) {
+                throw new IllegalArgumentException("rag draft not found");
+            }
+            RagSnapshotRecord latest = applicationRepository.findLatestRagSnapshot(
+                    context.userId, context.orgId, context.appId);
+            if (latest == null) {
+                return new AppVersionInfo("", "", "", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+            }
+            return toVersionInfo(latest, defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        }
         AppRecord record = applicationRepository.findAssistant(context.userId, context.orgId, context.appId);
         if (record == null) {
             throw new IllegalArgumentException("assistant draft not found");
@@ -371,6 +538,15 @@ public class AppServiceImpl implements AppService {
     @Override
     public AppVersionListResult listAppVersions(AppVersionQuery query) {
         VersionContext context = versionContext(query);
+        if (APP_TYPE_RAG.equals(context.appType)) {
+            List<RagSnapshotRecord> snapshots = applicationRepository.listRagSnapshots(
+                    context.userId, context.orgId, context.appId);
+            List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
+            for (RagSnapshotRecord snapshot : snapshots) {
+                versions.add(toVersionInfo(snapshot, ""));
+            }
+            return new AppVersionListResult(versions, versions.size());
+        }
         List<AssistantSnapshotRecord> snapshots = applicationRepository.listAssistantSnapshots(
                 context.userId, context.orgId, context.appId);
         List<AppVersionInfo> versions = new ArrayList<>(snapshots.size());
@@ -388,6 +564,16 @@ public class AppServiceImpl implements AppService {
         VersionContext context = versionContext(command.getAppId(), command.getAppType(), command.getUserId(), command.getOrgId());
         String publishType = normalizePublishType(command.getPublishType(), null);
         long now = clock.millis();
+        if (APP_TYPE_RAG.equals(context.appType)) {
+            if (!applicationRepository.updateLatestRagSnapshot(
+                    context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
+                throw new IllegalArgumentException("rag snapshot not found");
+            }
+            if (!applicationRepository.updateRagPublishType(context.userId, context.orgId, context.appId, publishType, now)) {
+                throw new IllegalArgumentException("rag draft not found");
+            }
+            return;
+        }
         if (!applicationRepository.updateLatestAssistantSnapshot(
                 context.userId, context.orgId, context.appId, defaultIfBlank(command.getDesc(), ""), now)) {
             throw new IllegalArgumentException("assistant snapshot not found");
@@ -406,6 +592,10 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("app version is required");
         }
         VersionContext context = versionContext(command.getAppId(), command.getAppType(), command.getUserId(), command.getOrgId());
+        if (APP_TYPE_RAG.equals(context.appType)) {
+            rollbackRagVersion(command, context);
+            return;
+        }
         AppRecord existing = applicationRepository.findAssistant(context.userId, context.orgId, context.appId);
         if (existing == null) {
             throw new IllegalArgumentException("assistant draft not found");
@@ -439,11 +629,22 @@ public class AppServiceImpl implements AppService {
 
     @Override
     public ApplicationListResult listApplications(ApplicationListQuery query) {
-        String appType = query == null ? APP_TYPE_AGENT : normalizeAgentAppType(query.getAppType());
-        if (!APP_TYPE_AGENT.equals(appType)) {
-            return new ApplicationListResult(Collections.<Map<String, Object>>emptyList(), 0);
+        String appType = query == null ? APP_TYPE_AGENT : normalizeAppType(query.getAppType());
+        if (APP_TYPE_RAG.equals(appType)) {
+            String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
+            String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+            String name = query == null ? "" : defaultIfBlank(query.getName(), "");
+            List<AppRecord> records = applicationRepository.listRags(userId, orgId, name);
+            List<Map<String, Object>> items = new ArrayList<>(records.size());
+            for (AppRecord record : records) {
+                items.add(toFrontendCard(record));
+            }
+            return new ApplicationListResult(items, items.size());
         }
-        return listAssistants(query);
+        if (APP_TYPE_AGENT.equals(appType)) {
+            return listAssistants(query);
+        }
+        return new ApplicationListResult(Collections.<Map<String, Object>>emptyList(), 0);
     }
 
     @Override
@@ -673,6 +874,48 @@ public class AppServiceImpl implements AppService {
         draft.put("newAgent", false);
         draft.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
         return draft;
+    }
+
+    @Override
+    public Map<String, Object> getRagDraft(RagDetailQuery query) {
+        if (query == null || isBlank(query.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AppRecord record = applicationRepository.findRag(userId, orgId, query.getRagId());
+        if (record == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+        RagDraftConfigRecord config = applicationRepository.findRagConfig(userId, orgId, query.getRagId());
+        return toFrontendRag(record, config);
+    }
+
+    @Override
+    public Map<String, Object> getPublishedRag(RagDetailQuery query) {
+        if (query == null || isBlank(query.getRagId())) {
+            throw new IllegalArgumentException("rag id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        RagSnapshotRecord snapshot;
+        if (isBlank(query.getVersion())) {
+            snapshot = applicationRepository.findLatestRagSnapshot(userId, orgId, query.getRagId());
+        } else {
+            snapshot = applicationRepository.findRagSnapshotByVersion(userId, orgId, query.getRagId(), query.getVersion());
+        }
+        if (snapshot == null) {
+            throw new IllegalArgumentException("rag snapshot not found");
+        }
+        Map<String, Object> rag = mapOrDefault(snapshot.getRagInfoJson(), new LinkedHashMap<String, Object>());
+        AppRecord record = applicationRepository.findRag(userId, orgId, query.getRagId());
+        rag.put("ragId", query.getRagId());
+        rag.put("uuid", query.getRagId());
+        rag.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        Map<String, Object> publish = mapValue(rag.get("appPublishConfig"));
+        publish.put("publishType", record == null ? PUBLISH_TYPE_UNPUBLISHED : defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        rag.put("appPublishConfig", publish);
+        return rag;
     }
 
     @Override
@@ -1796,9 +2039,7 @@ public class AppServiceImpl implements AppService {
         item.put("updatedAt", formatMillis(record.getUpdatedAt()));
         item.put("publishType", record.getPublishType());
         item.put("category", record.getCategory());
-        AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(
-                record.getUserId(), record.getOrgId(), record.getAppId());
-        item.put("version", latest == null ? "" : latest.getVersion());
+        item.put("version", latestVersion(record));
         item.put("user", user(record));
         return item;
     }
@@ -1832,6 +2073,32 @@ public class AppServiceImpl implements AppService {
         item.put("toolInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getToolInfosJson()));
         item.put("skillInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getSkillInfosJson()));
         item.put("multiAgentInfos", config == null ? Collections.emptyList() : listMapOrDefault(config.getMultiAgentInfosJson()));
+        return item;
+    }
+
+    private Map<String, Object> toFrontendRag(AppRecord record, RagDraftConfigRecord config) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("ragId", record.getAppId());
+        item.put("uuid", record.getAppId());
+        item.put("avatar", avatar(record));
+        item.put("name", record.getName());
+        item.put("desc", record.getDesc());
+        item.put("category", record.getCategory());
+        item.put("publishType", record.getPublishType());
+        item.put("modelConfig", config == null ? modelConfig() : mapOrDefault(config.getModelConfigJson(), modelConfig()));
+        item.put("rerankConfig", config == null ? rerankConfig() : mapOrDefault(config.getRerankConfigJson(), rerankConfig()));
+        item.put("qaRerankConfig", config == null ? rerankConfig() : mapOrDefault(config.getQaRerankConfigJson(), rerankConfig()));
+        item.put("knowledgeBaseConfig", config == null
+                ? knowledgeBaseConfig()
+                : mapOrDefault(config.getKnowledgeBaseConfigJson(), knowledgeBaseConfig()));
+        item.put("qaKnowledgeBaseConfig", config == null
+                ? qaKnowledgeBaseConfig()
+                : mapOrDefault(config.getQaKnowledgeBaseConfigJson(), qaKnowledgeBaseConfig()));
+        item.put("safetyConfig", config == null ? safetyConfig() : mapOrDefault(config.getSafetyConfigJson(), safetyConfig()));
+        item.put("visionConfig", config == null ? ragVisionConfig() : mapOrDefault(config.getVisionConfigJson(), ragVisionConfig()));
+        Map<String, Object> publishConfig = new LinkedHashMap<>();
+        publishConfig.put("publishType", defaultIfBlank(record.getPublishType(), PUBLISH_TYPE_UNPUBLISHED));
+        item.put("appPublishConfig", publishConfig);
         return item;
     }
 
@@ -1886,6 +2153,30 @@ public class AppServiceImpl implements AppService {
         return copied;
     }
 
+    private RagDraftConfigRecord copyRagConfig(RagDraftConfigRecord source,
+                                               String userId,
+                                               String orgId,
+                                               String newRagId,
+                                               long now) {
+        RagDraftConfigRecord copied = new RagDraftConfigRecord();
+        copied.setCreatedAt(now);
+        copied.setUpdatedAt(now);
+        copied.setUserId(userId);
+        copied.setOrgId(orgId);
+        copied.setRagId(newRagId);
+        if (source == null) {
+            return copied;
+        }
+        copied.setModelConfigJson(source.getModelConfigJson());
+        copied.setRerankConfigJson(source.getRerankConfigJson());
+        copied.setQaRerankConfigJson(source.getQaRerankConfigJson());
+        copied.setKnowledgeBaseConfigJson(source.getKnowledgeBaseConfigJson());
+        copied.setQaKnowledgeBaseConfigJson(source.getQaKnowledgeBaseConfigJson());
+        copied.setSafetyConfigJson(source.getSafetyConfigJson());
+        copied.setVisionConfigJson(source.getVisionConfigJson());
+        return copied;
+    }
+
     private String nextCopyName(String userId, String orgId, String sourceName) {
         String prefix = sourceName + "_";
         int max = 0;
@@ -1902,6 +2193,77 @@ public class AppServiceImpl implements AppService {
         return prefix + (max + 1);
     }
 
+    private String nextRagCopyName(String userId, String orgId, String sourceName) {
+        String prefix = sourceName + "_";
+        int max = 0;
+        for (String name : applicationRepository.listRagNamesByPrefix(userId, orgId, prefix)) {
+            if (name == null || !name.startsWith(prefix)) {
+                continue;
+            }
+            String suffix = name.substring(prefix.length());
+            try {
+                max = Math.max(max, Integer.parseInt(suffix));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return prefix + (max + 1);
+    }
+
+    private void publishRag(AppPublishCommand command, String userId, String orgId, String publishType) {
+        AppRecord record = applicationRepository.findRag(userId, orgId, command.getAppId());
+        if (record == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+        RagSnapshotRecord latest = applicationRepository.findLatestRagSnapshot(userId, orgId, command.getAppId());
+        String version = isBlank(command.getVersion()) ? nextVersion(latestVersion(latest)) : command.getVersion().trim();
+        validateVersion(version);
+        if (latest != null && compareVersion(version, latest.getVersion()) <= 0) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+        if (applicationRepository.findRagSnapshotByVersion(userId, orgId, command.getAppId(), version) != null) {
+            throw new IllegalArgumentException("app version must be greater than latest version");
+        }
+
+        long now = clock.millis();
+        RagDraftConfigRecord config = applicationRepository.findRagConfig(userId, orgId, command.getAppId());
+        RagSnapshotRecord snapshot = new RagSnapshotRecord();
+        snapshot.setCreatedAt(now);
+        snapshot.setUpdatedAt(now);
+        snapshot.setUserId(userId);
+        snapshot.setOrgId(orgId);
+        snapshot.setRagId(command.getAppId());
+        snapshot.setVersion(version);
+        snapshot.setDesc(defaultIfBlank(command.getDesc(), ""));
+        snapshot.setCategory(record.getCategory());
+        Map<String, Object> ragInfo = toFrontendRag(record, config);
+        Map<String, Object> publishConfig = mapValue(ragInfo.get("appPublishConfig"));
+        publishConfig.put("publishType", publishType);
+        ragInfo.put("appPublishConfig", publishConfig);
+        snapshot.setRagInfoJson(toJsonOrNull(ragInfo));
+        snapshot.setRagConfigJson(toJsonOrNull(config));
+        applicationRepository.saveRagSnapshot(snapshot);
+        applicationRepository.updateRagPublishType(userId, orgId, command.getAppId(), publishType, now);
+    }
+
+    private void rollbackRagVersion(AppVersionRollbackCommand command, VersionContext context) {
+        AppRecord existing = applicationRepository.findRag(context.userId, context.orgId, context.appId);
+        if (existing == null) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+        RagSnapshotRecord snapshot = applicationRepository.findRagSnapshotByVersion(
+                context.userId, context.orgId, context.appId, command.getVersion());
+        if (snapshot == null) {
+            throw new IllegalArgumentException("rag snapshot not found");
+        }
+        Map<String, Object> snapshotDraft = mapOrDefault(snapshot.getRagInfoJson(), new LinkedHashMap<String, Object>());
+        AppRecord restored = restoreRecord(existing, snapshotDraft, clock.millis());
+        RagDraftConfigRecord restoredConfig = restoreRagConfig(
+                snapshotDraft, context.userId, context.orgId, context.appId, restored.getUpdatedAt());
+        if (!applicationRepository.rollbackRag(restored, restoredConfig)) {
+            throw new IllegalArgumentException("rag draft not found");
+        }
+    }
+
     private VersionContext versionContext(AppVersionQuery query) {
         if (query == null) {
             throw new IllegalArgumentException("app version query is required");
@@ -1910,9 +2272,9 @@ public class AppServiceImpl implements AppService {
     }
 
     private VersionContext versionContext(String appId, String appType, String userId, String orgId) {
-        String normalizedAppType = normalizeAgentAppType(appType);
-        if (!APP_TYPE_AGENT.equals(normalizedAppType)) {
-            throw new IllegalArgumentException("only agent publish is supported");
+        String normalizedAppType = normalizeAppType(appType);
+        if (!APP_TYPE_AGENT.equals(normalizedAppType) && !APP_TYPE_RAG.equals(normalizedAppType)) {
+            throw new IllegalArgumentException("unsupported app type");
         }
         if (isBlank(appId)) {
             throw new IllegalArgumentException("app id is required");
@@ -1922,6 +2284,10 @@ public class AppServiceImpl implements AppService {
                 normalizedAppType,
                 defaultIfBlank(userId, DEV_USER_ID),
                 defaultIfBlank(orgId, DEV_ORG_ID));
+    }
+
+    private String normalizeAppType(String appType) {
+        return normalizeAgentAppType(appType);
     }
 
     private String normalizeAgentAppType(String appType) {
@@ -1948,12 +2314,30 @@ public class AppServiceImpl implements AppService {
         }
     }
 
-    private String nextVersion(AssistantSnapshotRecord latest) {
-        if (latest == null || isBlank(latest.getVersion())) {
+    private String nextVersion(String latest) {
+        if (isBlank(latest)) {
             return DEFAULT_VERSION;
         }
-        int[] parts = versionParts(latest.getVersion());
+        int[] parts = versionParts(latest);
         return "v" + parts[0] + "." + parts[1] + "." + (parts[2] + 1);
+    }
+
+    private String latestVersion(AssistantSnapshotRecord latest) {
+        return latest == null ? "" : latest.getVersion();
+    }
+
+    private String latestVersion(RagSnapshotRecord latest) {
+        return latest == null ? "" : latest.getVersion();
+    }
+
+    private String latestVersion(AppRecord record) {
+        if (APP_TYPE_RAG.equals(record.getAppType())) {
+            return latestVersion(applicationRepository.findLatestRagSnapshot(
+                    record.getUserId(), record.getOrgId(), record.getAppId()));
+        }
+        AssistantSnapshotRecord latest = applicationRepository.findLatestAssistantSnapshot(
+                record.getUserId(), record.getOrgId(), record.getAppId());
+        return latestVersion(latest);
     }
 
     private int compareVersion(String left, String right) {
@@ -1978,6 +2362,14 @@ public class AppServiceImpl implements AppService {
     }
 
     private AppVersionInfo toVersionInfo(AssistantSnapshotRecord snapshot, String publishType) {
+        return new AppVersionInfo(
+                snapshot.getVersion(),
+                defaultIfBlank(snapshot.getDesc(), ""),
+                formatMillis(snapshot.getCreatedAt()),
+                publishType);
+    }
+
+    private AppVersionInfo toVersionInfo(RagSnapshotRecord snapshot, String publishType) {
         return new AppVersionInfo(
                 snapshot.getVersion(),
                 defaultIfBlank(snapshot.getDesc(), ""),
@@ -2034,6 +2426,27 @@ public class AppServiceImpl implements AppService {
         return config;
     }
 
+    private RagDraftConfigRecord restoreRagConfig(Map<String, Object> snapshotDraft,
+                                                  String userId,
+                                                  String orgId,
+                                                  String ragId,
+                                                  long now) {
+        RagDraftConfigRecord config = new RagDraftConfigRecord();
+        config.setCreatedAt(now);
+        config.setUpdatedAt(now);
+        config.setUserId(userId);
+        config.setOrgId(orgId);
+        config.setRagId(ragId);
+        config.setModelConfigJson(toJsonOrNull(snapshotDraft.get("modelConfig")));
+        config.setRerankConfigJson(toJsonOrNull(snapshotDraft.get("rerankConfig")));
+        config.setQaRerankConfigJson(toJsonOrNull(snapshotDraft.get("qaRerankConfig")));
+        config.setKnowledgeBaseConfigJson(toJsonOrNull(snapshotDraft.get("knowledgeBaseConfig")));
+        config.setQaKnowledgeBaseConfigJson(toJsonOrNull(snapshotDraft.get("qaKnowledgeBaseConfig")));
+        config.setSafetyConfigJson(toJsonOrNull(snapshotDraft.get("safetyConfig")));
+        config.setVisionConfigJson(toJsonOrNull(snapshotDraft.get("visionConfig")));
+        return config;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapValue(Object value) {
         if (value instanceof Map) {
@@ -2083,6 +2496,36 @@ public class AppServiceImpl implements AppService {
         return knowledgeBaseConfig;
     }
 
+    private Map<String, Object> qaKnowledgeBaseConfig() {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("keywordPriority", 0.8);
+        config.put("matchType", "mix");
+        config.put("priorityMatch", 1);
+        config.put("rerankModelId", "");
+        config.put("semanticsPriority", 0.2);
+        config.put("topK", 5);
+        config.put("threshold", 0.4);
+        config.put("maxHistory", 0);
+
+        Map<String, Object> knowledgeBaseConfig = new LinkedHashMap<>();
+        knowledgeBaseConfig.put("config", config);
+        knowledgeBaseConfig.put("knowledgebases", Collections.emptyList());
+        return knowledgeBaseConfig;
+    }
+
+    private Map<String, Object> safetyConfig() {
+        Map<String, Object> safetyConfig = new LinkedHashMap<>();
+        safetyConfig.put("enable", false);
+        safetyConfig.put("tables", Collections.emptyList());
+        return safetyConfig;
+    }
+
+    private Map<String, Object> ragVisionConfig() {
+        Map<String, Object> visionConfig = new LinkedHashMap<>();
+        visionConfig.put("picNum", 0);
+        return visionConfig;
+    }
+
     private Map<String, Object> modelConfig() {
         Map<String, Object> modelConfig = new LinkedHashMap<>();
         modelConfig.put("config", null);
@@ -2125,6 +2568,10 @@ public class AppServiceImpl implements AppService {
 
     private String newAssistantId() {
         return "assistant-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newRagId() {
+        return "rag-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String newConversationId() {

@@ -43,6 +43,13 @@ import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateResult;
+import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
@@ -52,6 +59,8 @@ import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -60,6 +69,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -129,6 +139,90 @@ public class AppServiceImplTest {
         assertEquals("public", result.getList().get(0).get("publishType"));
         assertEquals("v1.0.0", result.getList().get(0).get("version"));
         assertNotEquals(first.getAssistantId(), result.getList().get(0).get("appId"));
+    }
+
+    @Test
+    public void ragLifecyclePersistsConfigAndSupportsPublishCopyDelete() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("PolicyRag");
+        create.setDesc("policy qa");
+        create.setAvatarKey("avatars/rag.png");
+        create.setAvatarPath("/static/rag.png");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setModelConfig(modelConfig("llm-001"));
+        config.setRerankConfig(modelConfig("rerank-001"));
+        config.setQaRerankConfig(modelConfig("qa-rerank-001"));
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-001"));
+        config.setQaKnowledgeBaseConfig(knowledgeConfig("qa-kb-001"));
+        config.setSafetyConfig(safetyConfig("table-001"));
+        config.setVisionConfig(visionConfig(1));
+        service.updateRagConfig(config);
+
+        Map<String, Object> draft = service.getRagDraft(
+                new RagDetailQuery(created.getRagId(), "", "dev-admin", "default-org"));
+        assertEquals(created.getRagId(), draft.get("ragId"));
+        assertEquals("PolicyRag", draft.get("name"));
+        assertEquals("llm-001", ((Map<?, ?>) draft.get("modelConfig")).get("modelId"));
+        assertEquals(1, ((Map<?, ?>) draft.get("visionConfig")).get("picNum"));
+
+        ApplicationListResult ragList = service.listApplications(
+                new ApplicationListQuery("rag", "Policy", "dev-admin", "default-org"));
+        assertEquals(1, ragList.getTotal());
+        assertEquals("rag", ragList.getList().get(0).get("appType"));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getRagId());
+        publish.setAppType("rag");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setDesc("first rag version");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        Map<String, Object> published = service.getPublishedRag(
+                new RagDetailQuery(created.getRagId(), "", "dev-admin", "default-org"));
+        assertEquals("public", ((Map<?, ?>) published.get("appPublishConfig")).get("publishType"));
+        assertEquals("PolicyRag", published.get("name"));
+        assertEquals("v1.0.0", service.getLatestAppVersion(
+                new AppVersionQuery(created.getRagId(), "rag", "dev-admin", "default-org")).getVersion());
+
+        RagUpdateCommand update = new RagUpdateCommand();
+        update.setRagId(created.getRagId());
+        update.setName("PolicyRagUpdated");
+        update.setDesc("updated policy qa");
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        service.updateRag(update);
+        assertEquals("PolicyRagUpdated", service.getRagDraft(
+                new RagDetailQuery(created.getRagId(), "", "dev-admin", "default-org")).get("name"));
+
+        RagCopyCommand copy = new RagCopyCommand();
+        copy.setRagId(created.getRagId());
+        copy.setUserId("dev-admin");
+        copy.setOrgId("default-org");
+        RagCreateResult copied = service.copyRag(copy);
+        assertNotEquals(created.getRagId(), copied.getRagId());
+        assertEquals(2, service.listApplications(
+                new ApplicationListQuery("rag", "PolicyRagUpdated", "dev-admin", "default-org")).getTotal());
+
+        RagDeleteCommand delete = new RagDeleteCommand();
+        delete.setRagId(created.getRagId());
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        service.deleteRag(delete);
+        assertThrows(IllegalArgumentException.class, () -> service.getRagDraft(
+                new RagDetailQuery(created.getRagId(), "", "dev-admin", "default-org")));
     }
 
     @Test
@@ -1016,12 +1110,62 @@ public class AppServiceImplTest {
         return Clock.fixed(Instant.parse("2026-06-29T02:00:00Z"), ZoneOffset.UTC);
     }
 
+    private Map<String, Object> modelConfig(String modelId) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("temperature", 0.14);
+        Map<String, Object> model = new LinkedHashMap<>();
+        model.put("provider", "local");
+        model.put("model", modelId);
+        model.put("modelId", modelId);
+        model.put("modelType", modelId.contains("rerank") ? "rerank" : "llm");
+        model.put("displayName", modelId);
+        model.put("config", config);
+        return model;
+    }
+
+    private Map<String, Object> knowledgeConfig(String knowledgeId) {
+        Map<String, Object> knowledge = new LinkedHashMap<>();
+        knowledge.put("id", knowledgeId);
+        knowledge.put("name", knowledgeId);
+        knowledge.put("category", 0);
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("maxHistory", 0);
+        params.put("threshold", 0.4);
+        params.put("topK", 5);
+        params.put("matchType", "mix");
+        params.put("priorityMatch", 1);
+        params.put("semanticsPriority", 0.2);
+        params.put("keywordPriority", 0.8);
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("knowledgebases", Collections.singletonList(knowledge));
+        config.put("config", params);
+        return config;
+    }
+
+    private Map<String, Object> safetyConfig(String tableId) {
+        Map<String, Object> table = new LinkedHashMap<>();
+        table.put("tableId", tableId);
+        table.put("tableName", tableId);
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("enable", true);
+        config.put("tables", Collections.singletonList(table));
+        return config;
+    }
+
+    private Map<String, Object> visionConfig(int picNum) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("picNum", picNum);
+        return config;
+    }
+
     private static class InMemoryApplicationRepository implements ApplicationRepository {
 
         private final AtomicLong ids = new AtomicLong();
         private final List<AppRecord> records = new ArrayList<>();
         private final List<AssistantDraftConfigRecord> configs = new ArrayList<>();
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
+        private final List<RagDraftConfigRecord> ragConfigs = new ArrayList<>();
+        private final List<RagSnapshotRecord> ragSnapshots = new ArrayList<>();
         private final List<AppUrlRecord> appUrls = new ArrayList<>();
         private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
@@ -1267,6 +1411,216 @@ public class AppServiceImplTest {
             existing.setAvatarPath(record.getAvatarPath());
             existing.setCategory(record.getCategory());
             saveAssistantConfig(config);
+            return true;
+        }
+
+        @Override
+        public AppRecord saveRag(AppRecord record) {
+            record.setId(ids.incrementAndGet());
+            records.add(record);
+            RagDraftConfigRecord config = new RagDraftConfigRecord();
+            config.setCreatedAt(record.getCreatedAt());
+            config.setUpdatedAt(record.getUpdatedAt());
+            config.setUserId(record.getUserId());
+            config.setOrgId(record.getOrgId());
+            config.setRagId(record.getAppId());
+            ragConfigs.add(config);
+            return record;
+        }
+
+        @Override
+        public AppRecord updateRag(AppRecord record) {
+            AppRecord existing = findRag(record.getUserId(), record.getOrgId(), record.getAppId());
+            if (existing == null) {
+                return null;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDesc(record.getDesc());
+            existing.setAvatarKey(record.getAvatarKey());
+            existing.setAvatarPath(record.getAvatarPath());
+            existing.setCategory(record.getCategory());
+            return existing;
+        }
+
+        @Override
+        public List<AppRecord> listRags(String userId, String orgId, String name) {
+            List<AppRecord> matches = new ArrayList<>();
+            for (AppRecord record : records) {
+                if (!userId.equals(record.getUserId())
+                        || !orgId.equals(record.getOrgId())
+                        || !"rag".equals(record.getAppType())) {
+                    continue;
+                }
+                if (name != null && !name.isEmpty() && !record.getName().contains(name)) {
+                    continue;
+                }
+                matches.add(record);
+            }
+            matches.sort(Comparator.comparing(AppRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public AppRecord findRag(String userId, String orgId, String ragId) {
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && ragId.equals(record.getAppId())
+                        && "rag".equals(record.getAppType())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean deleteRag(String userId, String orgId, String ragId) {
+            AppRecord existing = findRag(userId, orgId, ragId);
+            if (existing == null) {
+                return false;
+            }
+            records.remove(existing);
+            RagDraftConfigRecord config = findRagConfig(userId, orgId, ragId);
+            if (config != null) {
+                ragConfigs.remove(config);
+            }
+            List<RagSnapshotRecord> removed = new ArrayList<>();
+            for (RagSnapshotRecord snapshot : ragSnapshots) {
+                if (ragId.equals(snapshot.getRagId())) {
+                    removed.add(snapshot);
+                }
+            }
+            ragSnapshots.removeAll(removed);
+            return true;
+        }
+
+        @Override
+        public List<String> listRagNamesByPrefix(String userId, String orgId, String prefix) {
+            List<String> names = new ArrayList<>();
+            for (AppRecord record : records) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && "rag".equals(record.getAppType())
+                        && record.getName() != null
+                        && record.getName().startsWith(prefix)) {
+                    names.add(record.getName());
+                }
+            }
+            return names;
+        }
+
+        @Override
+        public AppRecord copyRag(AppRecord record, RagDraftConfigRecord config) {
+            record.setId(ids.incrementAndGet());
+            records.add(record);
+            if (config != null) {
+                ragConfigs.add(config);
+            }
+            return record;
+        }
+
+        @Override
+        public RagDraftConfigRecord saveRagConfig(RagDraftConfigRecord record) {
+            RagDraftConfigRecord existing = findRagConfig(record.getUserId(), record.getOrgId(), record.getRagId());
+            if (existing != null) {
+                ragConfigs.remove(existing);
+            }
+            ragConfigs.add(record);
+            AppRecord app = findRag(record.getUserId(), record.getOrgId(), record.getRagId());
+            if (app != null) {
+                app.setUpdatedAt(record.getUpdatedAt());
+            }
+            return record;
+        }
+
+        @Override
+        public RagDraftConfigRecord findRagConfig(String userId, String orgId, String ragId) {
+            for (RagDraftConfigRecord config : ragConfigs) {
+                if (userId.equals(config.getUserId())
+                        && orgId.equals(config.getOrgId())
+                        && ragId.equals(config.getRagId())) {
+                    return config;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public RagSnapshotRecord saveRagSnapshot(RagSnapshotRecord snapshot) {
+            snapshot.setId(ids.incrementAndGet());
+            ragSnapshots.add(snapshot);
+            return snapshot;
+        }
+
+        @Override
+        public List<RagSnapshotRecord> listRagSnapshots(String userId, String orgId, String ragId) {
+            List<RagSnapshotRecord> matches = new ArrayList<>();
+            for (RagSnapshotRecord snapshot : ragSnapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && ragId.equals(snapshot.getRagId())) {
+                    matches.add(snapshot);
+                }
+            }
+            matches.sort(Comparator.comparing(RagSnapshotRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public RagSnapshotRecord findLatestRagSnapshot(String userId, String orgId, String ragId) {
+            List<RagSnapshotRecord> matches = listRagSnapshots(userId, orgId, ragId);
+            return matches.isEmpty() ? null : matches.get(0);
+        }
+
+        @Override
+        public RagSnapshotRecord findRagSnapshotByVersion(String userId, String orgId, String ragId, String version) {
+            for (RagSnapshotRecord snapshot : ragSnapshots) {
+                if (userId.equals(snapshot.getUserId())
+                        && orgId.equals(snapshot.getOrgId())
+                        && ragId.equals(snapshot.getRagId())
+                        && version.equals(snapshot.getVersion())) {
+                    return snapshot;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean updateLatestRagSnapshot(String userId, String orgId, String ragId, String desc, long updatedAt) {
+            RagSnapshotRecord latest = findLatestRagSnapshot(userId, orgId, ragId);
+            if (latest == null) {
+                return false;
+            }
+            latest.setDesc(desc);
+            latest.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean updateRagPublishType(String userId, String orgId, String ragId, String publishType, long updatedAt) {
+            AppRecord existing = findRag(userId, orgId, ragId);
+            if (existing == null) {
+                return false;
+            }
+            existing.setPublishType(publishType);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean rollbackRag(AppRecord record, RagDraftConfigRecord config) {
+            AppRecord existing = findRag(record.getUserId(), record.getOrgId(), record.getAppId());
+            if (existing == null) {
+                return false;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+            existing.setName(record.getName());
+            existing.setDesc(record.getDesc());
+            existing.setAvatarKey(record.getAvatarKey());
+            existing.setAvatarPath(record.getAvatarPath());
+            existing.setCategory(record.getCategory());
+            saveRagConfig(config);
             return true;
         }
 

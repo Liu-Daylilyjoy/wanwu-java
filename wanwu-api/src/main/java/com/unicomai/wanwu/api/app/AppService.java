@@ -43,6 +43,13 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateCommand;
+import com.unicomai.wanwu.api.app.dto.RagCreateResult;
+import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
+import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 
 import java.util.Map;
@@ -81,6 +88,20 @@ public interface AppService {
     Map<String, Object> getAssistantDraft(AssistantDetailQuery query);
 
     Map<String, Object> getPublishedAssistant(AssistantPublishedQuery query);
+
+    RagCreateResult createRag(RagCreateCommand command);
+
+    void updateRag(RagUpdateCommand command);
+
+    void updateRagConfig(RagConfigUpdateCommand command);
+
+    void deleteRag(RagDeleteCommand command);
+
+    RagCreateResult copyRag(RagCopyCommand command);
+
+    Map<String, Object> getRagDraft(RagDetailQuery query);
+
+    Map<String, Object> getPublishedRag(RagDetailQuery query);
 
     void addAssistantWorkflow(AssistantResourceCommand command);
 

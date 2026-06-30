@@ -77,6 +77,55 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                               @Param("orgId") String orgId,
                                               @Param("prefix") String prefix);
 
+    @Select({
+            "<script>",
+            "SELECT a.id, a.created_at, a.updated_at, a.user_id, a.org_id,",
+            "       a.app_id, a.app_type, a.publish_type,",
+            "       d.name, d.description AS `desc`, d.avatar_key, d.avatar_path, d.category",
+            "FROM apps a",
+            "JOIN rag_drafts d ON d.rag_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'rag'",
+            "<if test='name != null and name != \"\"'>",
+            "  AND d.name LIKE CONCAT('%', #{name}, '%')",
+            "</if>",
+            "ORDER BY a.id DESC",
+            "</script>"
+    })
+    List<AppRecord> selectRagRecords(@Param("userId") String userId,
+                                     @Param("orgId") String orgId,
+                                     @Param("name") String name);
+
+    @Select({
+            "SELECT a.id, a.created_at, a.updated_at, a.user_id, a.org_id,",
+            "       a.app_id, a.app_type, a.publish_type,",
+            "       d.name, d.description AS `desc`, d.avatar_key, d.avatar_path, d.category",
+            "FROM apps a",
+            "JOIN rag_drafts d ON d.rag_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'rag'",
+            "  AND a.app_id = #{ragId}",
+            "LIMIT 1"
+    })
+    AppRecord selectRagRecord(@Param("userId") String userId,
+                              @Param("orgId") String orgId,
+                              @Param("ragId") String ragId);
+
+    @Select({
+            "SELECT d.name",
+            "FROM apps a",
+            "JOIN rag_drafts d ON d.rag_id = a.app_id",
+            "WHERE a.user_id = #{userId}",
+            "  AND a.org_id = #{orgId}",
+            "  AND a.app_type = 'rag'",
+            "  AND d.name LIKE CONCAT(#{prefix}, '%')"
+    })
+    List<String> selectRagNamesByPrefix(@Param("userId") String userId,
+                                        @Param("orgId") String orgId,
+                                        @Param("prefix") String prefix);
+
     @Update({
             "UPDATE apps",
             "SET updated_at = #{updatedAt}",
@@ -104,6 +153,33 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                    @Param("publishType") String publishType,
                                    @Param("updatedAt") Long updatedAt);
 
+    @Update({
+            "UPDATE apps",
+            "SET updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'rag'",
+            "  AND app_id = #{ragId}"
+    })
+    int updateRagUpdatedAt(@Param("userId") String userId,
+                           @Param("orgId") String orgId,
+                           @Param("ragId") String ragId,
+                           @Param("updatedAt") Long updatedAt);
+
+    @Update({
+            "UPDATE apps",
+            "SET publish_type = #{publishType}, updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'rag'",
+            "  AND app_id = #{ragId}"
+    })
+    int updateRagPublishType(@Param("userId") String userId,
+                             @Param("orgId") String orgId,
+                             @Param("ragId") String ragId,
+                             @Param("publishType") String publishType,
+                             @Param("updatedAt") Long updatedAt);
+
     @Delete({
             "DELETE FROM apps",
             "WHERE user_id = #{userId}",
@@ -114,4 +190,15 @@ public interface AppMapper extends BaseMapper<AppEntity> {
     int deleteAssistantApp(@Param("userId") String userId,
                            @Param("orgId") String orgId,
                            @Param("assistantId") String assistantId);
+
+    @Delete({
+            "DELETE FROM apps",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = 'rag'",
+            "  AND app_id = #{ragId}"
+    })
+    int deleteRagApp(@Param("userId") String userId,
+                     @Param("orgId") String orgId,
+                     @Param("ragId") String ragId);
 }
