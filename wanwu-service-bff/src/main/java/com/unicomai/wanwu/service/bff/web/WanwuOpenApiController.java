@@ -74,6 +74,8 @@ public class WanwuOpenApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private KnowledgeService knowledgeService;
 
+    private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
+
     public WanwuOpenApiController() {
     }
 
@@ -82,9 +84,15 @@ public class WanwuOpenApiController {
     }
 
     public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService) {
+        this(appService, modelService, knowledgeService, new OpenApiChatflowSessionStore());
+    }
+
+    public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
+                                  OpenApiChatflowSessionStore chatflowSessionStore) {
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
+        this.chatflowSessionStore = chatflowSessionStore == null ? new OpenApiChatflowSessionStore() : chatflowSessionStore;
     }
 
     @PostMapping("/agent")
@@ -384,46 +392,60 @@ public class WanwuOpenApiController {
     public FrontendResponse<Map<String, Object>> createChatflowConversation(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        String id = "chatflow-conversation-" + compactId();
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("conversation_id", id);
-        data.put("conversationId", id);
-        data.put("uuid", text(request, "uuid"));
-        return FrontendResponse.ok(data);
+        OpenApiContext ctx = context(headers);
+        Map<String, Object> body = body(request);
+        return FrontendResponse.ok(chatflowSessionStore.create(
+                ctx.userId, ctx.orgId, text(body, "uuid"), text(body, "conversation_name")));
     }
 
     @DeleteMapping("/chatflow/conversation")
-    public FrontendResponse<Map<String, Object>> deleteChatflowConversation(@RequestHeader HttpHeaders headers) {
-        context(headers);
+    public FrontendResponse<Map<String, Object>> deleteChatflowConversation(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        OpenApiContext ctx = context(headers);
+        Map<String, Object> body = body(request);
+        chatflowSessionStore.delete(ctx.userId, ctx.orgId,
+                text(body, "uuid"),
+                firstText(body, "conversation_id", "conversationId"));
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     @PostMapping("/chatflow/conversation/list")
-    public FrontendResponse<Map<String, Object>> listChatflowConversations(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(listResult(Collections.emptyList()));
+    public FrontendResponse<Map<String, Object>> listChatflowConversations(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        OpenApiContext ctx = context(headers);
+        return FrontendResponse.ok(chatflowSessionStore.list(ctx.userId, ctx.orgId, text(body(request), "uuid")));
     }
 
     @PostMapping("/chatflow/conversation/message/list")
-    public FrontendResponse<Map<String, Object>> listChatflowMessages(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("data", Collections.emptyList());
-        data.put("has_more", false);
-        data.put("first_id", 0);
-        data.put("last_id", 0);
-        return FrontendResponse.ok(data);
+    public FrontendResponse<Map<String, Object>> listChatflowMessages(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        OpenApiContext ctx = context(headers);
+        Map<String, Object> body = body(request);
+        return FrontendResponse.ok(chatflowSessionStore.messages(
+                ctx.userId,
+                ctx.orgId,
+                text(body, "uuid"),
+                firstText(body, "conversation_id", "conversationId"),
+                intValue(body.get("limit"), 50)));
     }
 
     @PostMapping("/chatflow/chat")
     public ResponseEntity<String> chatflowChat(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        String query = text(request, "query");
-        String json = "{\"code\":0,\"message\":\"success\",\"response\":\"" + jsonEscape(query) + "\",\"finish\":1}";
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + json + "\n\n");
+        OpenApiContext ctx = context(headers);
+        Map<String, Object> body = body(request);
+        Map<String, Object> data = chatflowSessionStore.chat(
+                ctx.userId,
+                ctx.orgId,
+                text(body, "uuid"),
+                firstText(body, "conversation_id", "conversationId"),
+                text(body, "query"),
+                objectMap(body.get("parameters")));
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + toJson(data) + "\n\n");
     }
 
     @PostMapping("/chatflow/file/upload")

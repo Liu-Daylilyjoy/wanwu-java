@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.jayway.jsonpath.JsonPath;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
@@ -38,6 +39,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -51,7 +53,8 @@ public class WanwuOpenApiControllerTest {
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new WanwuOpenApiController(appService, modelService, knowledgeService))
+            .standaloneSetup(new WanwuOpenApiController(
+                    appService, modelService, knowledgeService, new OpenApiChatflowSessionStore()))
             .build();
 
     @Test
@@ -213,6 +216,59 @@ public class WanwuOpenApiControllerTest {
         assertEquals("organization", publishCaptor.getValue().getPublishType());
         assertEquals("dev-admin", publishCaptor.getValue().getUserId());
         assertEquals("default-org", publishCaptor.getValue().getOrgId());
+    }
+
+    @Test
+    public void chatflowOpenApiRoutesKeepLocalConversationState() throws Exception {
+        String createdBody = mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_name\":\"Policy chat\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversation_id").exists())
+                .andExpect(jsonPath("$.data.conversation_name").value("Policy chat"))
+                .andReturn().getResponse().getContentAsString();
+        String conversationId = JsonPath.read(createdBody, "$.data.conversation_id");
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_id\":\"" + conversationId + "\",\"query\":\"hello chatflow\",\"parameters\":{\"city\":\"Beijing\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("hello chatflow")))
+                .andExpect(content().string(containsString(conversationId)));
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation/message/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_id\":\"" + conversationId + "\",\"limit\":\"10\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.data[0].role").value("user"))
+                .andExpect(jsonPath("$.data.data[0].content").value("hello chatflow"))
+                .andExpect(jsonPath("$.data.data[1].role").value("assistant"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversations[0].conversation_id").value(conversationId))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(delete("/service/api/openapi/v1/chatflow/conversation")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_id\":\"" + conversationId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
     }
 
     @Test
