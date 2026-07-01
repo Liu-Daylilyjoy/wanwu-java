@@ -881,18 +881,78 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public Map<String, Object> getKnowledgeGraph(String userId, String orgId, Map<String, Object> request) {
+    public synchronized Map<String, Object> getKnowledgeGraph(String userId, String orgId, Map<String, Object> request) {
+        String knowledgeId = string(safe(request).get("knowledgeId"));
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        List<DocState> docs = docs(knowledgeId);
+
+        Map<String, Map<String, Object>> nodesByName = new LinkedHashMap<String, Map<String, Object>>();
+        List<Map<String, Object>> edges = new ArrayList<Map<String, Object>>();
+        Set<String> sourceIds = new LinkedHashSet<String>();
+        sourceIds.add(knowledge.knowledgeId);
+
+        String knowledgeNode = addGraphNode(nodesByName, "Knowledge: " + knowledge.name, "knowledge",
+                knowledge.description, knowledge.knowledgeId, 10 + docs.size(), 1.0D);
+        for (String tagId : tagIds(knowledgeId)) {
+            TagState tag = tags.get(tagId);
+            if (tag == null) {
+                continue;
+            }
+            sourceIds.add(tag.tagId);
+            String tagNode = addGraphNode(nodesByName, "Tag: " + tag.tagName, "tag",
+                    "Knowledge tag", tag.tagId, 2, 0.35D);
+            edges.add(graphEdge(tagNode, knowledgeNode, "tags knowledge", 0.35D, tag.tagId));
+        }
+        for (KeywordState keyword : keywords.values()) {
+            if (!keyword.knowledgeBaseIds.contains(knowledgeId) || !matchesOwner(orgId, keyword)) {
+                continue;
+            }
+            sourceIds.add(String.valueOf(keyword.id));
+            String keywordNode = addGraphNode(nodesByName, "Keyword: " + keyword.name, "keyword",
+                    keyword.alias, String.valueOf(keyword.id), 2, 0.35D);
+            edges.add(graphEdge(keywordNode, knowledgeNode, "maps to knowledge", 0.35D, String.valueOf(keyword.id)));
+        }
+
+        for (DocState doc : docs) {
+            sourceIds.add(doc.docId);
+            String docNode = addGraphNode(nodesByName, "Document: " + doc.docName, "document",
+                    doc.docType, doc.docId, 5 + segments(doc.docId).size(), 0.75D);
+            edges.add(graphEdge(knowledgeNode, docNode, "contains document", 1.0D, doc.docId));
+            for (SegmentState segment : segments(doc.docId)) {
+                sourceIds.add(segment.contentId);
+                String segmentNode = addGraphNode(nodesByName, "Segment: " + graphTitle(segment.content),
+                        "segment", segment.content, segment.contentId, segment.available ? 3 : 1,
+                        segment.available ? 0.55D : 0.20D);
+                edges.add(graphEdge(docNode, segmentNode, "contains segment", 0.65D, segment.contentId));
+                for (String label : segment.labels) {
+                    if (isBlank(label)) {
+                        continue;
+                    }
+                    String labelNode = addGraphNode(nodesByName, "Label: " + label, "label",
+                            "Segment label", segment.contentId, 1, 0.25D);
+                    edges.add(graphEdge(labelNode, segmentNode, "labels segment", 0.25D, segment.contentId));
+                }
+                for (ChildSegmentState child : childSegments(segment)) {
+                    sourceIds.add(child.childId);
+                    String childNode = addGraphNode(nodesByName, "Child Segment: " + graphTitle(child.content),
+                            "child_segment", child.content, child.childId, 1, 0.20D);
+                    edges.add(graphEdge(segmentNode, childNode, "contains child segment", 0.40D, child.childId));
+                }
+            }
+        }
+
         Map<String, Object> graph = new LinkedHashMap<String, Object>();
         graph.put("directed", true);
         graph.put("multigraph", false);
-        graph.put("graph", singleton("source_id", Collections.emptyList()));
-        graph.put("nodes", Collections.emptyList());
-        graph.put("edges", Collections.emptyList());
+        graph.put("graph", singleton("source_id", new ArrayList<String>(sourceIds)));
+        graph.put("nodes", new ArrayList<Map<String, Object>>(nodesByName.values()));
+        graph.put("edges", edges);
+
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("processingCount", 0);
-        result.put("successCount", 0);
+        result.put("successCount", docs.size());
         result.put("failCount", 0);
-        result.put("total", 0);
+        result.put("total", docs.size());
         result.put("graph", graph);
         return result;
     }
@@ -2186,6 +2246,60 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         parent.childNum = parent.childSegments.size();
         return parent.childSegments;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String addGraphNode(Map<String, Map<String, Object>> nodesByName, String name, String type,
+                                String description, String sourceId, int rank, double pageRank) {
+        String entityName = defaultIfBlank(name, type);
+        Map<String, Object> node = nodesByName.get(entityName);
+        if (node == null) {
+            node = new LinkedHashMap<String, Object>();
+            node.put("entity_name", entityName);
+            node.put("entity_type", type);
+            node.put("description", defaultIfBlank(description, ""));
+            node.put("source_id", new ArrayList<String>());
+            node.put("rank", rank);
+            node.put("pagerank", pageRank);
+            nodesByName.put(entityName, node);
+        } else {
+            node.put("rank", Math.max(intValue(node.get("rank"), 0), rank));
+            node.put("pagerank", Math.max(doubleValue(node.get("pagerank"), 0D), pageRank));
+            if (isBlank(string(node.get("description"))) && !isBlank(description)) {
+                node.put("description", description);
+            }
+        }
+        if (!isBlank(sourceId)) {
+            List<String> sourceIds = (List<String>) node.get("source_id");
+            if (!sourceIds.contains(sourceId)) {
+                sourceIds.add(sourceId);
+            }
+        }
+        return entityName;
+    }
+
+    private Map<String, Object> graphEdge(String source, String target, String description,
+                                          double weight, String sourceId) {
+        Map<String, Object> edge = new LinkedHashMap<String, Object>();
+        edge.put("source_entity", source);
+        edge.put("target_entity", target);
+        edge.put("description", description);
+        edge.put("weight", weight);
+        edge.put("source_id", isBlank(sourceId)
+                ? Collections.<String>emptyList()
+                : Collections.singletonList(sourceId));
+        return edge;
+    }
+
+    private String graphTitle(String text) {
+        String normalized = defaultIfBlank(text, "empty").replace('\n', ' ').replace('\r', ' ').trim();
+        while (normalized.contains("  ")) {
+            normalized = normalized.replace("  ", " ");
+        }
+        if (normalized.length() <= 48) {
+            return normalized;
+        }
+        return normalized.substring(0, 48);
     }
 
     private List<QaPairState> qaPairs(String knowledgeId) {

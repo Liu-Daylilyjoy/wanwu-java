@@ -92,6 +92,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -1485,6 +1486,8 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(singleton("knowledgeSplitterList", Collections.singletonList(splitter("splitter-001", "paragraph", "\n\n", "preset"))));
         when(knowledgeService.listDocs(anyString(), anyString(), any(Map.class)))
                 .thenReturn(docPage("knowledge-001", "Dev KB"));
+        when(knowledgeService.getKnowledgeGraph(anyString(), anyString(), any(Map.class)))
+                .thenReturn(knowledgeGraph("knowledge-001", "Dev KB", "Guide.txt"));
         when(knowledgeService.getDocConfig(anyString(), anyString(), any(Map.class)))
                 .thenReturn(docConfig());
         when(knowledgeService.getDocImportTip(anyString(), anyString(), any(Map.class)))
@@ -1610,6 +1613,13 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list", hasSize(0)))
                 .andExpect(jsonPath("$.data.docKnowledgeInfo.knowledgeName").value("Dev KB"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/graph")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.graph.nodes[0].entity_name").value("Knowledge: Dev KB"))
+                .andExpect(jsonPath("$.data.graph.edges[0].source_entity").value("Knowledge: Dev KB"));
 
         mockMvc.perform(get("/user/api/v1/knowledge/doc/config")
                         .header("Authorization", "Bearer dev-token")
@@ -3273,6 +3283,46 @@ public class WanwuFrontendApiControllerTest {
         info.put("avatar", singleton("path", ""));
         page.put("docKnowledgeInfo", info);
         return page;
+    }
+
+    private Map<String, Object> knowledgeGraph(String knowledgeId, String knowledgeName, String docName) {
+        Map<String, Object> knowledgeNode = new LinkedHashMap<>();
+        knowledgeNode.put("entity_name", "Knowledge: " + knowledgeName);
+        knowledgeNode.put("entity_type", "knowledge");
+        knowledgeNode.put("description", "docs");
+        knowledgeNode.put("source_id", Collections.singletonList(knowledgeId));
+        knowledgeNode.put("rank", 10);
+        knowledgeNode.put("pagerank", 1.0D);
+
+        Map<String, Object> docNode = new LinkedHashMap<>();
+        docNode.put("entity_name", "Document: " + docName);
+        docNode.put("entity_type", "document");
+        docNode.put("description", "txt");
+        docNode.put("source_id", Collections.singletonList("doc-001"));
+        docNode.put("rank", 5);
+        docNode.put("pagerank", 0.75D);
+
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source_entity", "Knowledge: " + knowledgeName);
+        edge.put("target_entity", "Document: " + docName);
+        edge.put("description", "contains document");
+        edge.put("weight", 1.0D);
+        edge.put("source_id", Collections.singletonList("doc-001"));
+
+        Map<String, Object> graph = new LinkedHashMap<>();
+        graph.put("directed", true);
+        graph.put("multigraph", false);
+        graph.put("graph", singleton("source_id", Collections.singletonList(knowledgeId)));
+        graph.put("nodes", Arrays.asList(knowledgeNode, docNode));
+        graph.put("edges", Collections.singletonList(edge));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("processingCount", 0);
+        result.put("successCount", 1);
+        result.put("failCount", 0);
+        result.put("total", 1);
+        result.put("graph", graph);
+        return result;
     }
 
     private Map<String, Object> docConfig() {

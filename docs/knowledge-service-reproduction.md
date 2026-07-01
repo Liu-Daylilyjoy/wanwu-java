@@ -1,6 +1,6 @@
 # Knowledge Service Reproduction Notes
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Source Alignment
 
@@ -23,7 +23,7 @@ Date: 2026-06-30
   - QA pair create/list/update/switch/delete, import-tip, local CSV export record, and local text hit.
   - Community report list/add/update/delete, deterministic local generate, batch-add placeholder, and frontend status fields.
   - External API create/list/update/delete, external dataset selection, external knowledge create/update/delete, and external knowledge list integration.
-  - Graph compatibility shell plus QA/document export record list, delete, and local download compatibility.
+  - Local dynamic knowledge graph generation plus QA/document export record list, delete, and local download compatibility.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1/knowledge`.
 - Docker Compose `full` profile includes `knowledge` on ports `8083` and `20883`, and BFF now depends on it.
 
@@ -36,9 +36,11 @@ The Java knowledge service currently uses a Docker MySQL snapshot repository in 
 - Document pages include `list`, `total`, `pageNo`, `pageSize`, and `docKnowledgeInfo`.
 - Permission pages return `knowledgeUserInfoList`, `knowOrgInfoList`, and `userInfoList`.
 
-This is enough for the frontend to open the Knowledge module, create internal and external knowledge bases, bind tags, create and edit keyword mappings, view splitters, import local development document descriptors, see the document list, inspect and edit local segments and child segments, open permission-related panels, and manage community reports without backend 404s. Mutable knowledge, external API, external dataset mount state, tag, keyword, splitter, doc, segment, child segment, metadata, permission, QA-pair, and report state now survives Docker restarts. It is not the final Go-equivalent storage or indexing model.
+This is enough for the frontend to open the Knowledge module, create internal and external knowledge bases, bind tags, create and edit keyword mappings, view splitters, import local development document descriptors, see the document list, inspect and edit local segments and child segments, open the graph view, open permission-related panels, and manage community reports without backend 404s. Mutable knowledge, external API, external dataset mount state, tag, keyword, splitter, doc, segment, child segment, metadata, permission, QA-pair, and report state now survives Docker restarts. It is not the final Go-equivalent storage or indexing model.
 
 The document knowledge hit path now follows the Go BFF and proto response shape for `prompt`, `searchList`, `score`, and `useGraph`. It runs a deterministic local match over enabled imported document segments and their child segments, fills frontend card fields (`title`, `snippet`, `knowledgeName`, `contentType = text`, `childContentList`, `childScore`, `score`, and `rerankInfo`), honors `topK` and score/threshold inputs, and ignores disabled parent segments. This gives `/knowledge/hit` a real frontend-visible loop while the true RAG/vector/rerank integration remains a later replacement.
+
+The graph path now follows the Go `KnowledgeGraphResp` and schema contract from `response/knowledge.go`. `/knowledge/graph` derives nodes and edges from the local persisted state: knowledge base, bound tags, associated keywords, imported documents, parent segments, labels, and child segments. It returns the Go field names (`processingCount`, `successCount`, `failCount`, `total`, `graph.directed`, `graph.multigraph`, `graph.graph.source_id`, `nodes[].entity_name`, `nodes[].entity_type`, `edges[].source_entity`, and `edges[].target_entity`) so the unchanged frontend can render a non-empty graph. This is a deterministic local projection; the Go-equivalent LLM/RAG graph extraction pipeline and graph-based report generation are still pending.
 
 The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, export QA pairs into a persisted local CSV export record, and run a deterministic hit test over enabled finished pairs. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous import or retrieval engine.
 
@@ -55,5 +57,5 @@ The external knowledge path now follows the Go BFF contract from `knowledge_exte
 - Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
 - Real document upload byte handling, file parsing, automatic parent-child chunking, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and asynchronous callback status updates.
 - Real QA file import parsing, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
-- Real keyword extraction/sync into the RAG engine, graph generation, graph-derived report generation, CSV report import parsing, Dify external API validation/listing, and RAG query integration.
+- Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, CSV report import parsing, Dify external API validation/listing, and RAG query integration.
 - Callback status updates from asynchronous document processing.

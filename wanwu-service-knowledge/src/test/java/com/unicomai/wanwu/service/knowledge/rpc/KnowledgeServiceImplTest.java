@@ -437,6 +437,47 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeGraphReflectsLocalDocsSegmentsTagsAndKeywords() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Graph KB", 0)).get("knowledgeId");
+        String tagId = (String) service.createTag("dev-admin", "default-org", singleton("tagName", "GraphTag"))
+                .get("tagId");
+        service.bindTags("dev-admin", "default-org", bindTags(knowledgeId, tagId));
+        service.createKeyword("dev-admin", "default-org",
+                keywordCreate("Graph keyword", "Graph alias", knowledgeId));
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-graph", "GraphGuide.txt"));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-graph", "Graph segment explains Wanwu relationships.",
+                        Collections.singletonList("graph-label")));
+
+        Map<String, Object> parent = listOfMaps(service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-graph", "Graph segment")).get("contentList")).get(0);
+        service.createDocChildSegment("dev-admin", "default-org",
+                childCreate("doc-graph", (String) parent.get("contentId"), "Child graph fact"));
+
+        Map<String, Object> result = service.getKnowledgeGraph("dev-admin", "default-org",
+                singleton("knowledgeId", knowledgeId));
+        assertEquals(1, result.get("total"));
+        assertEquals(1, result.get("successCount"));
+
+        Map<String, Object> graph = map(result.get("graph"));
+        List<Map<String, Object>> nodes = listOfMaps(graph.get("nodes"));
+        List<Map<String, Object>> edges = listOfMaps(graph.get("edges"));
+        assertTrue(containsNode(nodes, "Knowledge: Graph KB", "knowledge"));
+        assertTrue(containsNode(nodes, "Document: GraphGuide.txt", "document"));
+        assertTrue(containsNode(nodes, "Tag: GraphTag", "tag"));
+        assertTrue(containsNode(nodes, "Keyword: Graph keyword", "keyword"));
+        assertTrue(containsNode(nodes, "Label: graph-label", "label"));
+        assertTrue(containsNode(nodes, "Child Segment: Child graph fact", "child_segment"));
+        assertTrue(containsEdge(edges, "Knowledge: Graph KB", "Document: GraphGuide.txt"));
+        assertTrue(containsEdge(edges, "Document: GraphGuide.txt",
+                "Segment: Graph segment explains Wanwu relationships."));
+        assertTrue(containsEdge(edges, "Segment: Graph segment explains Wanwu relationships.",
+                "Child Segment: Child graph fact"));
+        assertTrue(stringList(map(graph.get("graph")).get("source_id")).contains("doc-graph"));
+    }
+
+    @Test
     public void mutableKnowledgeStateIsPersistedAsSnapshotRecord() {
         KnowledgeRecordMapper mapper = mock(KnowledgeRecordMapper.class);
         KnowledgeServiceImpl persistent = new KnowledgeServiceImpl(mapper);
@@ -880,6 +921,24 @@ public class KnowledgeServiceImplTest {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> listOfMaps(Object value) {
         return (List<Map<String, Object>>) value;
+    }
+
+    private boolean containsNode(List<Map<String, Object>> nodes, String name, String type) {
+        for (Map<String, Object> node : nodes) {
+            if (name.equals(node.get("entity_name")) && type.equals(node.get("entity_type"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsEdge(List<Map<String, Object>> edges, String source, String target) {
+        for (Map<String, Object> edge : edges) {
+            if (source.equals(edge.get("source_entity")) && target.equals(edge.get("target_entity"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")
