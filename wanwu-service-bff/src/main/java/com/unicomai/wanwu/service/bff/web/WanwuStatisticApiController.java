@@ -12,6 +12,7 @@ import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -25,7 +26,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,6 +41,8 @@ import java.util.Map;
 @RequestMapping("/user/api/v1")
 public class WanwuStatisticApiController {
 
+    private static final DateTimeFormatter DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
@@ -47,12 +54,20 @@ public class WanwuStatisticApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
 
+    @Autowired(required = false)
+    private OpenApiUsageMeter usageMeter = new OpenApiUsageMeter();
+
     public WanwuStatisticApiController() {
     }
 
     public WanwuStatisticApiController(AppService appService, ModelService modelService) {
+        this(appService, modelService, new OpenApiUsageMeter());
+    }
+
+    public WanwuStatisticApiController(AppService appService, ModelService modelService, OpenApiUsageMeter usageMeter) {
         this.appService = appService;
         this.modelService = modelService;
+        this.usageMeter = usageMeter == null ? new OpenApiUsageMeter() : usageMeter;
     }
 
     @GetMapping("/statistic/app/select")
@@ -186,24 +201,39 @@ public class WanwuStatisticApiController {
     @GetMapping("/statistic/api/routes")
     public FrontendResponse<Map<String, Object>> apiRoutes() {
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        rows.add(route("POST", "/assistant/stream"));
-        rows.add(route("POST", "/rag/chat"));
-        rows.add(route("POST", "/workflow/run"));
-        rows.add(route("POST", "/chatflow/application/list"));
-        rows.add(route("GET", "/appspace/app"));
+        addRoute(rows, "POST", "/service/api/openapi/v1/agent/chat");
+        addRoute(rows, "POST", "/service/api/openapi/v1/rag/chat");
+        addRoute(rows, "POST", "/service/api/openapi/v1/workflow/run");
+        addRoute(rows, "POST", "/service/api/openapi/v1/chatflow/chat");
+        addRoute(rows, "POST", "/service/api/openapi/v1/knowledge/hit");
+        addRoute(rows, "GET", "/service/api/openapi/v1/model/list");
+        for (String methodPath : usageMeter.methodPaths()) {
+            int splitAt = methodPath.indexOf('-');
+            if (splitAt > 0 && splitAt + 1 < methodPath.length()) {
+                addRoute(rows, methodPath.substring(0, splitAt), methodPath.substring(splitAt + 1));
+            }
+        }
         return FrontendResponse.ok(page(rows, rows.size(), 1, rows.size()));
     }
 
     @PostMapping("/statistic/api")
     public FrontendResponse<Map<String, Object>> apiStatistic(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(request);
+        List<String> apiKeyIds = apiKeyIds(request);
+        List<String> methodPaths = methodPaths(request);
+        OpenApiUsageMeter.Aggregate current = usageMeter.total(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds, methodPaths);
+        OpenApiUsageMeter.Aggregate previous = usageMeter.total(
+                ctx.userId, ctx.orgId, range.previousStartDate, range.previousEndDate, apiKeyIds, methodPaths);
+        List<OpenApiUsageMeter.Record> records = usageMeter.records(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds, methodPaths);
         Map<String, Object> data = new LinkedHashMap<String, Object>();
-        data.put("overview", overview("callCount", "callFailure", "avgStreamCosts", "avgNonStreamCosts",
-                "streamCount", "nonStreamCount"));
+        data.put("overview", apiOverview(current, previous));
         Map<String, Object> trend = new LinkedHashMap<String, Object>();
-        trend.put("apiCalls", chart("API Calls",
-                dates(value(request, "startDate"), value(request, "endDate")),
-                "Total Calls", "Stream Calls", "Non-stream Calls"));
+        trend.put("apiCalls", apiCallChart(records, dates(value(request, "startDate"), value(request, "endDate"))));
         data.put("trend", trend);
         return FrontendResponse.ok(data);
     }
@@ -212,25 +242,50 @@ public class WanwuStatisticApiController {
     public FrontendResponse<Map<String, Object>> apiStatisticList(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(paged(apiRows(authorization, request), pageNo(request), pageSize(request)));
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(request);
+        Map<String, ApiKeyInfo> apiKeyMap = apiKeyMap(authorization);
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (OpenApiUsageMeter.Aggregate item : usageMeter.aggregates(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
+            Map<String, Object> row = metricRow();
+            ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+            row.put("name", apiKeyName(info, item.getApiKeyId()));
+            row.put("apiKey", apiKeyValue(info));
+            row.put("methodPath", item.getMethodPath());
+            row.put("callCount", item.getCallCount());
+            row.put("callFailure", item.getCallFailure());
+            row.put("failureRate", item.failureRate());
+            row.put("avgStreamCosts", item.avgStreamCosts());
+            row.put("avgNonStreamCosts", item.avgNonStreamCosts());
+            row.put("streamCount", item.getStreamCount());
+            row.put("nonStreamCount", item.getNonStreamCount());
+            rows.add(row);
+        }
+        return FrontendResponse.ok(paged(rows, pageNo(request), pageSize(request)));
     }
 
     @PostMapping("/statistic/api/record")
     public FrontendResponse<Map<String, Object>> apiStatisticRecord(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(request);
+        Map<String, ApiKeyInfo> apiKeyMap = apiKeyMap(authorization);
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> item : apiRows(authorization, request)) {
+        for (OpenApiUsageMeter.Record item : usageMeter.records(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
+            ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
             Map<String, Object> row = new LinkedHashMap<String, Object>();
-            row.put("name", item.get("name"));
-            row.put("apiKey", item.get("apiKey"));
-            row.put("methodPath", item.get("methodPath"));
-            row.put("callTime", defaultIfBlank(value(request, "endDate"), LocalDate.now().toString()) + " 00:00:00");
-            row.put("responseStatus", "success");
-            row.put("streamCosts", 0);
-            row.put("nonStreamCosts", 0);
-            row.put("requestBody", "");
-            row.put("responseBody", "");
+            row.put("name", apiKeyName(info, item.getApiKeyId()));
+            row.put("apiKey", apiKeyValue(info));
+            row.put("methodPath", item.getMethodPath());
+            row.put("callTime", formatTime(item.getCallTime()));
+            row.put("responseStatus", item.getResponseStatus());
+            row.put("streamCosts", item.getStreamCosts());
+            row.put("nonStreamCosts", item.getNonStreamCosts());
+            row.put("requestBody", item.getRequestBody());
+            row.put("responseBody", item.getResponseBody());
             rows.add(row);
         }
         return FrontendResponse.ok(paged(rows, pageNo(request), pageSize(request)));
@@ -291,6 +346,128 @@ public class WanwuStatisticApiController {
             }
         }
         return rows;
+    }
+
+    private void addRoute(List<Map<String, Object>> rows, String method, String path) {
+        String routeKey = method + "-" + path;
+        for (Map<String, Object> row : rows) {
+            if (routeKey.equals(row.get("method") + "-" + row.get("path"))) {
+                return;
+            }
+        }
+        rows.add(route(method, path));
+    }
+
+    private Map<String, Object> apiOverview(OpenApiUsageMeter.Aggregate current,
+                                            OpenApiUsageMeter.Aggregate previous) {
+        Map<String, Object> overview = new LinkedHashMap<String, Object>();
+        overview.put("callCount", overviewItem(current.getCallCount(), previous.getCallCount()));
+        overview.put("callFailure", overviewItem(current.getCallFailure(), previous.getCallFailure()));
+        overview.put("avgStreamCosts", overviewItem(current.avgStreamCosts(), previous.avgStreamCosts()));
+        overview.put("avgNonStreamCosts", overviewItem(current.avgNonStreamCosts(), previous.avgNonStreamCosts()));
+        overview.put("streamCount", overviewItem(current.getStreamCount(), previous.getStreamCount()));
+        overview.put("nonStreamCount", overviewItem(current.getNonStreamCount(), previous.getNonStreamCount()));
+        return overview;
+    }
+
+    private Map<String, Object> overviewItem(double current, double previous) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("value", current);
+        item.put("periodOverPeriod", previous == 0D ? -9999 : ((current - previous) / previous) * 100D);
+        return item;
+    }
+
+    private Map<String, Object> apiCallChart(List<OpenApiUsageMeter.Record> records, List<String> days) {
+        Map<String, int[]> counters = new LinkedHashMap<String, int[]>();
+        for (String day : days) {
+            counters.put(day, new int[]{0, 0, 0});
+        }
+        for (OpenApiUsageMeter.Record record : records) {
+            String day = record.getDate().toString();
+            int[] row = counters.get(day);
+            if (row == null) {
+                continue;
+            }
+            row[0]++;
+            if ("200".equals(record.getResponseStatus())) {
+                row[1]++;
+            } else {
+                row[2]++;
+            }
+        }
+        Map<String, Object> chart = new LinkedHashMap<String, Object>();
+        chart.put("tableName", "app_statistic_api_key_call_trend");
+        List<Map<String, Object>> lines = new ArrayList<Map<String, Object>>();
+        lines.add(apiCallLine("app_statistic_api_call_count_total", days, counters, 0));
+        lines.add(apiCallLine("app_statistic_api_call_success", days, counters, 1));
+        lines.add(apiCallLine("app_statistic_api_call_failure", days, counters, 2));
+        chart.put("lines", lines);
+        return chart;
+    }
+
+    private Map<String, Object> apiCallLine(String lineName, List<String> days, Map<String, int[]> counters, int index) {
+        Map<String, Object> line = new LinkedHashMap<String, Object>();
+        line.put("lineName", lineName);
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (String day : days) {
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("key", day);
+            int[] row = counters.get(day);
+            item.put("value", row == null ? 0 : row[index]);
+            items.add(item);
+        }
+        line.put("items", items);
+        return line;
+    }
+
+    private List<String> apiKeyIds(Map<String, Object> request) {
+        List<String> keys = splitList(request == null ? null : request.get("apiKeyIds"));
+        if (keys.contains("ALL")) {
+            return Collections.emptyList();
+        }
+        return keys;
+    }
+
+    private List<String> methodPaths(Map<String, Object> request) {
+        return splitList(request == null ? null : request.get("methodPaths"));
+    }
+
+    private DateRange dateRange(Map<String, Object> request) {
+        LocalDate end = parseDate(value(request, "endDate"), LocalDate.now());
+        LocalDate start = parseDate(value(request, "startDate"), end.minusDays(6));
+        if (start.isAfter(end)) {
+            start = end;
+        }
+        long days = ChronoUnit.DAYS.between(start, end) + 1;
+        LocalDate previousEnd = start.minusDays(1);
+        LocalDate previousStart = previousEnd.minusDays(Math.max(0L, days - 1));
+        return new DateRange(start, end, previousStart, previousEnd);
+    }
+
+    private Map<String, ApiKeyInfo> apiKeyMap(String authorization) {
+        Map<String, ApiKeyInfo> result = new LinkedHashMap<String, ApiKeyInfo>();
+        for (ApiKeyInfo item : safeApiKeys(listApiKeys(authorization).getList())) {
+            result.put(item.getKeyId(), item);
+        }
+        return result;
+    }
+
+    private String apiKeyName(ApiKeyInfo info, String apiKeyId) {
+        if (info == null) {
+            return "Deleted API Key";
+        }
+        return defaultIfBlank(info.getName(), apiKeyId);
+    }
+
+    private String apiKeyValue(ApiKeyInfo info) {
+        return info == null ? "Deleted API Key" : defaultIfBlank(info.getKey(), "");
+    }
+
+    private String formatTime(long epochMillis) {
+        return Instant.ofEpochMilli(epochMillis)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDateTime()
+                .format(DATE_TIME_FORMATTER);
     }
 
     private Map<String, Object> overview(String... keys) {
@@ -487,6 +664,21 @@ public class WanwuStatisticApiController {
         private UserContext(String userId, String orgId) {
             this.userId = userId;
             this.orgId = orgId;
+        }
+    }
+
+    private static class DateRange {
+        private final LocalDate startDate;
+        private final LocalDate endDate;
+        private final LocalDate previousStartDate;
+        private final LocalDate previousEndDate;
+
+        private DateRange(LocalDate startDate, LocalDate endDate,
+                          LocalDate previousStartDate, LocalDate previousEndDate) {
+            this.startDate = startDate;
+            this.endDate = endDate;
+            this.previousStartDate = previousStartDate;
+            this.previousEndDate = previousEndDate;
         }
     }
 }

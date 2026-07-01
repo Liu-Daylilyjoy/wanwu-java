@@ -376,26 +376,25 @@ public class WanwuFrontendApiControllerTest {
         mockMvc.perform(get("/user/api/v1/statistic/api/routes"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].method").value("POST"))
-                .andExpect(jsonPath("$.data.list[0].path").value("/assistant/stream"));
+                .andExpect(jsonPath("$.data.list[0].path").value("/service/api/openapi/v1/agent/chat"));
         mockMvc.perform(post("/user/api/v1/statistic/api")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"startDate\":\"2026-06-01\",\"endDate\":\"2026-06-02\",\"apiKeyIds\":[\"ALL\"],\"methodPaths\":[\"POST-/assistant/stream\"]}"))
+                        .content("{\"startDate\":\"2026-06-01\",\"endDate\":\"2026-06-02\",\"apiKeyIds\":[\"ALL\"],\"methodPaths\":[\"POST-/service/api/openapi/v1/agent/chat\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.overview.callCount.value").value(0))
                 .andExpect(jsonPath("$.data.trend.apiCalls.lines[0].items[0].key").value("2026-06-01"));
         mockMvc.perform(post("/user/api/v1/statistic/api/list")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/assistant/stream\"],\"pageNo\":1,\"pageSize\":10}"))
+                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/service/api/openapi/v1/agent/chat\"],\"pageNo\":1,\"pageSize\":10}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[0].name").value("Main key"))
-                .andExpect(jsonPath("$.data.list[0].methodPath").value("POST-/assistant/stream"));
+                .andExpect(jsonPath("$.data.total").value(0));
         mockMvc.perform(post("/user/api/v1/statistic/api/record")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/assistant/stream\"],\"pageNo\":1,\"pageSize\":10}"))
+                        .content("{\"apiKeyIds\":[\"key-001\"],\"methodPaths\":[\"POST-/service/api/openapi/v1/agent/chat\"],\"pageNo\":1,\"pageSize\":10}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[0].responseStatus").value("success"));
+                .andExpect(jsonPath("$.data.total").value(0));
 
         mockMvc.perform(get("/user/api/v1/statistic/app/export"))
                 .andExpect(status().isOk())

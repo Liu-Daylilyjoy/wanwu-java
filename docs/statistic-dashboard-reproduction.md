@@ -30,7 +30,8 @@ Covered routes in this Java slice:
 - App select/list data is sourced from `AppService.listApplications`.
 - Model list data is sourced from `ModelService.listModels`.
 - API Key select/list data is sourced from `AppService.listApiKeys`.
-- Overview and trend metrics are zero-valued development data with the same field names the Vue dashboard reads.
+- API Key overview, trend, aggregate list, and detailed records now read BFF-local OpenAPI runtime calls from `OpenApiUsageMeter`.
+- App/model overview and trend metrics remain zero-valued development data with the same field names the Vue dashboard reads.
 - Export routes return CSV bytes so export buttons no longer hit 404. They are intentionally not a full Excel reproduction yet.
 
 The admin development account now exposes:
@@ -53,10 +54,11 @@ The controller is also included in the Docker Compose BFF smoke path for:
 - Login permissions include `app_observability.statistic`.
 - `/statistic/app`, `/statistic/model`, and `/statistic/api` return overview/trend contracts.
 - App/model/API lists return frontend-compatible `list/total/pageNo/pageSize`.
+- OpenAPI API Key statistics record runtime calls through `OpenApiUsageRecordFilter`; see `docs/openapi-api-key-statistics-reproduction.md`.
 
 ## Remaining Work
 
-- Persist and aggregate real model/app/API usage records.
+- Persist and aggregate real model/app/API usage records in AppService-compatible storage.
 - Reproduce the Go cron/statistics synchronization path.
 - Replace CSV compatibility exports with true Excel exports.
-- Connect statistics to OpenAPI/runtime invocation paths instead of deterministic zero data.
+- Downstream API Key statistics from BFF-local memory into the Go-equivalent Redis/MySQL aggregation model.
