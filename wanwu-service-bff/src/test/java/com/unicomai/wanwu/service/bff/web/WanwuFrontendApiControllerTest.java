@@ -2556,6 +2556,17 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(actionList("get_weather"));
         when(appService.getAssistantToolActionDetail(any(AssistantResourceCommand.class)))
                 .thenReturn(actionDetail("get_weather"));
+        when(mcpService.listToolSelect(anyString(), anyString(), anyString()))
+                .thenReturn(null)
+                .thenReturn(listResult(toolSelect("builtin-weather", "Weather Tool", "builtin")));
+        when(mcpService.listToolActions(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(null)
+                .thenReturn(actionList("get_weather"));
+        when(mcpService.getToolActionDetail(anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(null)
+                .thenReturn(actionDetail("get_weather"));
+        when(mcpService.getToolSquare(anyString(), anyString(), anyString()))
+                .thenReturn(toolSquareDetail("builtin-weather", "Weather Tool"));
         when(appService.listAssistantMcpSelect(anyString(), anyString()))
                 .thenReturn(listResult(mcpSelect("mcp-001", "Search MCP", "mcp")));
         when(appService.listAssistantMcpActions(any(AssistantResourceCommand.class)))
@@ -2585,6 +2596,28 @@ public class WanwuFrontendApiControllerTest {
                         .param("actionName", "get_weather"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.action.name").value("get_weather"));
+        mockMvc.perform(get("/user/api/v1/workflow/tool/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolType", "builtin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolId").value("builtin-weather"))
+                .andExpect(jsonPath("$.data.list[0].actions[0].actionName").value("get_weather"));
+        mockMvc.perform(get("/user/api/v1/workflow/tool/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("toolId", "builtin-weather")
+                        .param("toolType", "builtin")
+                        .param("actionName", "get_weather"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actionId").value("get_weather"))
+                .andExpect(jsonPath("$.data.inputs[0].name").value("query"));
+        mockMvc.perform(get("/user/api/v1/workflow/tool/box")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("box_id", "builtin-weather")
+                        .param("box_type", "builtin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.box_id").value("builtin-weather"))
+                .andExpect(jsonPath("$.data.tools[0].tool_id").value("get_weather"))
+                .andExpect(jsonPath("$.data.tools[0].metadata.api_spec.request_body.type").value("object"));
         mockMvc.perform(get("/user/api/v1/mcp/select")
                         .header("Authorization", "Bearer dev-token"))
                 .andExpect(status().isOk())
@@ -3790,11 +3823,31 @@ public class WanwuFrontendApiControllerTest {
         return result;
     }
 
+    private Map<String, Object> toolSquareDetail(String toolId, String name) {
+        Map<String, Object> result = toolSelect(toolId, name, "builtin");
+        result.put("toolSquareId", toolId);
+        result.put("name", name);
+        result.put("tools", Collections.singletonList(action("get_weather")));
+        result.put("apiAuth", Collections.emptyMap());
+        return result;
+    }
+
     private Map<String, Object> action(String actionName) {
+        Map<String, Object> query = new LinkedHashMap<>();
+        query.put("type", "string");
+        query.put("description", "Input text");
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("query", query);
+        Map<String, Object> inputSchema = new LinkedHashMap<>();
+        inputSchema.put("type", "object");
+        inputSchema.put("properties", properties);
+        inputSchema.put("required", Collections.singletonList("query"));
         Map<String, Object> action = new LinkedHashMap<>();
         action.put("name", actionName);
         action.put("description", "Development action");
-        action.put("inputSchema", Collections.singletonMap("type", "object"));
+        action.put("inputSchema", inputSchema);
+        action.put("method", "POST");
+        action.put("path", "/" + actionName);
         return action;
     }
 

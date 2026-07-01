@@ -1,6 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
@@ -1121,13 +1122,45 @@ public class WanwuFrontendApiController {
                 new ModelTypeQuery(modelType, userContext.getUserId(), userContext.getOrgId())));
     }
 
-    @GetMapping({
-            "/workflow/tool/select",
-            "/workflow/tool/action",
-            "/workflow/tool/box"
-    })
-    public FrontendResponse<Map<String, Object>> workflowToolShell() {
-        return FrontendResponse.ok(emptyListResult());
+    @GetMapping("/workflow/tool/select")
+    public FrontendResponse<Map<String, Object>> selectWorkflowTools(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "toolType", required = false) String toolType,
+            @RequestParam(value = "name", required = false) String name) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(workflowToolSelect(
+                    userContext, defaultIfBlank(toolType, ""), defaultIfBlank(name, "")));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/workflow/tool/action")
+    public FrontendResponse<Map<String, Object>> getWorkflowToolAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            String toolId = firstText(request, "toolId", "tool_id", "box_id");
+            String toolType = defaultIfBlank(firstText(request, "toolType", "tool_type", "box_type"), "builtin");
+            String actionName = firstText(request, "actionName", "actionId", "operationId", "tool_id");
+            return FrontendResponse.ok(workflowToolAction(userContext, toolId, toolType, actionName));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/workflow/tool/box")
+    public FrontendResponse<Map<String, Object>> getWorkflowToolBox(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam Map<String, String> request) {
+        try {
+            UserContext userContext = userContext(authorization);
+            return FrontendResponse.ok(workflowToolBox(userContext, request));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/workflow/run")
@@ -2602,6 +2635,339 @@ public class WanwuFrontendApiController {
             }
         }
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+            return result;
+        }
+        return new LinkedHashMap<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> mapList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!(value instanceof List)) {
+            return result;
+        }
+        for (Object item : (List<Object>) value) {
+            if (item instanceof Map) {
+                result.add(mapValue(item));
+            }
+        }
+        return result;
+    }
+
+    private String firstText(Map<?, ?> source, String... keys) {
+        if (source == null) {
+            return "";
+        }
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value != null && !isBlank(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return "";
+    }
+
+    private Map<String, Object> workflowToolSelect(UserContext userContext, String toolType, String name) {
+        if (!isBlank(toolType) && !"builtin".equals(toolType) && !"custom".equals(toolType)) {
+            throw new IllegalArgumentException("unsupported tool type");
+        }
+        Map<String, Object> source = null;
+        if (mcpService != null) {
+            source = mcpService.listToolSelect(userContext.getUserId(), userContext.getOrgId(), name);
+        }
+        if (source == null || source.isEmpty()) {
+            source = appService.listAssistantToolSelect(userContext.getUserId(), userContext.getOrgId());
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> item : mapList(source.get("list"))) {
+            String currentType = defaultIfBlank(firstText(item, "toolType", "type"), "builtin");
+            if (!isBlank(toolType) && !toolType.equals(currentType)) {
+                continue;
+            }
+            String toolId = firstText(item, "toolId", "toolSquareId", "customToolId");
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("toolId", toolId);
+            row.put("toolName", firstText(item, "toolName", "name"));
+            row.put("toolType", currentType);
+            row.put("iconUrl", workflowIconUrl(item));
+            row.put("apiKey", firstText(item, "apiKey"));
+            row.put("desc", firstText(item, "desc", "description"));
+            row.put("actions", workflowToolActions(userContext, toolId, currentType));
+            list.add(row);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", list);
+        result.put("total", list.size());
+        return result;
+    }
+
+    private List<Map<String, Object>> workflowToolActions(UserContext userContext, String toolId, String toolType) {
+        Map<String, Object> source = null;
+        if (mcpService != null) {
+            source = mcpService.listToolActions(userContext.getUserId(), userContext.getOrgId(), toolId, toolType);
+        }
+        if (source == null || source.isEmpty()) {
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("toolId", toolId);
+            request.put("toolType", toolType);
+            source = appService.listAssistantToolActions(resourceCommand(
+                    userContext, request, "toolId", "toolType"));
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> action : mapList(source.get("actions"))) {
+            list.add(workflowActionSummary(action));
+        }
+        return list;
+    }
+
+    private Map<String, Object> workflowActionSummary(Map<String, Object> action) {
+        String name = firstText(action, "name", "actionName", "actionId", "operationId");
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("actionName", name);
+        row.put("actionId", name);
+        row.put("desc", firstText(action, "description", "desc", "summary"));
+        return row;
+    }
+
+    private Map<String, Object> workflowToolAction(
+            UserContext userContext, String toolId, String toolType, String actionName) {
+        Map<String, Object> source = null;
+        if (mcpService != null) {
+            source = mcpService.getToolActionDetail(
+                    userContext.getUserId(), userContext.getOrgId(), toolId, toolType, actionName);
+        }
+        if (source == null || source.isEmpty()) {
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("toolId", toolId);
+            request.put("toolType", toolType);
+            request.put("actionName", actionName);
+            source = appService.getAssistantToolActionDetail(
+                    resourceCommand(userContext, request, "toolId", "toolType"));
+        }
+        Map<String, Object> action = mapValue(source.get("action"));
+        if (action.isEmpty()) {
+            action.put("name", actionName);
+        }
+        String resolvedAction = defaultIfBlank(firstText(action, "name", "actionName", "actionId"), actionName);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("inputs", workflowParamsFromSchema(action.get("inputSchema")));
+        result.put("outputs", workflowParamsFromSchema(action.get("outputSchema")));
+        result.put("actionName", resolvedAction);
+        result.put("actionId", resolvedAction);
+        result.put("iconUrl", firstText(source, "iconUrl"));
+        return result;
+    }
+
+    private Map<String, Object> workflowToolBox(UserContext userContext, Map<String, String> request) {
+        String boxId = firstText(request, "box_id", "boxId", "toolId");
+        String boxType = defaultIfBlank(firstText(request, "box_type", "boxType", "toolType"), "builtin");
+        String toolId = firstText(request, "tool_id", "toolId", "actionName", "operationId");
+        int page = intParam(firstText(request, "page"), 1);
+        int pageSize = intParam(firstText(request, "page_size", "pageSize"), 100);
+        if (page <= 0) {
+            page = 1;
+        }
+        if (pageSize <= 0) {
+            pageSize = 100;
+        }
+
+        Map<String, Object> detail = new LinkedHashMap<>();
+        if (!isBlank(boxId) && mcpService != null) {
+            detail = "custom".equals(boxType)
+                    ? mcpService.getCustomTool(userContext.getUserId(), userContext.getOrgId(), boxId)
+                    : mcpService.getToolSquare(userContext.getUserId(), userContext.getOrgId(), boxId);
+            if (detail == null) {
+                detail = new LinkedHashMap<>();
+            }
+        }
+
+        List<Map<String, Object>> tools = workflowToolBoxItems(detail, toolId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", tools.size());
+        result.put("page", page);
+        result.put("page_size", pageSize);
+        result.put("total_pages", tools.isEmpty() ? 0 : 1);
+        result.put("has_next", false);
+        result.put("has_prev", false);
+        result.put("box_id", boxId);
+        result.put("api_key", firstText(detail, "apiKey"));
+        result.put("api_auth", mapValue(detail.get("apiAuth")));
+        result.put("tools", tools);
+        return result;
+    }
+
+    private List<Map<String, Object>> workflowToolBoxItems(Map<String, Object> detail, String selectedToolId) {
+        List<Map<String, Object>> actions = mapList(detail.get("tools"));
+        if (actions.isEmpty()) {
+            actions = mapList(detail.get("apiList"));
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Map<String, Object> action : actions) {
+            String actionName = firstText(action, "name", "actionName", "operationId");
+            if (!isBlank(selectedToolId) && !selectedToolId.equals(actionName)) {
+                continue;
+            }
+            list.add(workflowToolBoxItem(action, actionName));
+        }
+        return list;
+    }
+
+    private Map<String, Object> workflowToolBoxItem(Map<String, Object> action, String actionName) {
+        long fixedTime = 1767225600000000000L;
+        String description = firstText(action, "description", "desc", "summary");
+        String method = defaultIfBlank(firstText(action, "method"), "POST");
+        String path = defaultIfBlank(firstText(action, "path"), "/" + actionName);
+
+        Map<String, Object> apiSpec = new LinkedHashMap<>();
+        apiSpec.put("parameters", Collections.emptyList());
+        apiSpec.put("request_body", action.get("inputSchema"));
+        apiSpec.put("responses", Collections.emptyList());
+        apiSpec.put("components", Collections.emptyMap());
+        apiSpec.put("callbacks", Collections.emptyMap());
+        apiSpec.put("security", Collections.emptyList());
+        apiSpec.put("tags", Collections.emptyList());
+        apiSpec.put("external_docs", Collections.emptyMap());
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("version", "1.0.0");
+        metadata.put("summary", actionName);
+        metadata.put("description", description);
+        metadata.put("server_url", "");
+        metadata.put("path", path);
+        metadata.put("method", method);
+        metadata.put("create_time", fixedTime);
+        metadata.put("update_time", fixedTime);
+        metadata.put("create_user", "system");
+        metadata.put("update_user", "system");
+        metadata.put("api_spec", apiSpec);
+
+        Map<String, Object> globalParameters = new LinkedHashMap<>();
+        globalParameters.put("name", "");
+        globalParameters.put("description", "");
+        globalParameters.put("required", false);
+        globalParameters.put("in", "");
+        globalParameters.put("type", "");
+        globalParameters.put("value", null);
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("tool_id", actionName);
+        row.put("name", actionName);
+        row.put("description", description);
+        row.put("status", "enabled");
+        row.put("metadata_type", "openapi");
+        row.put("metadata", metadata);
+        row.put("use_rule", "");
+        row.put("global_parameters", globalParameters);
+        row.put("create_time", fixedTime);
+        row.put("update_time", fixedTime);
+        row.put("create_user", "system");
+        row.put("update_user", "system");
+        row.put("extend_info", Collections.emptyMap());
+        row.put("resource_object", "");
+        return row;
+    }
+
+    private String workflowIconUrl(Map<String, Object> item) {
+        String iconUrl = firstText(item, "iconUrl", "iconURL", "avatarUrl");
+        if (!isBlank(iconUrl)) {
+            return iconUrl;
+        }
+        Map<String, Object> avatar = mapValue(item.get("avatar"));
+        return firstText(avatar, "path", "url");
+    }
+
+    private List<Map<String, Object>> workflowParamsFromSchema(Object schemaObject) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (schemaObject == null) {
+            return result;
+        }
+        try {
+            JsonNode schema = JSON.valueToTree(schemaObject);
+            JsonNode properties = schema.path("properties");
+            if (!properties.isObject()) {
+                return result;
+            }
+            java.util.Iterator<Map.Entry<String, JsonNode>> fields = properties.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                result.add(workflowParam(field.getKey(), field.getValue(), schema.path("required")));
+            }
+        } catch (IllegalArgumentException ignored) {
+            result.clear();
+        }
+        return result;
+    }
+
+    private Map<String, Object> workflowParam(String name, JsonNode schema, JsonNode requiredList) {
+        String type = workflowSchemaType(schema);
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("input", Collections.emptyMap());
+        row.put("description", schema.path("description").asText(""));
+        row.put("name", name);
+        row.put("type", type);
+        row.put("required", containsText(requiredList, name));
+        if ("list".equals(type)) {
+            Map<String, Object> itemSchema = new LinkedHashMap<>();
+            JsonNode items = schema.path("items");
+            itemSchema.put("type", workflowSchemaType(items));
+            itemSchema.put("schema", workflowChildParams(items));
+            row.put("schema", itemSchema);
+        } else {
+            row.put("schema", workflowChildParams(schema));
+        }
+        return row;
+    }
+
+    private List<Map<String, Object>> workflowChildParams(JsonNode schema) {
+        List<Map<String, Object>> children = new ArrayList<>();
+        JsonNode properties = schema.path("properties");
+        if (!properties.isObject()) {
+            return children;
+        }
+        java.util.Iterator<Map.Entry<String, JsonNode>> fields = properties.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            children.add(workflowParam(field.getKey(), field.getValue(), schema.path("required")));
+        }
+        return children;
+    }
+
+    private boolean containsText(JsonNode list, String value) {
+        if (!list.isArray()) {
+            return false;
+        }
+        for (JsonNode item : list) {
+            if (value.equals(item.asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String workflowSchemaType(JsonNode schema) {
+        String type = schema.path("type").asText("string");
+        if ("array".equals(type)) {
+            return "list";
+        }
+        if ("number".equals(type)) {
+            return "float";
+        }
+        if ("integer".equals(type) || "boolean".equals(type) || "object".equals(type) || "string".equals(type)) {
+            return type;
+        }
+        return isBlank(type) ? "string" : type;
     }
 
     @SuppressWarnings("unchecked")

@@ -1,6 +1,6 @@
 # App and Assistant Service Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Covered Java Behavior
 
@@ -10,7 +10,7 @@ Date: 2026-06-30
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
 - RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell, and multipart upload response compatibility.
-- Workflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, local run shell, assistant workflow select from real created workflows, `/workflow/api/workflow/parameter`, `/workflow/api/api/workflow/use`, `/workflow/api/workflow/openapi_schema`, and `/api/bot/upload_file` avatar upload compatibility.
+- Workflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, local run shell, assistant workflow select from real created workflows, workflow tool select/action/tool-box compatibility backed by resource-center tools, `/workflow/api/workflow/parameter`, `/workflow/api/api/workflow/use`, `/workflow/api/workflow/openapi_schema`, and `/api/bot/upload_file` avatar upload compatibility.
 - Chatflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, and local chatflow application list/detail plus conversation-delete compatibility for `/appspace/chatflow/*` and `/chatflow/*` frontend calls.
 - Safety guard lifecycle: sensitive word table create/list/detail/update/reply/delete/select and sensitive word upload/list/delete through `wanwu-service-app` SafetyService.
 - Assistant extension bindings:
@@ -46,7 +46,7 @@ Workflow and Chatflow draft and snapshot state is stored in Workflow-specific ta
 - `workflow_drafts`
 - `workflow_snapshots`
 
-The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflow/*` for list, create, copy, import, export, and convert-shell compatibility. Chatflow uses the same storage tables with `apps.app_type=chatflow`, plus `/user/api/v1/appspace/chatflow/*`, `/user/api/v1/chatflow/application/list`, `/user/api/v1/chatflow/application/info`, and `/user/api/v1/chatflow/conversation/delete`. Generic app publish/version/delete endpoints now accept `appType=workflow` and `appType=chatflow`. The separate frontend Workflow API prefix `/workflow/api` is served by `WanwuWorkflowApiController`, and Docker nginx proxies `/workflow/api/` plus `/api/` to BFF so the zero-change Vue frontend no longer sees gateway-level 404s for Workflow schema/use/avatar-upload calls.
+The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflow/*` for list, create, copy, import, export, and convert-shell compatibility. It also maps `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box` to the Java MCP resource service, returning the Go workflow editor field shapes (`toolId/toolName/actions`, action inputs/outputs, and snake_case tool-box metadata). Chatflow uses the same storage tables with `apps.app_type=chatflow`, plus `/user/api/v1/appspace/chatflow/*`, `/user/api/v1/chatflow/application/list`, `/user/api/v1/chatflow/application/info`, and `/user/api/v1/chatflow/conversation/delete`. Generic app publish/version/delete endpoints now accept `appType=workflow` and `appType=chatflow`. The separate frontend Workflow API prefix `/workflow/api` is served by `WanwuWorkflowApiController`, and Docker nginx proxies `/workflow/api/` plus `/api/` to BFF so the zero-change Vue frontend no longer sees gateway-level 404s for Workflow schema/use/avatar-upload calls.
 
 ## Original Go Mapping
 

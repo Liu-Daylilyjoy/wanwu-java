@@ -1,12 +1,12 @@
 # Resource Service Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Original Go Mapping
 
 - Frontend callers: `web/src/api/mcp.js`, `web/src/api/templateSquare.js`, `web/src/api/promptTemplate.js`, `web/src/api/skill.js`, `web/src/api/skillSquare.js`, `web/src/views/tool`, `web/src/views/mcpManagementPublic`, and `web/src/components/createApp/createPrompt.vue`.
-- Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\tool.go`, `mcp_square.go`, `skill.go`, `skill_square.go`, and the prompt routes in `explore.go`.
-- Go request/response contracts: `internal\bff-service\model\request\tool.go`, `mcp.go`, `mcp_server.go`, `prompt.go`, `skill.go`, `skill_square.go`; responses in the matching `response` files.
+- Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\tool.go`, `workflow.go`, `mcp_square.go`, `skill.go`, `skill_square.go`, and the prompt routes in `explore.go`.
+- Go request/response contracts: `internal\bff-service\model\request\tool.go`, `tool_box.go`, `mcp.go`, `mcp_server.go`, `prompt.go`, `skill.go`, `skill_square.go`; responses in the matching `response` files, especially `workflow_tool.go` and `tool_box.go` for Workflow editor tool selection.
 
 ## Covered Java Behavior
 
@@ -28,6 +28,7 @@ Date: 2026-06-30
   - Skill square list/detail/share/download seed data and acquired Skill list/detail/delete.
   - Skill conversation create/list/detail/delete/clear/chat/save with deterministic local SSE responses.
 - `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, `/user/api/v1/prompt`, `/user/api/v1/agent/skill`, `/user/api/v1/agent/acquired/skill`, and `/user/api/v1/square/skill`.
+- `wanwu-service-bff` also exposes `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box`, adapting the same MCP Tool data into the Go Workflow editor response shapes.
 - Docker Compose `full` profile includes `mcp` on ports `8087` and `20887`, and BFF waits for it.
 
 ## Verification
@@ -42,7 +43,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 - Login as `admin` returned token `dev-token` and 18 implemented permissions, including `resource.tool`, `resource.mcp`, `resource.prompt`, and `resource.skill`.
 - Login as `app` returned token `dev-token-app` and only `app`, `app.rag`, `app.workflow`, `app.agent`.
-- Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, and `/tool/action/list?toolType=custom`.
+- Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, `/tool/action/list?toolType=custom`, and Workflow editor tool select/action/tool-box compatibility.
 - Created an MCP Server and verified `/mcp/server/list`.
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
@@ -53,7 +54,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages from receiving backend 404s and lets Agent configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`.
 
 It does not yet implement:
 
