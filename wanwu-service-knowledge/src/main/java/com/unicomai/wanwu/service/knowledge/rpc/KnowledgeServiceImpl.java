@@ -248,13 +248,50 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("prompt", "");
-        result.put("searchList", Collections.emptyList());
-        result.put("score", Collections.emptyList());
-        result.put("useGraph", Boolean.FALSE);
-        return result;
+    public synchronized Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String question = string(safe.get("question"));
+        Map<String, Object> matchParams = map(safe.get("knowledgeMatchParams"));
+        int topK = intValue(matchParams.get("topK"), 5);
+        if (topK <= 0) {
+            topK = 5;
+        }
+        double threshold = doubleValue(firstPresent(matchParams, "threshold", "score"), 0D);
+        boolean useGraph = booleanValue(matchParams.get("useGraph"), false);
+        Set<String> knowledgeIds = knowledgeIdsForHit(orgId, safe);
+
+        List<Map<String, Object>> searchList = new ArrayList<Map<String, Object>>();
+        List<Double> scores = new ArrayList<Double>();
+        for (String knowledgeId : knowledgeIds) {
+            KnowledgeState knowledge = knowledgeBases.get(knowledgeId);
+            if (knowledge == null || !matchesOwner(orgId, knowledge)) {
+                continue;
+            }
+            for (DocState doc : docs(knowledgeId)) {
+                if (doc.status != DOC_STATUS_FINISHED) {
+                    continue;
+                }
+                for (SegmentState segment : segments(doc.docId)) {
+                    if (!segment.available) {
+                        continue;
+                    }
+                    double score = knowledgeHitScore(question, knowledge, doc, segment);
+                    if (score < threshold) {
+                        continue;
+                    }
+                    if (!isBlank(question) && score <= 0D) {
+                        continue;
+                    }
+                    searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score));
+                    scores.add(score);
+                    if (searchList.size() >= topK) {
+                        return knowledgeHitResult(question, searchList, scores, useGraph);
+                    }
+                }
+            }
+        }
+        appendDocInfoHits(question, safe, searchList, scores, topK, threshold);
+        return knowledgeHitResult(question, searchList, scores, useGraph);
     }
 
     @Override
@@ -1660,6 +1697,35 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private Map<String, Object> toKnowledgeHitInfo(KnowledgeState knowledge, DocState doc,
+                                                   SegmentState segment, double score) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("title", doc.docName);
+        result.put("snippet", segment.content);
+        result.put("knowledgeName", knowledge.name);
+        result.put("childContentList", Collections.emptyList());
+        result.put("childScore", Collections.emptyList());
+        result.put("contentType", "text");
+        result.put("score", score);
+        result.put("rerankInfo", Collections.emptyList());
+        result.put("docId", doc.docId);
+        result.put("contentId", segment.contentId);
+        return result;
+    }
+
+    private Map<String, Object> toUploadedDocHitInfo(String docName, String snippet, double score) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("title", docName);
+        result.put("snippet", snippet);
+        result.put("knowledgeName", "Uploaded Document");
+        result.put("childContentList", Collections.emptyList());
+        result.put("childScore", Collections.emptyList());
+        result.put("contentType", "text");
+        result.put("score", score);
+        result.put("rerankInfo", Collections.emptyList());
+        return result;
+    }
+
     private Map<String, Object> toQaPairInfo(QaPairState pair) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("qaPairId", pair.qaPairId);
@@ -1796,6 +1862,30 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("searchList", searchList);
         result.put("score", scores);
         return result;
+    }
+
+    private Map<String, Object> knowledgeHitResult(String question, List<Map<String, Object>> searchList,
+                                                   List<Double> scores, boolean useGraph) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("prompt", buildKnowledgeHitPrompt(question, searchList));
+        result.put("searchList", searchList);
+        result.put("score", scores);
+        result.put("useGraph", useGraph);
+        return result;
+    }
+
+    private String buildKnowledgeHitPrompt(String question, List<Map<String, Object>> searchList) {
+        if (searchList.isEmpty()) {
+            return "";
+        }
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Question: ").append(defaultIfBlank(question, "")).append('\n');
+        for (int i = 0; i < searchList.size(); i++) {
+            Map<String, Object> item = searchList.get(i);
+            prompt.append("Reference ").append(i + 1).append(": ")
+                    .append(string(item.get("snippet"))).append('\n');
+        }
+        return prompt.toString();
     }
 
     private Map<String, Object> toPermissionInfo(PermissionState permission) {
@@ -2101,6 +2191,71 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    private Set<String> knowledgeIdsForHit(String orgId, Map<String, Object> request) {
+        Set<String> knowledgeIds = new LinkedHashSet<String>();
+        for (Object raw : list(request.get("knowledgeList"))) {
+            String knowledgeId = string(map(raw).get("knowledgeId"));
+            if (!isBlank(knowledgeId)) {
+                knowledgeIds.add(knowledgeId);
+            }
+        }
+        if (!knowledgeIds.isEmpty()) {
+            return knowledgeIds;
+        }
+        for (KnowledgeState knowledge : knowledgeBases.values()) {
+            if (knowledge.category == CATEGORY_KNOWLEDGE && knowledge.external == EXTERNAL_INTERNAL
+                    && matchesOwner(orgId, knowledge)) {
+                knowledgeIds.add(knowledge.knowledgeId);
+            }
+        }
+        return knowledgeIds;
+    }
+
+    private double knowledgeHitScore(String question, KnowledgeState knowledge, DocState doc, SegmentState segment) {
+        if (isBlank(question)) {
+            return 1.0D;
+        }
+        if (containsIgnoreCase(segment.content, question)) {
+            return 1.0D;
+        }
+        if (containsIgnoreCase(doc.docName, question)) {
+            return 0.85D;
+        }
+        if (containsIgnoreCase(knowledge.name, question)) {
+            return 0.70D;
+        }
+        for (String label : segment.labels) {
+            if (containsIgnoreCase(label, question)) {
+                return 0.65D;
+            }
+        }
+        return 0D;
+    }
+
+    private void appendDocInfoHits(String question, Map<String, Object> request, List<Map<String, Object>> searchList,
+                                   List<Double> scores, int topK, double threshold) {
+        if (searchList.size() >= topK) {
+            return;
+        }
+        for (Object raw : list(request.get("docInfoList"))) {
+            Map<String, Object> docInfo = map(raw);
+            String docName = defaultIfBlank(string(docInfo.get("docName")), string(docInfo.get("fileName")));
+            if (isBlank(docName)) {
+                docName = defaultIfBlank(string(docInfo.get("docId")), "uploaded-document");
+            }
+            String snippet = "Uploaded document: " + docName;
+            double score = isBlank(question) || containsIgnoreCase(docName, question) ? 0.80D : 0D;
+            if (score < threshold || (!isBlank(question) && score <= 0D)) {
+                continue;
+            }
+            searchList.add(toUploadedDocHitInfo(docName, snippet, score));
+            scores.add(score);
+            if (searchList.size() >= topK) {
+                return;
+            }
+        }
+    }
+
     private boolean qaMetaContains(QaPairState pair, String expected) {
         for (Map<String, Object> meta : pair.metaDataList) {
             for (Object value : meta.values()) {
@@ -2366,6 +2521,24 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
         }
         return fallback;
+    }
+
+    private double doubleValue(Object value, double fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value != null) {
+            try {
+                return Double.parseDouble(String.valueOf(value));
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private Object firstPresent(Map<String, Object> source, String firstKey, String secondKey) {
+        return source.containsKey(firstKey) ? source.get(firstKey) : source.get(secondKey);
     }
 
     private List<Integer> intList(Object raw) {

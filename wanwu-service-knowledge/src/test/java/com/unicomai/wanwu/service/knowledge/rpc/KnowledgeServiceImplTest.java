@@ -361,6 +361,34 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitReturnsImportedDocumentSegmentsForFrontendContract() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Hit KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-hit", "Guide.txt"));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-hit", "Wanwu Java retrieval keeps frontend hit test useful.",
+                        Collections.singletonList("retrieval")));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "Wanwu Java retrieval"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.txt", searchList.get(0).get("title"));
+        assertEquals("Hit KB", searchList.get(0).get("knowledgeName"));
+        assertEquals("text", searchList.get(0).get("contentType"));
+        assertEquals("Wanwu Java retrieval keeps frontend hit test useful.", searchList.get(0).get("snippet"));
+        assertEquals(1.0D, ((List<Double>) hit.get("score")).get(0));
+        assertEquals(false, hit.get("useGraph"));
+        assertTrue(((String) hit.get("prompt")).contains("Wanwu Java retrieval keeps frontend hit test useful."));
+
+        String contentId = (String) searchList.get(0).get("contentId");
+        service.updateDocSegmentStatus("dev-admin", "default-org", segmentStatus("doc-hit", contentId, "false"));
+        Map<String, Object> disabledHit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "Wanwu Java retrieval"));
+        assertEquals(0, listOfMaps(disabledHit.get("searchList")).size());
+    }
+
+    @Test
     public void mutableKnowledgeStateIsPersistedAsSnapshotRecord() {
         KnowledgeRecordMapper mapper = mock(KnowledgeRecordMapper.class);
         KnowledgeServiceImpl persistent = new KnowledgeServiceImpl(mapper);
@@ -662,6 +690,10 @@ public class KnowledgeServiceImplTest {
     }
 
     private Map<String, Object> qaHit(String knowledgeId, String question) {
+        return knowledgeHit(knowledgeId, question);
+    }
+
+    private Map<String, Object> knowledgeHit(String knowledgeId, String question) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("question", question);
         request.put("knowledgeList", Collections.singletonList(singleton("knowledgeId", knowledgeId)));

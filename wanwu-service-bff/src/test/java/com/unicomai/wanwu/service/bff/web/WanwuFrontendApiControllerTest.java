@@ -1495,6 +1495,11 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(urlAnalysis("https://example.com/files/guide.txt", "guide.txt"));
         when(knowledgeService.listDocSegments(anyString(), anyString(), any(Map.class)))
                 .thenReturn(segmentPage("Guide.txt", segment("segment-001", "Guide content", true)));
+        when(knowledgeService.hitKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("prompt", "Question: Guide\nReference 1: Guide content\n",
+                        "searchList", Collections.singletonList(knowledgeHitResult("Guide.txt", "Guide content", "Dev KB")),
+                        "score", Collections.singletonList(1.0D),
+                        "useGraph", false));
         when(knowledgeService.listKnowledgeUsers(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("knowledgeUserInfoList", Collections.singletonList(knowledgeUser("perm-001", "dev-admin", 20))));
         when(knowledgeService.listKnowledgeOrgs(anyString(), anyString(), any(Map.class)))
@@ -1643,6 +1648,17 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.fileName").value("Guide.txt"))
                 .andExpect(jsonPath("$.data.contentList[0].contentId").value("segment-001"));
 
+        mockMvc.perform(post("/user/api/v1/knowledge/hit")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"Guide\",\"knowledgeList\":[{\"knowledgeId\":\"knowledge-001\"}],\"knowledgeMatchParams\":{\"matchType\":\"mix\",\"topK\":5,\"threshold\":0.4}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.searchList[0].title").value("Guide.txt"))
+                .andExpect(jsonPath("$.data.searchList[0].knowledgeName").value("Dev KB"))
+                .andExpect(jsonPath("$.data.searchList[0].contentType").value("text"))
+                .andExpect(jsonPath("$.data.score[0]").value(1.0))
+                .andExpect(jsonPath("$.data.useGraph").value(false));
+
         mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/create")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -1717,6 +1733,7 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).analyzeDocUrls(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).importDocs(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocSegments(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).hitKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).createDocSegment(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateDocSegment(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateDocSegmentStatus(anyString(), anyString(), any(Map.class));
@@ -3335,6 +3352,19 @@ public class WanwuFrontendApiControllerTest {
         result.put("qaBase", knowledgeName);
         result.put("qaId", knowledgeId);
         result.put("contentType", "qa");
+        return result;
+    }
+
+    private Map<String, Object> knowledgeHitResult(String title, String snippet, String knowledgeName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("title", title);
+        result.put("snippet", snippet);
+        result.put("knowledgeName", knowledgeName);
+        result.put("childContentList", Collections.emptyList());
+        result.put("childScore", Collections.emptyList());
+        result.put("contentType", "text");
+        result.put("score", 1.0D);
+        result.put("rerankInfo", Collections.emptyList());
         return result;
     }
 
