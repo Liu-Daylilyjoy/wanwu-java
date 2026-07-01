@@ -102,6 +102,10 @@ public class WanwuOpenApiControllerTest {
 
         RagChatResult ragResult = new RagChatResult();
         ragResult.setResponse("rag answer");
+        Map<String, Object> ragSearch = new LinkedHashMap<>();
+        ragSearch.put("title", "PolicyGuide.txt");
+        ragSearch.put("snippet", "Policy hit");
+        ragResult.setSearchList(Collections.singletonList(ragSearch));
         when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(ragResult);
 
         Map<String, Object> output = new LinkedHashMap<>();
@@ -120,9 +124,10 @@ public class WanwuOpenApiControllerTest {
         mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uuid\":\"rag-openapi-001\",\"query\":\"search me\"}"))
+                        .content("{\"uuid\":\"rag-openapi-001\",\"prompt\":\"search me\",\"file_info\":[{\"fileName\":\"note.txt\"}]}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.output").value("rag answer"));
+                .andExpect(jsonPath("$.data.output").value("rag answer"))
+                .andExpect(jsonPath("$.data.searchList[0].title").value("PolicyGuide.txt"));
 
         mockMvc.perform(post("/service/api/openapi/v1/workflow/run")
                         .header("Authorization", "Bearer dev-token")
@@ -133,7 +138,12 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(jsonPath("$.data.output.result").value("workflow answer"));
 
         verify(appService).streamAssistantConversation(any(AssistantConversationStreamCommand.class));
-        verify(appService).streamRagChat(any(RagChatCommand.class));
+        ArgumentCaptor<RagChatCommand> ragCaptor = forClass(RagChatCommand.class);
+        verify(appService).streamRagChat(ragCaptor.capture());
+        assertEquals("rag-openapi-001", ragCaptor.getValue().getRagId());
+        assertEquals("search me", ragCaptor.getValue().getQuestion());
+        assertEquals(false, ragCaptor.getValue().isDraft());
+        assertEquals(1, ragCaptor.getValue().getFileInfo().size());
         verify(appService).runWorkflow(any(WorkflowRunCommand.class));
     }
 

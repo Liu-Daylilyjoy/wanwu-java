@@ -307,9 +307,10 @@ public class WanwuOpenApiController {
             Map<String, Object> body = body(request);
             RagChatCommand command = new RagChatCommand();
             command.setRagId(text(body, "uuid"));
-            command.setQuestion(text(body, "query"));
+            command.setQuestion(defaultIfBlank(text(body, "query"), text(body, "prompt")));
             command.setDraft(false);
             command.setHistory(mapList(body.get("history")));
+            command.setFileInfo(mapList(body.containsKey("file_info") ? body.get("file_info") : body.get("fileInfo")));
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
             RagChatResult result = appService.streamRagChat(command);
@@ -648,7 +649,13 @@ public class WanwuOpenApiController {
         data.put("code", 0);
         data.put("message", "success");
         data.put("msg_id", result == null ? "" : defaultIfBlank(result.getRagId(), ""));
-        data.put("data", Collections.singletonMap("output", result == null ? "" : defaultIfBlank(result.getResponse(), "")));
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("output", result == null ? "" : defaultIfBlank(result.getResponse(), ""));
+        output.put("searchList", result == null || result.getSearchList() == null
+                ? Collections.emptyList() : result.getSearchList());
+        output.put("qaSearchList", result == null || result.getQaSearchList() == null
+                ? Collections.emptyList() : result.getQaSearchList());
+        data.put("data", output);
         data.put("history", Collections.emptyList());
         data.put("finish", 1);
         return data;
