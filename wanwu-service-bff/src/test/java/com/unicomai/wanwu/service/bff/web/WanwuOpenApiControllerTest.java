@@ -3,6 +3,8 @@ package com.unicomai.wanwu.service.bff.web;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
@@ -38,6 +40,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -170,6 +173,46 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(content().string(containsString("data: {\"code\":0")))
                 .andExpect(content().string(containsString("\"searchList\":[{\"title\":\"PolicyGuide.txt\"")))
                 .andExpect(content().string(containsString("data: [DONE]")));
+    }
+
+    @Test
+    public void agentConfigAndPublishRoutesUseAppService() throws Exception {
+        mockMvc.perform(put("/service/api/openapi/v1/agent/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantUuid\":\"assistant-openapi-001\",\"prologue\":\"hello\",\"instructions\":\"be useful\",\"recommendQuestion\":[\"q1\"],\"modelConfig\":{\"modelId\":\"model-001\",\"modelType\":\"llm\"},\"knowledgeBaseConfig\":{\"knowledgebases\":[{\"id\":\"knowledge-001\"}],\"config\":{\"topK\":3}}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/service/api/openapi/v1/agent/publish")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantUuid\":\"assistant-openapi-001\",\"version\":\"v1.0.0\",\"desc\":\"first release\",\"publishType\":\"organization\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<AssistantConfigUpdateCommand> configCaptor =
+                forClass(AssistantConfigUpdateCommand.class);
+        verify(appService).updateAssistantConfig(configCaptor.capture());
+        assertEquals("assistant-openapi-001", configCaptor.getValue().getAssistantId());
+        assertEquals("dev-admin", configCaptor.getValue().getUserId());
+        assertEquals("default-org", configCaptor.getValue().getOrgId());
+        assertEquals("hello", configCaptor.getValue().getPrologue());
+        assertEquals("be useful", configCaptor.getValue().getInstructions());
+        assertEquals("model-001", configCaptor.getValue().getModelConfig().get("modelId"));
+        assertEquals(3, configCaptor.getValue().getKnowledgeBaseConfig().get("config") instanceof Map
+                ? ((Map<?, ?>) configCaptor.getValue().getKnowledgeBaseConfig().get("config")).get("topK") : null);
+        assertEquals("q1", configCaptor.getValue().getRecommendQuestion().get(0));
+
+        ArgumentCaptor<AppPublishCommand> publishCaptor = forClass(AppPublishCommand.class);
+        verify(appService).publishApp(publishCaptor.capture());
+        assertEquals("assistant-openapi-001", publishCaptor.getValue().getAppId());
+        assertEquals("agent", publishCaptor.getValue().getAppType());
+        assertEquals("v1.0.0", publishCaptor.getValue().getVersion());
+        assertEquals("first release", publishCaptor.getValue().getDesc());
+        assertEquals("organization", publishCaptor.getValue().getPublishType());
+        assertEquals("dev-admin", publishCaptor.getValue().getUserId());
+        assertEquals("default-org", publishCaptor.getValue().getOrgId());
     }
 
     @Test

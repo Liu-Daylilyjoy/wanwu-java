@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
@@ -157,16 +159,26 @@ public class WanwuOpenApiController {
     public FrontendResponse<Map<String, Object>> updateAgentConfig(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        return FrontendResponse.ok(echo("agent_config_updated", request));
+        try {
+            OpenApiContext ctx = context(headers);
+            appService.updateAssistantConfig(openApiAgentConfig(ctx, body(request)));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/agent/publish")
     public FrontendResponse<Map<String, Object>> publishAgent(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        return FrontendResponse.ok(echo("agent_published", request));
+        try {
+            OpenApiContext ctx = context(headers);
+            appService.publishApp(openApiAgentPublish(ctx, body(request)));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/agent/conversation")
@@ -726,6 +738,52 @@ public class WanwuOpenApiController {
         return values == null || values.isEmpty() ? "" : values.get(0);
     }
 
+    private AssistantConfigUpdateCommand openApiAgentConfig(OpenApiContext ctx, Map<String, Object> body) {
+        AssistantConfigUpdateCommand command = new AssistantConfigUpdateCommand();
+        command.setAssistantId(firstText(body, "assistantUuid", "uuid", "assistantId"));
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setPrologue(text(body, "prologue"));
+        command.setInstructions(text(body, "instructions"));
+        command.setMemoryConfig(objectMap(body.get("memoryConfig")));
+        command.setKnowledgeBaseConfig(openApiKnowledgeBaseConfig(body.get("knowledgeBaseConfig")));
+        command.setModelConfig(objectMap(body.get("modelConfig")));
+        command.setSafetyConfig(objectMap(body.get("safetyConfig")));
+        command.setVisionConfig(objectMap(body.get("visionConfig")));
+        command.setRerankConfig(objectMap(body.get("rerankConfig")));
+        command.setRecommendConfig(objectMap(body.get("recommendConfig")));
+        command.setRecommendQuestion(stringList(body.get("recommendQuestion")));
+        return command;
+    }
+
+    private AppPublishCommand openApiAgentPublish(OpenApiContext ctx, Map<String, Object> body) {
+        AppPublishCommand command = new AppPublishCommand();
+        command.setAppId(firstText(body, "assistantUuid", "uuid", "appId"));
+        command.setAppType(AGENT_APP_TYPE);
+        command.setVersion(text(body, "version"));
+        command.setDesc(text(body, "desc"));
+        command.setPublishType(text(body, "publishType"));
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        return command;
+    }
+
+    private Map<String, Object> openApiKnowledgeBaseConfig(Object value) {
+        Map<String, Object> config = objectMap(value);
+        if (!config.isEmpty()) {
+            return config;
+        }
+        Map<String, Object> defaults = new LinkedHashMap<>();
+        defaults.put("knowledgebases", Collections.emptyList());
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("matchType", "mix");
+        params.put("priorityMatch", 1);
+        params.put("threshold", 0.4D);
+        params.put("topK", 5);
+        defaults.put("config", params);
+        return defaults;
+    }
+
     private AssistantConversationListQuery conversationList(OpenApiContext ctx, String assistantId, int pageNo, int pageSize) {
         AssistantConversationListQuery query = new AssistantConversationListQuery();
         query.setAssistantId(assistantId);
@@ -877,6 +935,33 @@ public class WanwuOpenApiController {
             }
         }
         return result;
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List)) {
+            return Collections.emptyList();
+        }
+        List<?> source = (List<?>) value;
+        List<String> result = new ArrayList<>();
+        for (Object item : source) {
+            if (item != null) {
+                result.add(String.valueOf(item));
+            }
+        }
+        return result;
+    }
+
+    private String firstText(Map<String, Object> map, String... keys) {
+        if (keys == null) {
+            return "";
+        }
+        for (String key : keys) {
+            String value = text(map, key);
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String text(Map<String, Object> map, String key) {
