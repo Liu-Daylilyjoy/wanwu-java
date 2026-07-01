@@ -86,6 +86,57 @@ public class WanwuCommonApiController {
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
+    @PostMapping("/base/register/email/code")
+    public FrontendResponse<Map<String, Object>> registerEmailCode(@RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(emailNoop(request, "sent", true));
+    }
+
+    @PostMapping("/base/register/email")
+    public FrontendResponse<Map<String, Object>> registerByEmail(@RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> body = emailNoop(request, "registered", true);
+        body.put("username", defaultIfBlank(text(request, "username"), "guest"));
+        return FrontendResponse.ok(body);
+    }
+
+    @PostMapping("/base/password/email/code")
+    public FrontendResponse<Map<String, Object>> resetPasswordEmailCode(@RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(emailNoop(request, "sent", true));
+    }
+
+    @PostMapping("/base/password/email")
+    public FrontendResponse<Map<String, Object>> resetPasswordByEmail(@RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(emailNoop(request, "reset", true));
+    }
+
+    @PostMapping("/base/login/email")
+    public FrontendResponse<Map<String, Object>> loginByEmail(@RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = loginContext(request);
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("isEmailCheck", false);
+        body.put("token", ctx.admin ? DEV_ADMIN_TOKEN : DEV_APP_TOKEN);
+        body.put("isUpdatePassword", true);
+        return FrontendResponse.ok(body);
+    }
+
+    @PostMapping("/user/login/email/code")
+    public FrontendResponse<Map<String, Object>> loginEmailCode(@RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(emailNoop(request, "sent", true));
+    }
+
+    @PostMapping("/user/login")
+    public FrontendResponse<Map<String, Object>> loginEmailCheck(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(loginSession(userContext(authorization, loginUserId(request))));
+    }
+
+    @PutMapping("/user/login")
+    public FrontendResponse<Map<String, Object>> changePasswordByEmail(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(loginSession(userContext(authorization, loginUserId(request))));
+    }
+
     @PostMapping("/avatar")
     public FrontendResponse<Map<String, Object>> uploadAvatar(
             @RequestParam(value = "avatar", required = false) MultipartFile avatar,
@@ -244,11 +295,108 @@ public class WanwuCommonApiController {
         return body;
     }
 
+    private Map<String, Object> emailNoop(Map<String, Object> request, String statusKey, boolean status) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put(statusKey, status);
+        body.put("email", defaultIfBlank(text(request, "email"), "dev@example.local"));
+        body.put("status", "ok");
+        return body;
+    }
+
+    private Map<String, Object> loginSession(UserContext ctx) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("uid", ctx.userId);
+        body.put("userId", ctx.userId);
+        body.put("username", ctx.username);
+        body.put("userCategory", ctx.admin ? "admin" : "user");
+        body.put("token", ctx.admin ? DEV_ADMIN_TOKEN : DEV_APP_TOKEN);
+        body.put("expiresAt", 4102444800000L);
+        body.put("expireIn", "315360000");
+        body.put("nickname", ctx.username);
+        body.put("orgPermission", orgPermission(ctx));
+        body.put("orgs", Collections.singletonList(idName(DEV_ORG_ID, "Default Organization")));
+        body.put("language", language("zh", "\u4e2d\u6587"));
+        body.put("isUpdatePassword", true);
+        return body;
+    }
+
+    private Map<String, Object> orgPermission(UserContext ctx) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("org", idName(DEV_ORG_ID, "Default Organization"));
+        body.put("permissions", permissionItems(ctx.admin ? implementedPermissions() : appPermissions()));
+        body.put("roles", ctx.admin
+                ? Collections.singletonList(idName("admin", "System Admin"))
+                : Collections.singletonList(idName("app", "App User")));
+        body.put("isAdmin", ctx.admin);
+        body.put("isSystem", ctx.admin);
+        return body;
+    }
+
+    private List<Map<String, Object>> permissionItems(List<String> permissions) {
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (String permission : permissions) {
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("perm", permission);
+            item.put("name", permissionName(permission));
+            items.add(item);
+        }
+        return items;
+    }
+
+    private List<String> implementedPermissions() {
+        return Arrays.asList(
+                "permission",
+                "permission.user",
+                "permission.org",
+                "permission.role",
+                "setting",
+                "model",
+                "model.model_management",
+                "app",
+                "app.rag",
+                "app.workflow",
+                "app.agent",
+                "api_key",
+                "api_key.api_key_management",
+                "resource",
+                "resource.knowledge",
+                "resource.tool",
+                "resource.mcp",
+                "resource.prompt",
+                "resource.skill",
+                "resource.safety",
+                "operation",
+                "operation.oauth",
+                "operation.statistic_client",
+                "exploration",
+                "exploration.app",
+                "exploration.mcp",
+                "exploration.template",
+                "exploration.skill",
+                "app_observability",
+                "app_observability.statistic",
+                "wga",
+                "wga.wanwu_bot");
+    }
+
+    private List<String> appPermissions() {
+        return Arrays.asList("app", "app.rag", "app.workflow", "app.agent");
+    }
+
     private MultipartFile first(MultipartFile first, MultipartFile second, MultipartFile third) {
         if (first != null) {
             return first;
         }
         return second == null ? third : second;
+    }
+
+    private UserContext loginContext(Map<String, Object> request) {
+        String username = text(request, "username").toLowerCase(Locale.ROOT);
+        String email = text(request, "email").toLowerCase(Locale.ROOT);
+        if ("app".equals(username) || email.startsWith("app@") || email.contains("+app@")) {
+            return new UserContext(DEV_APP_ID, "app", false);
+        }
+        return new UserContext(DEV_ADMIN_ID, "admin", true);
     }
 
     private UserContext userContext(String authorization, String userId) {
@@ -261,6 +409,31 @@ public class WanwuCommonApiController {
             return new UserContext(DEV_ADMIN_ID, "admin", true);
         }
         return new UserContext(userId, userId, true);
+    }
+
+    private String loginUserId(Map<String, Object> request) {
+        UserContext ctx = loginContext(request);
+        return ctx.userId;
+    }
+
+    private String permissionName(String permission) {
+        String[] parts = permission.split("\\.");
+        String value = parts.length == 0 ? permission : parts[parts.length - 1];
+        String[] words = value.split("_");
+        StringBuilder name = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            if (name.length() > 0) {
+                name.append(' ');
+            }
+            name.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) {
+                name.append(word.substring(1));
+            }
+        }
+        return name.length() == 0 ? permission : name.toString();
     }
 
     private String title(String path) {

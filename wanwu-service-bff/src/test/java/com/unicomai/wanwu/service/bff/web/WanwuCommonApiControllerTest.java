@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -101,6 +102,64 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].title").value("Application Development"))
                 .andExpect(jsonPath("$.data[0].list[0].url").value("/aibase/docCenter/pages/application-development.md"));
+    }
+
+    @Test
+    public void guestEmailAuthRoutesReturnDevelopmentContracts() throws Exception {
+        MockMvc mockMvc = mockMvc();
+
+        mockMvc.perform(post("/user/api/v1/base/register/email/code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"tester\",\"email\":\"tester@example.local\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.sent").value(true))
+                .andExpect(jsonPath("$.data.email").value("tester@example.local"));
+        mockMvc.perform(post("/user/api/v1/base/register/email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"tester\",\"email\":\"tester@example.local\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.registered").value(true))
+                .andExpect(jsonPath("$.data.username").value("tester"));
+        mockMvc.perform(post("/user/api/v1/base/password/email/code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"tester@example.local\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sent").value(true));
+        mockMvc.perform(post("/user/api/v1/base/password/email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"tester@example.local\",\"code\":\"123456\",\"password\":\"x\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reset").value(true));
+        mockMvc.perform(post("/user/api/v1/base/login/email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"admin\",\"password\":\"x\",\"key\":\"dev-captcha\",\"code\":\"1234\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isEmailCheck").value(false))
+                .andExpect(jsonPath("$.data.token").value("dev-token"))
+                .andExpect(jsonPath("$.data.isUpdatePassword").value(true));
+        mockMvc.perform(post("/user/api/v1/user/login/email/code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"admin@example.local\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sent").value(true));
+        mockMvc.perform(post("/user/api/v1/user/login")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"admin@example.local\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uid").value("dev-admin"))
+                .andExpect(jsonPath("$.data.username").value("admin"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[31].perm").value("wga.wanwu_bot"));
+        mockMvc.perform(put("/user/api/v1/user/login")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"x\",\"newPassword\":\"y\",\"email\":\"app@example.local\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uid").value("dev-app"))
+                .andExpect(jsonPath("$.data.token").value("dev-token-app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("app.agent"));
     }
 
     private MockMvc mockMvc() {
