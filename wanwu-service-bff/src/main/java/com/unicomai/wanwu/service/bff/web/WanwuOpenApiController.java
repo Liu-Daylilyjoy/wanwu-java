@@ -22,6 +22,7 @@ import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -68,12 +69,20 @@ public class WanwuOpenApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private KnowledgeService knowledgeService;
+
     public WanwuOpenApiController() {
     }
 
     public WanwuOpenApiController(AppService appService, ModelService modelService) {
+        this(appService, modelService, null);
+    }
+
+    public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService) {
         this.appService = appService;
         this.modelService = modelService;
+        this.knowledgeService = knowledgeService;
     }
 
     @PostMapping("/agent")
@@ -444,68 +453,168 @@ public class WanwuOpenApiController {
     public FrontendResponse<Map<String, Object>> createKnowledge(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        String id = "knowledge-" + compactId();
-        Map<String, Object> data = echo("knowledge_created", request);
-        data.put("knowledgeId", id);
-        data.put("knowledge_id", id);
-        return FrontendResponse.ok(data);
+        try {
+            OpenApiContext ctx = context(headers);
+            Map<String, Object> data = knowledgeService.createKnowledge(ctx.userId, ctx.orgId, body(request));
+            return FrontendResponse.ok(withKnowledgeAliases(data));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PutMapping("/knowledge")
     public FrontendResponse<Map<String, Object>> updateKnowledge(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        return FrontendResponse.ok(echo("knowledge_updated", request));
+        try {
+            OpenApiContext ctx = context(headers);
+            knowledgeService.updateKnowledge(ctx.userId, ctx.orgId, body(request));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @DeleteMapping("/knowledge")
-    public FrontendResponse<Map<String, Object>> deleteKnowledge(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> deleteKnowledge(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            knowledgeService.deleteKnowledge(ctx.userId, ctx.orgId, body(request));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/knowledge/select")
-    public FrontendResponse<Map<String, Object>> selectKnowledge(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(listResult(Collections.emptyList()));
+    public FrontendResponse<Map<String, Object>> selectKnowledge(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.selectKnowledge(ctx.userId, ctx.orgId, body(request))));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping("/knowledge/doc/config")
     public FrontendResponse<Map<String, Object>> docConfig(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("segmentType", "auto");
-        data.put("chunkSize", 500);
-        data.put("chunkOverlap", 50);
-        return FrontendResponse.ok(data);
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.getDocConfig(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/knowledge/doc/list")
-    public FrontendResponse<Map<String, Object>> docList(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(listResult(Collections.emptyList()));
-    }
-
-    @PostMapping({"/knowledge/doc/import", "/knowledge/doc/update/config", "/knowledge/doc/export", "/knowledge/hit"})
-    public FrontendResponse<Map<String, Object>> knowledgePostShell(
+    public FrontendResponse<Map<String, Object>> docList(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
-        context(headers);
-        return FrontendResponse.ok(echo("ok", request));
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.listDocs(ctx.userId, ctx.orgId, body(request))));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
-    @GetMapping({"/knowledge/doc/import/tip", "/knowledge/export/record/list"})
-    public FrontendResponse<Map<String, Object>> knowledgeGetShell(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(listResult(Collections.emptyList()));
+    @PostMapping("/knowledge/doc/import")
+    public FrontendResponse<Map<String, Object>> importDocs(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            knowledgeService.importDocs(ctx.userId, ctx.orgId, body(request));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/knowledge/doc/update/config")
+    public FrontendResponse<Map<String, Object>> updateDocConfig(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            knowledgeService.updateDocConfig(ctx.userId, ctx.orgId, body(request));
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/knowledge/doc/export")
+    public FrontendResponse<Map<String, Object>> exportDocs(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.exportDocs(ctx.userId, ctx.orgId, body(request))));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @PostMapping("/knowledge/hit")
+    public FrontendResponse<Map<String, Object>> hitKnowledge(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.hitKnowledge(ctx.userId, ctx.orgId, body(request))));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/knowledge/doc/import/tip")
+    public FrontendResponse<Map<String, Object>> knowledgeImportTip(@RequestHeader HttpHeaders headers) {
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.getDocImportTip(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/knowledge/export/record/list")
+    public FrontendResponse<Map<String, Object>> listKnowledgeExportRecords(@RequestHeader HttpHeaders headers) {
+        try {
+            OpenApiContext ctx = context(headers);
+            return FrontendResponse.ok(serviceResult(
+                    knowledgeService.listExportRecords(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @DeleteMapping({"/knowledge/doc", "/knowledge/export/record"})
-    public FrontendResponse<Map<String, Object>> knowledgeDeleteShell(@RequestHeader HttpHeaders headers) {
-        context(headers);
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> knowledgeDeleteShell(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = body(request);
+            if (safe.containsKey("exportRecordId") || safe.containsKey("export_record_id")) {
+                knowledgeService.deleteExportRecord(ctx.userId, ctx.orgId, safe);
+            } else {
+                knowledgeService.deleteDocs(ctx.userId, ctx.orgId, safe);
+            }
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping({"/mcp/server/sse", "/mcp/server/streamable"})
@@ -708,6 +817,18 @@ public class WanwuOpenApiController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("list", list);
         data.put("total", list.size());
+        return data;
+    }
+
+    private Map<String, Object> serviceResult(Map<String, Object> response) {
+        return response == null ? Collections.<String, Object>emptyMap() : response;
+    }
+
+    private Map<String, Object> withKnowledgeAliases(Map<String, Object> response) {
+        Map<String, Object> data = new LinkedHashMap<>(serviceResult(response));
+        if (data.containsKey("knowledgeId") && !data.containsKey("knowledge_id")) {
+            data.put("knowledge_id", data.get("knowledgeId"));
+        }
         return data;
     }
 

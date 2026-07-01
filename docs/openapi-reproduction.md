@@ -27,11 +27,11 @@ Implemented in `WanwuOpenApiController` under `/service/api/openapi/v1`:
 - Workflow run plus workflow/chatflow upload response shapes.
 - Chatflow conversation/message/chat compatibility shells.
 - Model list via `ModelService`.
-- Knowledge management/doc/export/hit compatibility shells.
+- Knowledge management/doc/export/hit routes proxy to `KnowledgeService`.
 - MCP SSE/message/streamable compatibility shells.
 - OAuth JWKS, login, authorize, token, refresh, discovery, and userinfo development shells.
 
-This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, OAuth signing, and API usage metric persistence.
+This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Knowledge OpenAPI now reaches the same Docker MySQL-backed Java knowledge compatibility service used by the frontend. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, OAuth signing, and API usage metric persistence.
 
 ## Verification
 

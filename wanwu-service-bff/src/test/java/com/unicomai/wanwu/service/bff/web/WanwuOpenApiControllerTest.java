@@ -13,6 +13,7 @@ import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,8 +46,9 @@ public class WanwuOpenApiControllerTest {
 
     private final AppService appService = mock(AppService.class);
     private final ModelService modelService = mock(ModelService.class);
+    private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new WanwuOpenApiController(appService, modelService))
+            .standaloneSetup(new WanwuOpenApiController(appService, modelService, knowledgeService))
             .build();
 
     @Test
@@ -172,6 +175,21 @@ public class WanwuOpenApiControllerTest {
     @Test
     public void modelKnowledgeUploadOauthAndMcpShellsDoNotReturnNotFound() throws Exception {
         when(modelService.listModels(any())).thenReturn(new ModelListResult(Collections.emptyList(), 0));
+        when(knowledgeService.createKnowledge(eq("dev-admin"), eq("default-org"), any()))
+                .thenReturn(Collections.singletonMap("knowledgeId", "knowledge-openapi-001"));
+        Map<String, Object> knowledgeRow = new LinkedHashMap<>();
+        knowledgeRow.put("knowledgeId", "knowledge-openapi-001");
+        knowledgeRow.put("name", "Knowledge");
+        Map<String, Object> knowledgePage = new LinkedHashMap<>();
+        knowledgePage.put("list", Collections.singletonList(knowledgeRow));
+        knowledgePage.put("total", 1);
+        when(knowledgeService.selectKnowledge(eq("dev-admin"), eq("default-org"), any())).thenReturn(knowledgePage);
+        Map<String, Object> docConfig = new LinkedHashMap<>();
+        docConfig.put("chunkSize", 700);
+        when(knowledgeService.getDocConfig(eq("dev-admin"), eq("default-org"), any())).thenReturn(docConfig);
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(Collections.singletonMap("title", "OpenApiDoc.txt")));
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any())).thenReturn(hit);
 
         mockMvc.perform(get("/service/api/openapi/v1/model/list")
                         .header("Authorization", "Bearer dev-token")
@@ -184,7 +202,31 @@ public class WanwuOpenApiControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Knowledge\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.knowledgeId").exists());
+                .andExpect(jsonPath("$.data.knowledgeId").value("knowledge-openapi-001"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/knowledge/select")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].knowledgeId").value("knowledge-openapi-001"));
+
+        mockMvc.perform(get("/service/api/openapi/v1/knowledge/doc/config")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.chunkSize").value(700));
+
+        mockMvc.perform(post("/service/api/openapi/v1/knowledge/doc/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-openapi-001\",\"docInfoList\":[{\"docName\":\"OpenApiDoc.txt\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/service/api/openapi/v1/knowledge/hit")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"OpenApiDoc\",\"knowledgeList\":[{\"knowledgeId\":\"knowledge-openapi-001\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.searchList[0].title").value("OpenApiDoc.txt"));
 
         mockMvc.perform(multipart("/service/api/openapi/v1/workflow/file/upload")
                         .file(new MockMultipartFile("file", "input.txt", "text/plain", "hello".getBytes()))
@@ -200,6 +242,12 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(content().string(containsString("notifications/initialized")));
+
+        verify(knowledgeService).createKnowledge(eq("dev-admin"), eq("default-org"), any());
+        verify(knowledgeService).selectKnowledge(eq("dev-admin"), eq("default-org"), any());
+        verify(knowledgeService).getDocConfig(eq("dev-admin"), eq("default-org"), any());
+        verify(knowledgeService).importDocs(eq("dev-admin"), eq("default-org"), any());
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), any());
     }
 
     private Map<String, Object> appRow() {
