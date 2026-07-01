@@ -26,7 +26,7 @@ Measured from this Java repo before the full reproduction pass:
 | Group | Go routes | Java status |
 | --- | ---: | --- |
 | `callback/router.go` | 31 | Partially covered; `/callback/v1` file/model/workflow/MCP/chatflow/agent/RAG/WGA/app/skill route shapes now return stable development responses and stream shells through Docker Nginx, while real provider execution, RAG recall, sandbox runtime, auth/signature checks, and callback metrics remain missing |
-| `openapi/router.go` | 11 | Partially covered; public `/service/api/openapi/v1` agent/conversation/chat/RAG/workflow/chatflow/model/knowledge/MCP/OAuth route shapes now exist with API-key/dev-token context, and OpenAPI RAG JSON chat now exposes local `data.searchList` from Java knowledge hits; streaming legacy SSE, real inference, workflow engine, OAuth signing, MCP runtime, knowledge indexing, and API usage metrics remain missing |
+| `openapi/router.go` | 11 | Partially covered; public `/service/api/openapi/v1` agent/conversation/chat/RAG/workflow/chatflow/model/knowledge/MCP/OAuth route shapes now exist with API-key/dev-token context, and OpenAPI RAG JSON plus legacy single-frame SSE chat now exposes local `data.searchList` from Java knowledge hits; token streaming, real inference, workflow engine, OAuth signing, MCP runtime, knowledge indexing, and API usage metrics remain missing |
 | `openurl/router.go` | 11 | Mostly covered for Agent OpenURL plus anonymous file upload/merge/clean compatibility; deeper public runtime parity remains partial |
 | `v1/api_key.go` | 5 | Covered for create/update/delete/list/status |
 | `v1/assistant.go` | 32 | Partially covered; assistant CRUD/config/copy/publish/version/conversation/OpenURL plus local tool/workflow/MCP/skill/multi-agent binding/select compatibility and assistant template list/detail/copy covered; real assistant-side orchestration still missing |
@@ -76,7 +76,7 @@ Measured from this Java repo before the full reproduction pass:
 | `ModelService` | 16 | Partially covered with Java RPC contract and Docker MySQL JSON compatibility repository for model management/select/recommend/provider flows plus `/user/api/v1` and legacy `/use/model/api/v1` model experience dialog/record persistence aliases; normalized Go-equivalent model tables, real provider inference, encrypted credentials, and callback APIs still missing |
 | `OperateService` | 6 | Placeholder-level |
 | `PermService` | 2 | Missing as independent service |
-| `RagService` | 15 | Partially covered through Java `AppService` and BFF for appspace RAG lifecycle/config/publish/version/copy, frontend AG-UI chat shell, OpenAPI JSON search-list output, upload response shape, and local knowledge/QA hit search-list generation; standalone Go-equivalent retrieval/rerank/model stream behavior still missing |
+| `RagService` | 15 | Partially covered through Java `AppService` and BFF for appspace RAG lifecycle/config/publish/version/copy, frontend AG-UI chat shell, OpenAPI JSON and legacy single-frame SSE search-list output, upload response shape, and local knowledge/QA hit search-list generation; standalone Go-equivalent retrieval/rerank/model token-stream behavior still missing |
 | `SafetyService` | 12 | Partially covered with Java RPC contract and Docker MySQL snapshot repository for table CRUD/reply/select and word upload/list/delete; normalized Go tables, Excel parsing, global enforcement, and chat-stream interception missing |
 
 ## Reproduction Order

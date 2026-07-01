@@ -148,6 +148,28 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void ragOpenApiStreamReturnsLegacySseWithSearchList() throws Exception {
+        RagChatResult ragResult = new RagChatResult();
+        ragResult.setRagId("rag-openapi-stream-001");
+        ragResult.setResponse("stream rag answer");
+        Map<String, Object> ragSearch = new LinkedHashMap<>();
+        ragSearch.put("title", "PolicyGuide.txt");
+        ragSearch.put("snippet", "Policy hit");
+        ragResult.setSearchList(Collections.singletonList(ragSearch));
+        when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(ragResult);
+
+        mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"rag-openapi-stream-001\",\"query\":\"PolicyGuide\",\"stream\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("data: {\"code\":0")))
+                .andExpect(content().string(containsString("\"searchList\":[{\"title\":\"PolicyGuide.txt\"")))
+                .andExpect(content().string(containsString("data: [DONE]")));
+    }
+
+    @Test
     public void modelKnowledgeUploadOauthAndMcpShellsDoNotReturnNotFound() throws Exception {
         when(modelService.listModels(any())).thenReturn(new ModelListResult(Collections.emptyList(), 0));
 

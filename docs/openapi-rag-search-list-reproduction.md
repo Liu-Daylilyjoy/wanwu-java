@@ -14,11 +14,13 @@ Date: 2026-07-01
 - The controller now accepts either `query` or `prompt` as the question field.
 - The controller now maps `file_info` or `fileInfo` into `RagChatCommand.fileInfo`.
 - `openApiRagChat` now returns `data.searchList` and `data.qaSearchList` from `RagChatResult`, while preserving `data.output`, `msg_id`, `history`, and `finish`.
+- When the request contains `stream=true`, Java returns a legacy `text/event-stream` response with a single `data: {...}` JSON frame followed by `data: [DONE]`.
 
 ## Tests
 
 - `WanwuOpenApiControllerTest#chatRagAndWorkflowRoutesMapToExistingAppService` verifies published-mode RAG command mapping and asserts that `data.searchList[0].title` is returned to OpenAPI callers.
+- `WanwuOpenApiControllerTest#ragOpenApiStreamReturnsLegacySseWithSearchList` verifies `stream=true` legacy SSE compatibility.
 
 ## Remaining Gap
 
-The Java OpenAPI RAG endpoint is still non-streaming JSON only. Go also supports legacy SSE streaming when `stream=true`. Full parity still needs provider token streaming, exact legacy SSE line format, statistics recording, and API-key scoped app authorization.
+The Java OpenAPI RAG endpoint now supports a legacy SSE envelope for `stream=true`, but it still emits one completed frame rather than provider token-by-token chunks. Full parity still needs real model streaming, exact upstream rag-service chunk sequencing, statistics recording, and API-key scoped app authorization.

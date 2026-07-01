@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
@@ -58,6 +60,7 @@ public class WanwuOpenApiController {
     private static final String AGENT_APP_TYPE = "agent";
     private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -299,7 +302,7 @@ public class WanwuOpenApiController {
     }
 
     @PostMapping("/rag/chat")
-    public ResponseEntity<Map<String, Object>> chatRag(
+    public ResponseEntity<?> chatRag(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
         try {
@@ -314,7 +317,13 @@ public class WanwuOpenApiController {
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
             RagChatResult result = appService.streamRagChat(command);
-            return ResponseEntity.ok(openApiRagChat(result));
+            Map<String, Object> response = openApiRagChat(result);
+            if (booleanValue(body.get("stream"), false)) {
+                return ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(legacyRagSse(response));
+            }
+            return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(errorBody(ex.getMessage()));
         }
@@ -661,6 +670,19 @@ public class WanwuOpenApiController {
         return data;
     }
 
+    private String legacyRagSse(Map<String, Object> response) {
+        return "data: " + toJson(response) + "\n\n"
+                + "data: [DONE]\n\n";
+    }
+
+    private String toJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("openapi response is invalid", ex);
+        }
+    }
+
     private Map<String, Object> usage() {
         Map<String, Object> usage = new LinkedHashMap<>();
         usage.put("completion_tokens", 0);
@@ -754,6 +776,19 @@ public class WanwuOpenApiController {
             } catch (NumberFormatException ignored) {
                 return fallback;
             }
+        }
+        return fallback;
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        if (value instanceof String && !isBlank((String) value)) {
+            return Boolean.parseBoolean((String) value);
         }
         return fallback;
     }
