@@ -55,6 +55,7 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -78,6 +79,7 @@ import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -97,6 +99,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class AppServiceImplTest {
 
@@ -274,6 +281,52 @@ public class AppServiceImplTest {
                 ragChatCommand(created.getRagId(), "published", false));
         assertEquals("published", published.getQuestion());
         assertEquals(true, published.getResponse().contains("Demo RAG response"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatReturnsConfiguredKnowledgeHits() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("PolicyRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-001"));
+        service.updateRagConfig(config);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "PolicyGuide.txt");
+        hitItem.put("knowledgeName", "Policy KB");
+        hitItem.put("snippet", "Policy answer comes from the configured knowledge base.");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(hitItem));
+        hit.put("score", Collections.singletonList(1.0D));
+        hit.put("prompt", "Policy answer comes from the configured knowledge base.");
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        RagChatResult result = service.streamRagChat(
+                ragChatCommand(created.getRagId(), "what is policy", true));
+
+        assertEquals(1, result.getSearchList().size());
+        assertEquals("PolicyGuide.txt", result.getSearchList().get(0).get("title"));
+        assertTrue(result.getResponse().contains("Policy answer comes from the configured knowledge base."));
+
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), captor.capture());
+        Map<String, Object> request = captor.getValue();
+        assertEquals("what is policy", request.get("question"));
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) request.get("knowledgeList");
+        assertEquals("kb-001", knowledgeList.get(0).get("knowledgeId"));
+        assertEquals(5, ((Map<String, Object>) request.get("knowledgeMatchParams")).get("topK"));
     }
 
     @Test

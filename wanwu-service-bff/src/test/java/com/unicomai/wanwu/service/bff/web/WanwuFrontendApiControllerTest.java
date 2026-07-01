@@ -2902,6 +2902,10 @@ public class WanwuFrontendApiControllerTest {
         RagChatResult result = new RagChatResult();
         result.setRagId("rag-001");
         result.setResponse("RAG local answer.");
+        Map<String, Object> searchItem = new LinkedHashMap<>();
+        searchItem.put("title", "PolicyGuide.txt");
+        searchItem.put("snippet", "RAG evidence.");
+        result.setSearchList(Collections.singletonList(searchItem));
         when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(result);
 
         mockMvc.perform(post("/user/api/v1/rag/chat/draft")
@@ -2912,6 +2916,8 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(content().string(containsString("\"type\":\"RUN_STARTED\"")))
                 .andExpect(content().string(containsString("\"type\":\"TEXT_MESSAGE_CONTENT\"")))
+                .andExpect(content().string(containsString("rag_search_list")))
+                .andExpect(content().string(containsString("PolicyGuide.txt")))
                 .andExpect(content().string(containsString("RAG local answer.")))
                 .andExpect(content().string(containsString("\"type\":\"RUN_FINISHED\"")));
 

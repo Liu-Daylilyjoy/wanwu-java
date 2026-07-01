@@ -69,6 +69,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
@@ -84,6 +85,7 @@ import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -140,20 +142,34 @@ public class AppServiceImpl implements AppService {
     private final ApplicationRepository applicationRepository;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private KnowledgeService knowledgeService;
 
     @Autowired
     public AppServiceImpl(ApplicationRepository applicationRepository) {
-        this(applicationRepository, Clock.systemUTC(), new ObjectMapper());
+        this(applicationRepository, Clock.systemUTC(), new ObjectMapper(), null);
     }
 
     public AppServiceImpl(ApplicationRepository applicationRepository, Clock clock) {
-        this(applicationRepository, clock, new ObjectMapper());
+        this(applicationRepository, clock, new ObjectMapper(), null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, KnowledgeService knowledgeService) {
+        this(applicationRepository, clock, new ObjectMapper(), knowledgeService);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, ObjectMapper objectMapper) {
+        this(applicationRepository, clock, objectMapper, null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository,
+                   Clock clock,
+                   ObjectMapper objectMapper,
+                   KnowledgeService knowledgeService) {
         this.applicationRepository = applicationRepository;
         this.clock = clock;
         this.objectMapper = objectMapper;
+        this.knowledgeService = knowledgeService;
     }
 
     @Override
@@ -1010,16 +1026,35 @@ public class AppServiceImpl implements AppService {
         if (rag == null) {
             throw new IllegalArgumentException("rag draft not found");
         }
-        if (!command.isDraft()
-                && applicationRepository.findLatestRagSnapshot(userId, orgId, command.getRagId()) == null) {
+        RagSnapshotRecord snapshot = null;
+        if (!command.isDraft()) {
+            snapshot = applicationRepository.findLatestRagSnapshot(userId, orgId, command.getRagId());
+        }
+        if (!command.isDraft() && snapshot == null) {
             throw new IllegalArgumentException("rag snapshot not found");
         }
+        RagDraftConfigRecord config = ragConfigForChat(command.isDraft(), userId, orgId, command.getRagId(), snapshot);
+        Map<String, Object> knowledgeHit = hitConfiguredKnowledge(
+                userId,
+                orgId,
+                command.getQuestion(),
+                config == null ? null : config.getKnowledgeBaseConfigJson(),
+                false);
+        Map<String, Object> qaHit = hitConfiguredKnowledge(
+                userId,
+                orgId,
+                command.getQuestion(),
+                config == null ? null : config.getQaKnowledgeBaseConfigJson(),
+                true);
+        List<Map<String, Object>> searchList = hitSearchList(knowledgeHit);
+        List<Map<String, Object>> qaSearchList = hitSearchList(qaHit);
         RagChatResult result = new RagChatResult();
         result.setRagId(command.getRagId());
         result.setQuestion(command.getQuestion());
-        result.setResponse(deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo()));
-        result.setSearchList(Collections.<Map<String, Object>>emptyList());
-        result.setQaSearchList(Collections.<Map<String, Object>>emptyList());
+        String response = deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo());
+        result.setResponse(enrichRagResponse(response, knowledgeHit, searchList, qaHit, qaSearchList));
+        result.setSearchList(searchList);
+        result.setQaSearchList(qaSearchList);
         result.setCreatedAt(clock.millis());
         return result;
     }
@@ -2149,6 +2184,142 @@ public class AppServiceImpl implements AppService {
         int fileCount = fileInfo == null ? 0 : fileInfo.size();
         String suffix = fileCount > 0 ? " Attached files: " + fileCount + "." : "";
         return "Demo RAG response from " + defaultIfBlank(rag.getName(), "RAG") + ": " + question + suffix;
+    }
+
+    private RagDraftConfigRecord ragConfigForChat(boolean draft,
+                                                  String userId,
+                                                  String orgId,
+                                                  String ragId,
+                                                  RagSnapshotRecord snapshot) {
+        if (draft) {
+            return applicationRepository.findRagConfig(userId, orgId, ragId);
+        }
+        return ragConfigFromSnapshot(snapshot);
+    }
+
+    private RagDraftConfigRecord ragConfigFromSnapshot(RagSnapshotRecord snapshot) {
+        if (snapshot == null || isBlank(snapshot.getRagConfigJson())) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(snapshot.getRagConfigJson(), RagDraftConfigRecord.class);
+        } catch (Exception ex) {
+            throw new IllegalStateException("rag snapshot config is invalid", ex);
+        }
+    }
+
+    private Map<String, Object> hitConfiguredKnowledge(String userId,
+                                                       String orgId,
+                                                       String question,
+                                                       String configJson,
+                                                       boolean qa) {
+        if (knowledgeService == null || isBlank(configJson)) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> config = mapOrDefault(configJson, new LinkedHashMap<String, Object>());
+        List<Map<String, Object>> knowledgeList = knowledgeHitList(config);
+        if (knowledgeList.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("question", question);
+        request.put("knowledgeList", knowledgeList);
+        request.put("knowledgeMatchParams", mapValue(config.get("config")));
+        Map<String, Object> hit = qa
+                ? knowledgeService.hitQaPairs(userId, orgId, request)
+                : knowledgeService.hitKnowledge(userId, orgId, request);
+        return hit == null ? Collections.<String, Object>emptyMap() : hit;
+    }
+
+    private List<Map<String, Object>> knowledgeHitList(Map<String, Object> config) {
+        List<Map<String, Object>> knowledgeList = new ArrayList<>();
+        for (Object item : listValue(config.get("knowledgebases"))) {
+            Map<String, Object> source = mapValue(item);
+            String knowledgeId = defaultIfBlank(stringValue(source.get("knowledgeId")), stringValue(source.get("id")));
+            if (isBlank(knowledgeId)) {
+                continue;
+            }
+            Map<String, Object> target = new LinkedHashMap<>();
+            target.put("knowledgeId", knowledgeId);
+            copyIfPresent(source, target, "knowledgeName", "knowledgeName");
+            copyIfPresent(source, target, "name", "knowledgeName");
+            copyIfPresent(source, target, "category", "category");
+            copyIfPresent(source, target, "external", "external");
+            copyIfPresent(source, target, "graphSwitch", "graphSwitch");
+            copyIfPresent(source, target, "metaDataFilterParams", "metaDataFilterParams");
+            knowledgeList.add(target);
+        }
+        return knowledgeList;
+    }
+
+    private void copyIfPresent(Map<String, Object> source,
+                               Map<String, Object> target,
+                               String sourceKey,
+                               String targetKey) {
+        if (source.containsKey(sourceKey) && source.get(sourceKey) != null && !target.containsKey(targetKey)) {
+            target.put(targetKey, source.get(sourceKey));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> listValue(Object value) {
+        if (value instanceof List) {
+            return (List<Object>) value;
+        }
+        return Collections.emptyList();
+    }
+
+    private List<Map<String, Object>> hitSearchList(Map<String, Object> hit) {
+        List<Map<String, Object>> searchList = new ArrayList<>();
+        if (hit == null) {
+            return searchList;
+        }
+        for (Object item : listValue(hit.get("searchList"))) {
+            if (item instanceof Map) {
+                searchList.add(new LinkedHashMap<>(mapValue(item)));
+            }
+        }
+        return searchList;
+    }
+
+    private String enrichRagResponse(String base,
+                                     Map<String, Object> knowledgeHit,
+                                     List<Map<String, Object>> searchList,
+                                     Map<String, Object> qaHit,
+                                     List<Map<String, Object>> qaSearchList) {
+        String evidence = firstNonBlank(
+                stringValue(knowledgeHit == null ? null : knowledgeHit.get("prompt")),
+                stringValue(qaHit == null ? null : qaHit.get("prompt")),
+                firstHitText(searchList),
+                firstHitText(qaSearchList));
+        if (isBlank(evidence) || base.contains(evidence)) {
+            return base;
+        }
+        return base + "\n\n" + evidence;
+    }
+
+    private String firstHitText(List<Map<String, Object>> searchList) {
+        if (searchList == null || searchList.isEmpty()) {
+            return "";
+        }
+        Map<String, Object> first = searchList.get(0);
+        return firstNonBlank(
+                stringValue(first.get("snippet")),
+                stringValue(first.get("content")),
+                stringValue(first.get("answer")),
+                stringValue(first.get("text")));
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private AssistantDraftConfigRecord resourceConfig(AssistantResourceCommand command) {
