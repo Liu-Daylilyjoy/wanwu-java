@@ -596,7 +596,7 @@ public class WanwuFrontendApiController {
         }
     }
 
-    @GetMapping("/appspace/assistant/list")
+    @GetMapping({"/appspace/assistant/list", "/assistant/list"})
     public FrontendResponse<ApplicationListResult> assistantList(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "appType", required = false) String appType,

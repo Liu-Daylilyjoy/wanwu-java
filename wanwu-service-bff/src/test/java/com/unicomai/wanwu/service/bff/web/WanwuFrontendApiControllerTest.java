@@ -221,6 +221,21 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void assistantListLegacyAliasReturnsEmptyFrontendList() throws Exception {
+        when(appService.listAssistants(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.emptyList()));
+
+        mockMvc.perform(get("/user/api/v1/assistant/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(0))
+                .andExpect(jsonPath("$.data.list", hasSize(0)));
+
+        verify(appService).listAssistants(any(ApplicationListQuery.class));
+    }
+
+    @Test
     public void settingRoutesUpdatePlatformConfig() throws Exception {
         mockMvc.perform(post("/user/api/v1/custom/tab")
                         .contentType(MediaType.APPLICATION_JSON)
