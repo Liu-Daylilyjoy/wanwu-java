@@ -86,6 +86,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final AtomicLong nextSplitterId = new AtomicLong(1000);
     private final AtomicLong nextDocId = new AtomicLong(1000);
     private final AtomicLong nextSegmentId = new AtomicLong(1000);
+    private final AtomicLong nextChildSegmentId = new AtomicLong(1000);
     private final AtomicLong nextQaPairId = new AtomicLong(1000);
     private final AtomicLong nextReportId = new AtomicLong(1000);
     private final AtomicLong nextExportRecordId = new AtomicLong(1000);
@@ -282,7 +283,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     if (!isBlank(question) && score <= 0D) {
                         continue;
                     }
-                    searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score));
+                    searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score, question));
                     scores.add(score);
                     if (searchList.size() >= topK) {
                         return knowledgeHitResult(question, searchList, scores, useGraph);
@@ -616,8 +617,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public Map<String, Object> listDocChildSegments(String userId, String orgId, Map<String, Object> request) {
-        return singleton("contentList", Collections.emptyList());
+    public synchronized Map<String, Object> listDocChildSegments(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState parent = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        if (parent != null) {
+            for (ChildSegmentState child : childSegments(parent)) {
+                rows.add(toChildSegmentInfo(child, parent.contentId));
+            }
+        }
+        return singleton("contentList", rows);
     }
 
     @Override
@@ -788,15 +797,62 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public void createDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void createDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState parent = findSegment(string(safe.get("docId")), string(safe.get("parentId")));
+        if (parent == null) {
+            throw new IllegalArgumentException("parent segment not found");
+        }
+        List<ChildSegmentState> children = childSegments(parent);
+        for (Object raw : list(safe.get("content"))) {
+            String content = string(raw);
+            if (isBlank(content)) {
+                continue;
+            }
+            ChildSegmentState child = new ChildSegmentState();
+            child.childId = "child-segment-" + nextChildSegmentId.incrementAndGet();
+            child.content = content;
+            child.childNum = children.size() + 1;
+            children.add(child);
+        }
+        parent.parent = true;
+        parent.childNum = children.size();
+        saveSnapshot();
     }
 
     @Override
-    public void updateDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState parent = findSegment(string(safe.get("docId")), string(safe.get("parentId")));
+        if (parent == null) {
+            throw new IllegalArgumentException("parent segment not found");
+        }
+        Map<String, Object> childChunk = map(safe.get("childChunk"));
+        ChildSegmentState child = findChildSegment(parent, intValue(childChunk.get("chunkNo"), -1));
+        if (child != null) {
+            child.content = string(childChunk.get("content"));
+            saveSnapshot();
+        }
     }
 
     @Override
-    public void deleteDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void deleteDocChildSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        SegmentState parent = findSegment(string(safe.get("docId")), string(safe.get("parentId")));
+        if (parent == null) {
+            return;
+        }
+        List<Integer> childNums = intList(safe.get("ChildChunkNoList"));
+        List<ChildSegmentState> children = childSegments(parent);
+        for (int i = children.size() - 1; i >= 0; i--) {
+            if (childNums.contains(children.get(i).childNum)) {
+                children.remove(i);
+            }
+        }
+        renumberChildSegments(children);
+        parent.parent = true;
+        parent.childNum = children.size();
+        saveSnapshot();
     }
 
     @Override
@@ -1693,23 +1749,42 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("contentNum", segment.contentNum);
         result.put("labels", new ArrayList<String>(segment.labels));
         result.put("isParent", segment.parent);
-        result.put("childNum", segment.childNum);
+        result.put("childNum", childSegments(segment).size());
         return result;
     }
 
     private Map<String, Object> toKnowledgeHitInfo(KnowledgeState knowledge, DocState doc,
-                                                   SegmentState segment, double score) {
+                                                   SegmentState segment, double score, String question) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> childContentList = new ArrayList<Map<String, Object>>();
+        List<Double> childScore = new ArrayList<Double>();
+        for (ChildSegmentState child : childSegments(segment)) {
+            Map<String, Object> childContent = new LinkedHashMap<String, Object>();
+            childContent.put("childSnippet", child.content);
+            double currentScore = childHitScore(question, child, score);
+            childContent.put("score", currentScore);
+            childContentList.add(childContent);
+            childScore.add(currentScore);
+        }
         result.put("title", doc.docName);
         result.put("snippet", segment.content);
         result.put("knowledgeName", knowledge.name);
-        result.put("childContentList", Collections.emptyList());
-        result.put("childScore", Collections.emptyList());
+        result.put("childContentList", childContentList);
+        result.put("childScore", childScore);
         result.put("contentType", "text");
         result.put("score", score);
         result.put("rerankInfo", Collections.emptyList());
         result.put("docId", doc.docId);
         result.put("contentId", segment.contentId);
+        return result;
+    }
+
+    private Map<String, Object> toChildSegmentInfo(ChildSegmentState child, String parentId) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("content", child.content);
+        result.put("childId", child.childId);
+        result.put("childNum", child.childNum);
+        result.put("parentId", parentId);
         return result;
     }
 
@@ -1987,6 +2062,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return null;
     }
 
+    private ChildSegmentState findChildSegment(SegmentState parent, int childNum) {
+        for (ChildSegmentState child : childSegments(parent)) {
+            if (child.childNum == childNum) {
+                return child;
+            }
+        }
+        return null;
+    }
+
     private QaPairState existingQaPair(String qaPairId) {
         QaPairState pair = qaPairsById.get(qaPairId);
         if (pair == null) {
@@ -2096,6 +2180,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return segments;
     }
 
+    private List<ChildSegmentState> childSegments(SegmentState parent) {
+        if (parent.childSegments == null) {
+            parent.childSegments = new ArrayList<ChildSegmentState>();
+        }
+        parent.childNum = parent.childSegments.size();
+        return parent.childSegments;
+    }
+
     private List<QaPairState> qaPairs(String knowledgeId) {
         List<QaPairState> pairs = qaPairsByKnowledgeId.get(knowledgeId);
         if (pairs == null) {
@@ -2191,6 +2283,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    private void renumberChildSegments(List<ChildSegmentState> children) {
+        for (int i = 0; i < children.size(); i++) {
+            children.get(i).childNum = i + 1;
+        }
+    }
+
     private Set<String> knowledgeIdsForHit(String orgId, Map<String, Object> request) {
         Set<String> knowledgeIds = new LinkedHashSet<String>();
         for (Object raw : list(request.get("knowledgeList"))) {
@@ -2229,7 +2327,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 return 0.65D;
             }
         }
+        for (ChildSegmentState child : childSegments(segment)) {
+            if (containsIgnoreCase(child.content, question)) {
+                return 0.95D;
+            }
+        }
         return 0D;
+    }
+
+    private double childHitScore(String question, ChildSegmentState child, double parentScore) {
+        if (isBlank(question)) {
+            return parentScore;
+        }
+        if (containsIgnoreCase(child.content, question)) {
+            return 1.0D;
+        }
+        return parentScore;
     }
 
     private void appendDocInfoHits(String question, Map<String, Object> request, List<Map<String, Object>> searchList,
@@ -2655,6 +2768,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         snapshot.nextSplitterId = nextSplitterId.get();
         snapshot.nextDocId = nextDocId.get();
         snapshot.nextSegmentId = nextSegmentId.get();
+        snapshot.nextChildSegmentId = nextChildSegmentId.get();
         snapshot.nextQaPairId = nextQaPairId.get();
         snapshot.nextReportId = nextReportId.get();
         snapshot.nextExportRecordId = nextExportRecordId.get();
@@ -2713,6 +2827,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         restoreSequence(nextSplitterId, snapshot.nextSplitterId);
         restoreSequence(nextDocId, snapshot.nextDocId);
         restoreSequence(nextSegmentId, snapshot.nextSegmentId);
+        restoreSequence(nextChildSegmentId, snapshot.nextChildSegmentId);
         restoreSequence(nextQaPairId, snapshot.nextQaPairId);
         restoreSequence(nextReportId, snapshot.nextReportId);
         restoreSequence(nextExportRecordId, snapshot.nextExportRecordId);
@@ -2738,6 +2853,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         for (List<SegmentState> segments : segmentsByDocId.values()) {
             for (SegmentState segment : safeList(segments)) {
                 bumpSequence(nextSegmentId, segment.contentId, "segment-");
+                List<ChildSegmentState> children = childSegments(segment);
+                renumberChildSegments(children);
+                segment.childNum = children.size();
+                for (ChildSegmentState child : children) {
+                    bumpSequence(nextChildSegmentId, child.childId, "child-segment-");
+                }
             }
         }
         for (QaPairState pair : qaPairsById.values()) {
@@ -2849,6 +2970,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private long nextSplitterId;
         private long nextDocId;
         private long nextSegmentId;
+        private long nextChildSegmentId;
         private long nextQaPairId;
         private long nextReportId;
         private long nextExportRecordId;
@@ -2913,6 +3035,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private int contentNum;
         private List<String> labels = new ArrayList<String>();
         private boolean parent;
+        private int childNum;
+        private List<ChildSegmentState> childSegments = new ArrayList<ChildSegmentState>();
+    }
+
+    private static final class ChildSegmentState {
+        private String childId;
+        private String content;
         private int childNum;
     }
 

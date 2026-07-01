@@ -1495,6 +1495,9 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(urlAnalysis("https://example.com/files/guide.txt", "guide.txt"));
         when(knowledgeService.listDocSegments(anyString(), anyString(), any(Map.class)))
                 .thenReturn(segmentPage("Guide.txt", segment("segment-001", "Guide content", true)));
+        when(knowledgeService.listDocChildSegments(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("contentList", Collections.singletonList(
+                        childSegment("child-001", "segment-001", 1, "Child content"))));
         when(knowledgeService.hitKnowledge(anyString(), anyString(), any(Map.class)))
                 .thenReturn(map("prompt", "Question: Guide\nReference 1: Guide content\n",
                         "searchList", Collections.singletonList(knowledgeHitResult("Guide.txt", "Guide content", "Dev KB")),
@@ -1648,6 +1651,14 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.fileName").value("Guide.txt"))
                 .andExpect(jsonPath("$.data.contentList[0].contentId").value("segment-001"));
 
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/segment/child/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("docId", "doc-guide")
+                        .param("contentId", "segment-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.contentList[0].childId").value("child-001"))
+                .andExpect(jsonPath("$.data.contentList[0].childNum").value(1));
+
         mockMvc.perform(post("/user/api/v1/knowledge/hit")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -1663,6 +1674,27 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"docId\":\"doc-guide\",\"content\":\"Extra segment\",\"labels\":[\"manual\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/child/create")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"parentId\":\"segment-001\",\"content\":[\"Child content\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/child/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"parentId\":\"segment-001\",\"parentChunkNo\":1,\"childChunk\":{\"chunkNo\":1,\"content\":\"Updated child\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(delete("/user/api/v1/knowledge/doc/segment/child/delete")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-guide\",\"parentId\":\"segment-001\",\"parentChunkNo\":1,\"ChildChunkNoList\":[1]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
@@ -1733,8 +1765,12 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).analyzeDocUrls(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).importDocs(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocSegments(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listDocChildSegments(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).hitKnowledge(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).createDocSegment(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).createDocChildSegment(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateDocChildSegment(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).deleteDocChildSegment(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateDocSegment(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateDocSegmentStatus(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).updateDocSegmentLabels(anyString(), anyString(), any(Map.class));
@@ -3411,6 +3447,15 @@ public class WanwuFrontendApiControllerTest {
         segment.put("isParent", false);
         segment.put("childNum", 0);
         return segment;
+    }
+
+    private Map<String, Object> childSegment(String childId, String parentId, int childNum, String content) {
+        Map<String, Object> child = new LinkedHashMap<>();
+        child.put("childId", childId);
+        child.put("parentId", parentId);
+        child.put("childNum", childNum);
+        child.put("content", content);
+        return child;
     }
 
     private Map<String, Object> knowledgeUser(String permissionId, String userId, int permissionType) {

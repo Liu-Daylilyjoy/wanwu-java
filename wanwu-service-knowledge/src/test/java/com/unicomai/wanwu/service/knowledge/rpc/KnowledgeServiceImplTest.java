@@ -389,6 +389,54 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void docChildSegmentsFollowFrontendAndGoContract() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Child KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-child", "ChildGuide.txt"));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-child", "Parent section for child chunks.", Collections.singletonList("parent")));
+
+        Map<String, Object> parentPage = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-child", "Parent section"));
+        Map<String, Object> parent = listOfMaps(parentPage.get("contentList")).get(0);
+        String parentId = (String) parent.get("contentId");
+        assertEquals(false, parent.get("isParent"));
+        assertEquals(0, parent.get("childNum"));
+
+        service.createDocChildSegment("dev-admin", "default-org",
+                childCreate("doc-child", parentId, "Child insight one", "Child insight two"));
+        Map<String, Object> childList = service.listDocChildSegments("dev-admin", "default-org",
+                childList("doc-child", parentId));
+        List<Map<String, Object>> children = listOfMaps(childList.get("contentList"));
+        assertEquals(2, children.size());
+        assertNotNull(children.get(0).get("childId"));
+        assertEquals(1, children.get(0).get("childNum"));
+        assertEquals(parentId, children.get(0).get("parentId"));
+
+        Map<String, Object> parentAfterCreate = listOfMaps(service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-child", "Parent section")).get("contentList")).get(0);
+        assertEquals(true, parentAfterCreate.get("isParent"));
+        assertEquals(2, parentAfterCreate.get("childNum"));
+
+        service.updateDocChildSegment("dev-admin", "default-org",
+                childUpdate("doc-child", parentId, 1, "Updated child insight"));
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "Updated child insight"));
+        Map<String, Object> hitItem = listOfMaps(hit.get("searchList")).get(0);
+        assertEquals("Parent section for child chunks.", hitItem.get("snippet"));
+        assertEquals(2, listOfMaps(hitItem.get("childContentList")).size());
+        assertEquals(2, ((List<Double>) hitItem.get("childScore")).size());
+        assertEquals(0.95D, ((List<Double>) hit.get("score")).get(0));
+
+        service.deleteDocChildSegment("dev-admin", "default-org", childDelete("doc-child", parentId, 1));
+        List<Map<String, Object>> remaining = listOfMaps(service.listDocChildSegments("dev-admin", "default-org",
+                childList("doc-child", parentId)).get("contentList"));
+        assertEquals(1, remaining.size());
+        assertEquals(1, remaining.get(0).get("childNum"));
+        assertEquals("Child insight two", remaining.get(0).get("content"));
+    }
+
+    @Test
     public void mutableKnowledgeStateIsPersistedAsSnapshotRecord() {
         KnowledgeRecordMapper mapper = mock(KnowledgeRecordMapper.class);
         KnowledgeServiceImpl persistent = new KnowledgeServiceImpl(mapper);
@@ -610,6 +658,40 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("docId", docId);
         request.put("contentId", contentId);
+        return request;
+    }
+
+    private Map<String, Object> childList(String docId, String parentId) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("contentId", parentId);
+        return request;
+    }
+
+    private Map<String, Object> childCreate(String docId, String parentId, String... contents) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("parentId", parentId);
+        request.put("content", java.util.Arrays.asList(contents));
+        return request;
+    }
+
+    private Map<String, Object> childUpdate(String docId, String parentId, int childNum, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("parentId", parentId);
+        Map<String, Object> childChunk = new LinkedHashMap<String, Object>();
+        childChunk.put("chunkNo", childNum);
+        childChunk.put("content", content);
+        request.put("childChunk", childChunk);
+        return request;
+    }
+
+    private Map<String, Object> childDelete(String docId, String parentId, int childNum) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("parentId", parentId);
+        request.put("ChildChunkNoList", Collections.singletonList(childNum));
         return request;
     }
 
