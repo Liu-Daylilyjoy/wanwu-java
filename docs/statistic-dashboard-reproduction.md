@@ -1,6 +1,6 @@
 # Statistic Dashboard Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Original Go Surface
 
@@ -30,7 +30,8 @@ Covered routes in this Java slice:
 - App select/list data is sourced from `AppService.listApplications`.
 - Model list data is sourced from `ModelService.listModels`.
 - API Key select/list data is sourced from `AppService.listApiKeys`.
-- API Key overview, trend, aggregate list, and detailed records now read BFF-local OpenAPI runtime calls from `OpenApiUsageMeter`.
+- API Key overview, trend, aggregate list, and detailed records now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`.
+- `OpenApiUsageMeter` remains as a BFF-local fallback if the AppService statistic path is temporarily unavailable.
 - App/model overview and trend metrics remain zero-valued development data with the same field names the Vue dashboard reads.
 - Export routes return CSV bytes so export buttons no longer hit 404. They are intentionally not a full Excel reproduction yet.
 
@@ -58,7 +59,7 @@ The controller is also included in the Docker Compose BFF smoke path for:
 
 ## Remaining Work
 
-- Persist and aggregate real model/app/API usage records in AppService-compatible storage.
+- Persist and aggregate real model/app usage records in AppService-compatible storage.
 - Reproduce the Go cron/statistics synchronization path.
 - Replace CSV compatibility exports with true Excel exports.
-- Downstream API Key statistics from BFF-local memory into the Go-equivalent Redis/MySQL aggregation model.
+- Replace the direct MySQL API Key aggregate write with the Go-equivalent Redis daily aggregation plus synchronization job when Redis parity is introduced.

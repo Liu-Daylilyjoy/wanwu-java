@@ -36,6 +36,10 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
@@ -65,11 +69,14 @@ import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
+import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -546,6 +553,69 @@ public class AppServiceImplTest {
         delete.setKeyId(created.getKeyId());
         service.deleteApiKey(delete);
         assertEquals(0, service.listApiKeys(new ApiKeyListQuery(1, 10, "dev-admin", "default-org")).getTotal());
+    }
+
+    @Test
+    public void apiKeyStatisticPersistsAggregatesAndRecords() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        service.recordApiKeyStatistic(apiKeyUsage(
+                "dev-admin-key",
+                "GET-/service/api/openapi/v1/model/list",
+                Instant.parse("2026-06-28T03:00:00Z").toEpochMilli(),
+                "200",
+                false,
+                0L,
+                20L,
+                ""));
+        service.recordApiKeyStatistic(apiKeyUsage(
+                "dev-admin-key",
+                "GET-/service/api/openapi/v1/model/list",
+                Instant.parse("2026-06-29T03:00:00Z").toEpochMilli(),
+                "200",
+                false,
+                0L,
+                40L,
+                ""));
+        service.recordApiKeyStatistic(apiKeyUsage(
+                "dev-admin-key",
+                "GET-/service/api/openapi/v1/model/list",
+                Instant.parse("2026-06-29T04:00:00Z").toEpochMilli(),
+                "500",
+                true,
+                100L,
+                0L,
+                "{\"stream\":true}"));
+
+        ApiKeyStatisticPageQuery query = new ApiKeyStatisticPageQuery(
+                "dev-admin",
+                "default-org",
+                "2026-06-29",
+                "2026-06-29",
+                Collections.singletonList("dev-admin-key"),
+                Collections.singletonList("GET-/service/api/openapi/v1/model/list"),
+                1,
+                10);
+        ApiKeyStatisticResult overview = service.getApiKeyStatistic(query);
+        assertEquals(2D, overview.getOverview().getCallCount().getValue(), 0.001D);
+        assertEquals(100D, overview.getOverview().getCallCount().getPeriodOverPeriod(), 0.001D);
+        assertEquals(1D, overview.getOverview().getCallFailure().getValue(), 0.001D);
+        assertEquals(100D, overview.getOverview().getAvgStreamCosts().getValue(), 0.001D);
+        assertEquals(40D, overview.getOverview().getAvgNonStreamCosts().getValue(), 0.001D);
+        assertEquals(2, overview.getTrend().getApiCalls().getLines().get(0).getItems().get(0).getValue(), 0.001D);
+
+        ApiKeyStatisticListResult list = service.listApiKeyStatistics(query);
+        assertEquals(1, list.getTotal());
+        assertEquals(2, list.getList().get(0).getCallCount());
+        assertEquals(1, list.getList().get(0).getCallFailure());
+        assertEquals(1, list.getList().get(0).getStreamCount());
+        assertEquals(1, list.getList().get(0).getNonStreamCount());
+
+        ApiKeyStatisticRecordResult records = service.listApiKeyStatisticRecords(query);
+        assertEquals(2, records.getTotal());
+        assertEquals("500", records.getList().get(0).getResponseStatus());
+        assertEquals("{\"stream\":true}", records.getList().get(0).getRequestBody());
     }
 
     @Test
@@ -1266,6 +1336,29 @@ public class AppServiceImplTest {
         return command;
     }
 
+    private RecordApiKeyStatisticCommand apiKeyUsage(String apiKeyId,
+                                                     String methodPath,
+                                                     long callTime,
+                                                     String status,
+                                                     boolean stream,
+                                                     long streamCosts,
+                                                     long nonStreamCosts,
+                                                     String requestBody) {
+        RecordApiKeyStatisticCommand command = new RecordApiKeyStatisticCommand();
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        command.setApiKeyId(apiKeyId);
+        command.setMethodPath(methodPath);
+        command.setCallTime(callTime);
+        command.setHttpStatus(status);
+        command.setStream(stream);
+        command.setStreamCosts(streamCosts);
+        command.setNonStreamCosts(nonStreamCosts);
+        command.setRequestBody(requestBody);
+        command.setResponseBody("");
+        return command;
+    }
+
     private AppUrlCreateCommand appUrlCreateCommand(String assistantId, String name, String expiredAt) {
         AppUrlCreateCommand command = new AppUrlCreateCommand();
         command.setAppId(assistantId);
@@ -1464,6 +1557,8 @@ public class AppServiceImplTest {
         private final List<WorkflowSnapshotRecord> workflowSnapshots = new ArrayList<>();
         private final List<AppUrlRecord> appUrls = new ArrayList<>();
         private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
+        private final List<ApiKeyUsageAggregateRecord> apiKeyUsageAggregates = new ArrayList<>();
+        private final List<ApiKeyUsageRecord> apiKeyUsageRecords = new ArrayList<>();
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
@@ -2214,6 +2309,132 @@ public class AppServiceImplTest {
         }
 
         @Override
+        public void recordApiKeyUsage(ApiKeyUsageRecord record, ApiKeyUsageAggregateRecord aggregate) {
+            record.setId(ids.incrementAndGet());
+            apiKeyUsageRecords.add(record);
+            ApiKeyUsageAggregateRecord existing = findUsageAggregate(aggregate);
+            if (existing == null) {
+                aggregate.setId(ids.incrementAndGet());
+                apiKeyUsageAggregates.add(aggregate);
+            } else {
+                addAggregate(existing, aggregate);
+            }
+        }
+
+        @Override
+        public ApiKeyUsageAggregateRecord sumApiKeyUsage(String userId,
+                                                         String orgId,
+                                                         String startDate,
+                                                         String endDate,
+                                                         List<String> apiKeyIds,
+                                                         List<String> methodPaths) {
+            ApiKeyUsageAggregateRecord sum = new ApiKeyUsageAggregateRecord();
+            for (ApiKeyUsageAggregateRecord record : apiKeyUsageAggregates) {
+                if (matchesUsage(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getApiKeyId(), record.getMethodPath(), userId, orgId, startDate, endDate,
+                        apiKeyIds, methodPaths)) {
+                    addAggregate(sum, record);
+                }
+            }
+            return sum;
+        }
+
+        @Override
+        public List<ApiKeyUsageAggregateRecord> listApiKeyUsageTrend(String userId,
+                                                                     String orgId,
+                                                                     String startDate,
+                                                                     String endDate,
+                                                                     List<String> apiKeyIds,
+                                                                     List<String> methodPaths) {
+            Map<String, ApiKeyUsageAggregateRecord> byDate = new LinkedHashMap<>();
+            for (ApiKeyUsageAggregateRecord record : apiKeyUsageAggregates) {
+                if (!matchesUsage(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getApiKeyId(), record.getMethodPath(), userId, orgId, startDate, endDate,
+                        apiKeyIds, methodPaths)) {
+                    continue;
+                }
+                ApiKeyUsageAggregateRecord sum = byDate.get(record.getDate());
+                if (sum == null) {
+                    sum = new ApiKeyUsageAggregateRecord();
+                    sum.setDate(record.getDate());
+                    byDate.put(record.getDate(), sum);
+                }
+                addAggregate(sum, record);
+            }
+            return new ArrayList<>(byDate.values());
+        }
+
+        @Override
+        public List<ApiKeyUsageAggregateRecord> listApiKeyUsageAggregates(String userId,
+                                                                          String orgId,
+                                                                          String startDate,
+                                                                          String endDate,
+                                                                          List<String> apiKeyIds,
+                                                                          List<String> methodPaths,
+                                                                          int offset,
+                                                                          int limit) {
+            List<ApiKeyUsageAggregateRecord> grouped = groupedUsage(userId, orgId, startDate, endDate, apiKeyIds, methodPaths);
+            grouped.sort(Comparator.comparing(ApiKeyUsageAggregateRecord::getCallCount).reversed());
+            return slice(grouped, offset, limit);
+        }
+
+        @Override
+        public long countApiKeyUsageAggregates(String userId,
+                                               String orgId,
+                                               String startDate,
+                                               String endDate,
+                                               List<String> apiKeyIds,
+                                               List<String> methodPaths) {
+            return groupedUsage(userId, orgId, startDate, endDate, apiKeyIds, methodPaths).size();
+        }
+
+        @Override
+        public List<ApiKeyUsageRecord> listApiKeyUsageRecords(String userId,
+                                                              String orgId,
+                                                              String startDate,
+                                                              String endDate,
+                                                              List<String> apiKeyIds,
+                                                              List<String> methodPaths,
+                                                              int offset,
+                                                              int limit) {
+            List<ApiKeyUsageRecord> matches = new ArrayList<>();
+            for (ApiKeyUsageRecord record : apiKeyUsageRecords) {
+                if (matchesUsage(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getApiKeyId(), record.getMethodPath(), userId, orgId, startDate, endDate,
+                        apiKeyIds, methodPaths)) {
+                    matches.add(record);
+                }
+            }
+            matches.sort(Comparator.comparing(ApiKeyUsageRecord::getCallTime).reversed()
+                    .thenComparing(Comparator.comparing(ApiKeyUsageRecord::getId).reversed()));
+            return slice(matches, offset, limit);
+        }
+
+        @Override
+        public long countApiKeyUsageRecords(String userId,
+                                            String orgId,
+                                            String startDate,
+                                            String endDate,
+                                            List<String> apiKeyIds,
+                                            List<String> methodPaths) {
+            return listApiKeyUsageRecords(userId, orgId, startDate, endDate, apiKeyIds, methodPaths, 0, Integer.MAX_VALUE).size();
+        }
+
+        @Override
+        public List<String> listApiKeyUsageMethodPaths(String userId, String orgId) {
+            List<String> paths = new ArrayList<>();
+            for (ApiKeyUsageAggregateRecord record : apiKeyUsageAggregates) {
+                if (userId.equals(record.getUserId())
+                        && orgId.equals(record.getOrgId())
+                        && !paths.contains(record.getMethodPath())) {
+                    paths.add(record.getMethodPath());
+                }
+            }
+            Collections.sort(paths);
+            return paths;
+        }
+
+        @Override
         public AppKeyRecord saveAppKey(AppKeyRecord record) {
             record.setId(ids.incrementAndGet());
             appKeys.add(record);
@@ -2502,6 +2723,83 @@ public class AppServiceImplTest {
             }
             messages.removeAll(removed);
             return !removed.isEmpty();
+        }
+
+        private ApiKeyUsageAggregateRecord findUsageAggregate(ApiKeyUsageAggregateRecord target) {
+            for (ApiKeyUsageAggregateRecord record : apiKeyUsageAggregates) {
+                if (sameUsageKey(record, target)) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        private boolean sameUsageKey(ApiKeyUsageAggregateRecord left, ApiKeyUsageAggregateRecord right) {
+            return left.getUserId().equals(right.getUserId())
+                    && left.getOrgId().equals(right.getOrgId())
+                    && left.getApiKeyId().equals(right.getApiKeyId())
+                    && left.getMethodPath().equals(right.getMethodPath())
+                    && left.getDate().equals(right.getDate());
+        }
+
+        private void addAggregate(ApiKeyUsageAggregateRecord target, ApiKeyUsageAggregateRecord delta) {
+            target.setCallCount(target.getCallCount() + delta.getCallCount());
+            target.setCallFailure(target.getCallFailure() + delta.getCallFailure());
+            target.setStreamCount(target.getStreamCount() + delta.getStreamCount());
+            target.setNonStreamCount(target.getNonStreamCount() + delta.getNonStreamCount());
+            target.setStreamFailure(target.getStreamFailure() + delta.getStreamFailure());
+            target.setNonStreamFailure(target.getNonStreamFailure() + delta.getNonStreamFailure());
+            target.setStreamCosts(target.getStreamCosts() + delta.getStreamCosts());
+            target.setNonStreamCosts(target.getNonStreamCosts() + delta.getNonStreamCosts());
+        }
+
+        private List<ApiKeyUsageAggregateRecord> groupedUsage(String userId,
+                                                              String orgId,
+                                                              String startDate,
+                                                              String endDate,
+                                                              List<String> apiKeyIds,
+                                                              List<String> methodPaths) {
+            Map<String, ApiKeyUsageAggregateRecord> grouped = new LinkedHashMap<>();
+            for (ApiKeyUsageAggregateRecord record : apiKeyUsageAggregates) {
+                if (!matchesUsage(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getApiKeyId(), record.getMethodPath(), userId, orgId, startDate, endDate,
+                        apiKeyIds, methodPaths)) {
+                    continue;
+                }
+                String key = record.getApiKeyId() + "|" + record.getMethodPath();
+                ApiKeyUsageAggregateRecord sum = grouped.get(key);
+                if (sum == null) {
+                    sum = new ApiKeyUsageAggregateRecord();
+                    sum.setApiKeyId(record.getApiKeyId());
+                    sum.setMethodPath(record.getMethodPath());
+                    grouped.put(key, sum);
+                }
+                addAggregate(sum, record);
+            }
+            return new ArrayList<>(grouped.values());
+        }
+
+        private boolean matchesUsage(String recordUserId,
+                                     String recordOrgId,
+                                     String recordDate,
+                                     String recordApiKeyId,
+                                     String recordMethodPath,
+                                     String userId,
+                                     String orgId,
+                                     String startDate,
+                                     String endDate,
+                                     List<String> apiKeyIds,
+                                     List<String> methodPaths) {
+            if (!userId.equals(recordUserId) || !orgId.equals(recordOrgId)) {
+                return false;
+            }
+            if (recordDate.compareTo(startDate) < 0 || recordDate.compareTo(endDate) > 0) {
+                return false;
+            }
+            if (apiKeyIds != null && !apiKeyIds.isEmpty() && !apiKeyIds.contains(recordApiKeyId)) {
+                return false;
+            }
+            return methodPaths == null || methodPaths.isEmpty() || methodPaths.contains(recordMethodPath);
         }
 
         private <T> List<T> slice(List<T> source, int offset, int limit) {

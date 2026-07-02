@@ -1,6 +1,6 @@
 # OpenAPI Reproduction Notes
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Go Source Baseline
 
@@ -30,9 +30,9 @@ Implemented in `WanwuOpenApiController` under `/service/api/openapi/v1`:
 - Knowledge management/doc/export/hit routes proxy to `KnowledgeService`.
 - MCP SSE/message/streamable compatibility shells.
 - OAuth JWKS, login, authorize, token, refresh, discovery, and userinfo development shells.
-- API-key-style OpenAPI routes are recorded by `OpenApiUsageRecordFilter` and surfaced in the App Observability API Key statistics page.
+- API-key-style OpenAPI routes are recorded by `OpenApiUsageRecordFilter`, persisted through `AppService` into MySQL, and surfaced in the App Observability API Key statistics page with a BFF-local fallback.
 
-This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Agent config/publish now reaches the Java app-service draft/version loop, Chatflow OpenAPI now keeps a local conversation/message loop, Knowledge OpenAPI now reaches the same Docker MySQL-backed Java knowledge compatibility service used by the frontend, and API Key statistics now reflect BFF-local OpenAPI calls. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, OAuth signing, and AppService/Redis/MySQL-backed API usage metric persistence.
+This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Agent config/publish now reaches the Java app-service draft/version loop, Chatflow OpenAPI now keeps a local conversation/message loop, Knowledge OpenAPI now reaches the same Docker MySQL-backed Java knowledge compatibility service used by the frontend, and API Key statistics now reflect persisted OpenAPI calls. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, OAuth signing, Redis daily statistic synchronization, and exact API-key authorization behavior.
 
 ## Verification
 

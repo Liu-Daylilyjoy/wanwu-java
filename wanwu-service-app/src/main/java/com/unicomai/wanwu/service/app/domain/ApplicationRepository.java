@@ -126,6 +126,56 @@ public interface ApplicationRepository {
 
     boolean deleteApiKey(Long id);
 
+    void recordApiKeyUsage(ApiKeyUsageRecord record, ApiKeyUsageAggregateRecord aggregate);
+
+    ApiKeyUsageAggregateRecord sumApiKeyUsage(String userId,
+                                              String orgId,
+                                              String startDate,
+                                              String endDate,
+                                              List<String> apiKeyIds,
+                                              List<String> methodPaths);
+
+    List<ApiKeyUsageAggregateRecord> listApiKeyUsageTrend(String userId,
+                                                          String orgId,
+                                                          String startDate,
+                                                          String endDate,
+                                                          List<String> apiKeyIds,
+                                                          List<String> methodPaths);
+
+    List<ApiKeyUsageAggregateRecord> listApiKeyUsageAggregates(String userId,
+                                                               String orgId,
+                                                               String startDate,
+                                                               String endDate,
+                                                               List<String> apiKeyIds,
+                                                               List<String> methodPaths,
+                                                               int offset,
+                                                               int limit);
+
+    long countApiKeyUsageAggregates(String userId,
+                                    String orgId,
+                                    String startDate,
+                                    String endDate,
+                                    List<String> apiKeyIds,
+                                    List<String> methodPaths);
+
+    List<ApiKeyUsageRecord> listApiKeyUsageRecords(String userId,
+                                                   String orgId,
+                                                   String startDate,
+                                                   String endDate,
+                                                   List<String> apiKeyIds,
+                                                   List<String> methodPaths,
+                                                   int offset,
+                                                   int limit);
+
+    long countApiKeyUsageRecords(String userId,
+                                 String orgId,
+                                 String startDate,
+                                 String endDate,
+                                 List<String> apiKeyIds,
+                                 List<String> methodPaths);
+
+    List<String> listApiKeyUsageMethodPaths(String userId, String orgId);
+
     AppKeyRecord saveAppKey(AppKeyRecord record);
 
     List<AppKeyRecord> listAppKeys(String userId, String orgId, String appId, String appType);

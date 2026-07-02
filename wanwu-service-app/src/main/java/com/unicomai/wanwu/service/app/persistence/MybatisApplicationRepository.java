@@ -5,6 +5,8 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -14,6 +16,8 @@ import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageAggregateEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageRecordEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
@@ -28,6 +32,8 @@ import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageAggregateMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageRecordMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
@@ -59,6 +65,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final WorkflowDraftMapper workflowDraftMapper;
     private final WorkflowSnapshotMapper workflowSnapshotMapper;
     private final ApiKeyMapper apiKeyMapper;
+    private final ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper;
+    private final ApiKeyUsageRecordMapper apiKeyUsageRecordMapper;
     private final AppKeyMapper appKeyMapper;
     private final AppUrlMapper appUrlMapper;
     private final AssistantConversationMapper assistantConversationMapper;
@@ -74,6 +82,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         WorkflowDraftMapper workflowDraftMapper,
                                         WorkflowSnapshotMapper workflowSnapshotMapper,
                                         ApiKeyMapper apiKeyMapper,
+                                        ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper,
+                                        ApiKeyUsageRecordMapper apiKeyUsageRecordMapper,
                                         AppKeyMapper appKeyMapper,
                                         AppUrlMapper appUrlMapper,
                                         AssistantConversationMapper assistantConversationMapper,
@@ -88,6 +98,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.workflowDraftMapper = workflowDraftMapper;
         this.workflowSnapshotMapper = workflowSnapshotMapper;
         this.apiKeyMapper = apiKeyMapper;
+        this.apiKeyUsageAggregateMapper = apiKeyUsageAggregateMapper;
+        this.apiKeyUsageRecordMapper = apiKeyUsageRecordMapper;
         this.appKeyMapper = appKeyMapper;
         this.appUrlMapper = appUrlMapper;
         this.assistantConversationMapper = assistantConversationMapper;
@@ -581,6 +593,86 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    @Transactional
+    public void recordApiKeyUsage(ApiKeyUsageRecord record, ApiKeyUsageAggregateRecord aggregate) {
+        apiKeyUsageRecordMapper.insert(toEntity(record));
+        apiKeyUsageAggregateMapper.upsertDelta(toEntity(aggregate));
+    }
+
+    @Override
+    public ApiKeyUsageAggregateRecord sumApiKeyUsage(String userId,
+                                                     String orgId,
+                                                     String startDate,
+                                                     String endDate,
+                                                     List<String> apiKeyIds,
+                                                     List<String> methodPaths) {
+        return toRecord(apiKeyUsageAggregateMapper.selectSum(
+                userId, orgId, startDate, endDate, apiKeyIds, methodPaths));
+    }
+
+    @Override
+    public List<ApiKeyUsageAggregateRecord> listApiKeyUsageTrend(String userId,
+                                                                 String orgId,
+                                                                 String startDate,
+                                                                 String endDate,
+                                                                 List<String> apiKeyIds,
+                                                                 List<String> methodPaths) {
+        return toApiKeyUsageAggregateRecords(apiKeyUsageAggregateMapper.selectTrend(
+                userId, orgId, startDate, endDate, apiKeyIds, methodPaths));
+    }
+
+    @Override
+    public List<ApiKeyUsageAggregateRecord> listApiKeyUsageAggregates(String userId,
+                                                                      String orgId,
+                                                                      String startDate,
+                                                                      String endDate,
+                                                                      List<String> apiKeyIds,
+                                                                      List<String> methodPaths,
+                                                                      int offset,
+                                                                      int limit) {
+        return toApiKeyUsageAggregateRecords(apiKeyUsageAggregateMapper.selectGroupedPage(
+                userId, orgId, startDate, endDate, apiKeyIds, methodPaths, offset, limit));
+    }
+
+    @Override
+    public long countApiKeyUsageAggregates(String userId,
+                                           String orgId,
+                                           String startDate,
+                                           String endDate,
+                                           List<String> apiKeyIds,
+                                           List<String> methodPaths) {
+        return apiKeyUsageAggregateMapper.countGrouped(userId, orgId, startDate, endDate, apiKeyIds, methodPaths);
+    }
+
+    @Override
+    public List<ApiKeyUsageRecord> listApiKeyUsageRecords(String userId,
+                                                          String orgId,
+                                                          String startDate,
+                                                          String endDate,
+                                                          List<String> apiKeyIds,
+                                                          List<String> methodPaths,
+                                                          int offset,
+                                                          int limit) {
+        return toApiKeyUsageRecords(apiKeyUsageRecordMapper.selectPage(
+                userId, orgId, startDate, endDate, apiKeyIds, methodPaths, offset, limit));
+    }
+
+    @Override
+    public long countApiKeyUsageRecords(String userId,
+                                        String orgId,
+                                        String startDate,
+                                        String endDate,
+                                        List<String> apiKeyIds,
+                                        List<String> methodPaths) {
+        return apiKeyUsageRecordMapper.countRecords(userId, orgId, startDate, endDate, apiKeyIds, methodPaths);
+    }
+
+    @Override
+    public List<String> listApiKeyUsageMethodPaths(String userId, String orgId) {
+        return apiKeyUsageAggregateMapper.selectMethodPaths(userId, orgId);
+    }
+
+    @Override
     public AppKeyRecord saveAppKey(AppKeyRecord record) {
         AppKeyEntity entity = toEntity(record);
         appKeyMapper.insert(entity);
@@ -1053,6 +1145,110 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         return record;
     }
 
+    private ApiKeyUsageAggregateEntity toEntity(ApiKeyUsageAggregateRecord record) {
+        ApiKeyUsageAggregateEntity entity = new ApiKeyUsageAggregateEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setApiKeyId(record.getApiKeyId());
+        entity.setMethodPath(record.getMethodPath());
+        entity.setDate(record.getDate());
+        entity.setCallCount(record.getCallCount());
+        entity.setCallFailure(record.getCallFailure());
+        entity.setStreamCount(record.getStreamCount());
+        entity.setNonStreamCount(record.getNonStreamCount());
+        entity.setStreamFailure(record.getStreamFailure());
+        entity.setNonStreamFailure(record.getNonStreamFailure());
+        entity.setStreamCosts(record.getStreamCosts());
+        entity.setNonStreamCosts(record.getNonStreamCosts());
+        return entity;
+    }
+
+    private List<ApiKeyUsageAggregateRecord> toApiKeyUsageAggregateRecords(List<ApiKeyUsageAggregateEntity> entities) {
+        List<ApiKeyUsageAggregateRecord> records = new java.util.ArrayList<>();
+        for (ApiKeyUsageAggregateEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private ApiKeyUsageAggregateRecord toRecord(ApiKeyUsageAggregateEntity entity) {
+        ApiKeyUsageAggregateRecord record = new ApiKeyUsageAggregateRecord();
+        if (entity == null) {
+            return record;
+        }
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setApiKeyId(entity.getApiKeyId());
+        record.setMethodPath(entity.getMethodPath());
+        record.setDate(entity.getDate());
+        record.setCallCount(value(entity.getCallCount()));
+        record.setCallFailure(value(entity.getCallFailure()));
+        record.setStreamCount(value(entity.getStreamCount()));
+        record.setNonStreamCount(value(entity.getNonStreamCount()));
+        record.setStreamFailure(value(entity.getStreamFailure()));
+        record.setNonStreamFailure(value(entity.getNonStreamFailure()));
+        record.setStreamCosts(value(entity.getStreamCosts()));
+        record.setNonStreamCosts(value(entity.getNonStreamCosts()));
+        return record;
+    }
+
+    private ApiKeyUsageRecordEntity toEntity(ApiKeyUsageRecord record) {
+        ApiKeyUsageRecordEntity entity = new ApiKeyUsageRecordEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setApiKeyId(record.getApiKeyId());
+        entity.setMethodPath(record.getMethodPath());
+        entity.setCallTime(record.getCallTime());
+        entity.setResponseStatus(record.getResponseStatus());
+        entity.setStream(record.isStream());
+        entity.setStreamCosts(record.getStreamCosts());
+        entity.setNonStreamCosts(record.getNonStreamCosts());
+        entity.setRequestBody(record.getRequestBody());
+        entity.setResponseBody(record.getResponseBody());
+        entity.setDate(record.getDate());
+        return entity;
+    }
+
+    private List<ApiKeyUsageRecord> toApiKeyUsageRecords(List<ApiKeyUsageRecordEntity> entities) {
+        List<ApiKeyUsageRecord> records = new java.util.ArrayList<>();
+        for (ApiKeyUsageRecordEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private ApiKeyUsageRecord toRecord(ApiKeyUsageRecordEntity entity) {
+        ApiKeyUsageRecord record = new ApiKeyUsageRecord();
+        if (entity == null) {
+            return record;
+        }
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setApiKeyId(entity.getApiKeyId());
+        record.setMethodPath(entity.getMethodPath());
+        record.setCallTime(value(entity.getCallTime()));
+        record.setResponseStatus(entity.getResponseStatus());
+        record.setStream(Boolean.TRUE.equals(entity.getStream()));
+        record.setStreamCosts(value(entity.getStreamCosts()));
+        record.setNonStreamCosts(value(entity.getNonStreamCosts()));
+        record.setRequestBody(entity.getRequestBody());
+        record.setResponseBody(entity.getResponseBody());
+        record.setDate(entity.getDate());
+        return record;
+    }
+
     private AppKeyEntity toEntity(AppKeyRecord record) {
         AppKeyEntity entity = new AppKeyEntity();
         entity.setId(record.getId());
@@ -1243,5 +1439,9 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setFileName(entity.getFileName());
         record.setQaType(entity.getQaType());
         return record;
+    }
+
+    private long value(Long value) {
+        return value == null ? 0L : value;
     }
 }

@@ -4,8 +4,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
@@ -25,6 +28,7 @@ import java.util.Map;
 @Component
 public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpenApiUsageRecordFilter.class);
     private static final String PREFIX = "/service/api/openapi/v1";
     private static final String DEV_ADMIN_TOKEN = "dev-token";
     private static final String DEV_APP_TOKEN = "dev-token-app";
@@ -102,18 +106,55 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
         long costs = Math.max(0L, System.currentTimeMillis() - startedAt);
         String requestBody = jsonRequestBody(request);
         boolean stream = streamRequest(request, requestBody);
+        String methodPath = request.getMethod() + "-" + request.getRequestURI();
+        long streamCosts = stream ? costs : 0L;
+        long nonStreamCosts = stream ? 0L : costs;
         usageMeter.record(
                 context.userId,
                 context.orgId,
                 context.apiKeyId,
-                request.getMethod() + "-" + request.getRequestURI(),
+                methodPath,
                 startedAt,
                 String.valueOf(status),
                 stream,
-                stream ? costs : 0L,
-                stream ? 0L : costs,
+                streamCosts,
+                nonStreamCosts,
                 requestBody,
                 "");
+        recordAppService(context, methodPath, startedAt, status, stream, streamCosts, nonStreamCosts, requestBody);
+    }
+
+    private void recordAppService(UsageContext context,
+                                  String methodPath,
+                                  long callTime,
+                                  int status,
+                                  boolean stream,
+                                  long streamCosts,
+                                  long nonStreamCosts,
+                                  String requestBody) {
+        if (appService == null) {
+            return;
+        }
+        try {
+            RecordApiKeyStatisticCommand command = new RecordApiKeyStatisticCommand();
+            command.setUserId(context.userId);
+            command.setOrgId(context.orgId);
+            command.setApiKeyId(context.apiKeyId);
+            command.setMethodPath(methodPath);
+            command.setCallTime(callTime);
+            command.setHttpStatus(String.valueOf(status));
+            command.setStream(stream);
+            command.setStreamCosts(streamCosts);
+            command.setNonStreamCosts(nonStreamCosts);
+            command.setRequestBody(requestBody);
+            command.setResponseBody("");
+            appService.recordApiKeyStatistic(command);
+        } catch (RuntimeException ex) {
+            LOGGER.warn("OpenAPI API key statistic persistence failed, falling back to local meter: apiKeyId={}, methodPath={}",
+                    context.apiKeyId,
+                    methodPath,
+                    ex);
+        }
     }
 
     private UsageContext usageContext(HttpServletRequest request) {

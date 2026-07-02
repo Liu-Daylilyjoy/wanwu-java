@@ -27,6 +27,11 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
@@ -55,6 +60,7 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -220,6 +226,14 @@ public interface AppService {
     ApiKeyPageResult listApiKeys(ApiKeyListQuery query);
 
     ApiKeyInfo getApiKeyByKey(String key);
+
+    void recordApiKeyStatistic(RecordApiKeyStatisticCommand command);
+
+    ApiKeyStatisticResult getApiKeyStatistic(ApiKeyStatisticQuery query);
+
+    ApiKeyStatisticListResult listApiKeyStatistics(ApiKeyStatisticPageQuery query);
+
+    ApiKeyStatisticRecordResult listApiKeyStatisticRecords(ApiKeyStatisticPageQuery query);
 
     AppKeyInfo createAppKey(AppKeyCreateCommand command);
 

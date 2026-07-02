@@ -4,6 +4,17 @@ import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticChart;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticLine;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticOverview;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticOverviewItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPoint;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.model.ModelService;
@@ -224,6 +235,15 @@ public class WanwuStatisticApiController {
         DateRange range = dateRange(request);
         List<String> apiKeyIds = apiKeyIds(request);
         List<String> methodPaths = methodPaths(request);
+        ApiKeyStatisticResult persistent = persistentApiStatistic(ctx, range, apiKeyIds, methodPaths);
+        if (persistent != null) {
+            Map<String, Object> data = new LinkedHashMap<String, Object>();
+            data.put("overview", apiOverview(persistent.getOverview()));
+            Map<String, Object> trend = new LinkedHashMap<String, Object>();
+            trend.put("apiCalls", apiCallChart(persistent.getTrend() == null ? null : persistent.getTrend().getApiCalls()));
+            data.put("trend", trend);
+            return FrontendResponse.ok(data);
+        }
         OpenApiUsageMeter.Aggregate current = usageMeter.total(
                 ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds, methodPaths);
         OpenApiUsageMeter.Aggregate previous = usageMeter.total(
@@ -245,6 +265,27 @@ public class WanwuStatisticApiController {
         UserContext ctx = userContext(authorization);
         DateRange range = dateRange(request);
         Map<String, ApiKeyInfo> apiKeyMap = apiKeyMap(authorization);
+        ApiKeyStatisticListResult persistent = persistentApiStatisticList(
+                ctx, range, apiKeyIds(request), methodPaths(request), pageNo(request), pageSize(request));
+        if (persistent != null) {
+            List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+            for (ApiKeyStatisticItem item : safeStatisticItems(persistent.getList())) {
+                Map<String, Object> row = metricRow();
+                ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+                row.put("name", apiKeyName(info, item.getApiKeyId()));
+                row.put("apiKey", apiKeyValue(info));
+                row.put("methodPath", item.getMethodPath());
+                row.put("callCount", item.getCallCount());
+                row.put("callFailure", item.getCallFailure());
+                row.put("failureRate", item.getCallCount() == 0L ? 0D : ((double) item.getCallFailure() / (double) item.getCallCount()) * 100D);
+                row.put("avgStreamCosts", item.getAvgStreamCosts());
+                row.put("avgNonStreamCosts", item.getAvgNonStreamCosts());
+                row.put("streamCount", item.getStreamCount());
+                row.put("nonStreamCount", item.getNonStreamCount());
+                rows.add(row);
+            }
+            return FrontendResponse.ok(page(rows, persistent.getTotal(), persistent.getPageNo(), persistent.getPageSize()));
+        }
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         for (OpenApiUsageMeter.Aggregate item : usageMeter.aggregates(
                 ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
@@ -272,6 +313,26 @@ public class WanwuStatisticApiController {
         UserContext ctx = userContext(authorization);
         DateRange range = dateRange(request);
         Map<String, ApiKeyInfo> apiKeyMap = apiKeyMap(authorization);
+        ApiKeyStatisticRecordResult persistent = persistentApiStatisticRecords(
+                ctx, range, apiKeyIds(request), methodPaths(request), pageNo(request), pageSize(request));
+        if (persistent != null) {
+            List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+            for (ApiKeyStatisticRecordItem item : safeStatisticRecords(persistent.getList())) {
+                ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                row.put("name", apiKeyName(info, item.getApiKeyId()));
+                row.put("apiKey", apiKeyValue(info));
+                row.put("methodPath", item.getMethodPath());
+                row.put("callTime", formatTime(item.getCallTime()));
+                row.put("responseStatus", item.getResponseStatus());
+                row.put("streamCosts", item.getStreamCosts());
+                row.put("nonStreamCosts", item.getNonStreamCosts());
+                row.put("requestBody", item.getRequestBody());
+                row.put("responseBody", item.getResponseBody());
+                rows.add(row);
+            }
+            return FrontendResponse.ok(page(rows, persistent.getTotal(), persistent.getPageNo(), persistent.getPageSize()));
+        }
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         for (OpenApiUsageMeter.Record item : usageMeter.records(
                 ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
@@ -370,10 +431,28 @@ public class WanwuStatisticApiController {
         return overview;
     }
 
+    private Map<String, Object> apiOverview(ApiKeyStatisticOverview source) {
+        Map<String, Object> overview = new LinkedHashMap<String, Object>();
+        overview.put("callCount", overviewItem(source == null ? null : source.getCallCount()));
+        overview.put("callFailure", overviewItem(source == null ? null : source.getCallFailure()));
+        overview.put("avgStreamCosts", overviewItem(source == null ? null : source.getAvgStreamCosts()));
+        overview.put("avgNonStreamCosts", overviewItem(source == null ? null : source.getAvgNonStreamCosts()));
+        overview.put("streamCount", overviewItem(source == null ? null : source.getStreamCount()));
+        overview.put("nonStreamCount", overviewItem(source == null ? null : source.getNonStreamCount()));
+        return overview;
+    }
+
     private Map<String, Object> overviewItem(double current, double previous) {
         Map<String, Object> item = new LinkedHashMap<String, Object>();
         item.put("value", current);
         item.put("periodOverPeriod", previous == 0D ? -9999 : ((current - previous) / previous) * 100D);
+        return item;
+    }
+
+    private Map<String, Object> overviewItem(ApiKeyStatisticOverviewItem source) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("value", source == null ? 0D : source.getValue());
+        item.put("periodOverPeriod", source == null ? -9999D : source.getPeriodOverPeriod());
         return item;
     }
 
@@ -420,6 +499,31 @@ public class WanwuStatisticApiController {
         return line;
     }
 
+    private Map<String, Object> apiCallChart(ApiKeyStatisticChart source) {
+        Map<String, Object> chart = new LinkedHashMap<String, Object>();
+        chart.put("tableName", source == null ? "app_statistic_api_key_call_trend" : source.getTableName());
+        List<Map<String, Object>> lines = new ArrayList<Map<String, Object>>();
+        if (source != null && source.getLines() != null) {
+            for (ApiKeyStatisticLine sourceLine : source.getLines()) {
+                Map<String, Object> line = new LinkedHashMap<String, Object>();
+                line.put("lineName", sourceLine.getLineName());
+                List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+                if (sourceLine.getItems() != null) {
+                    for (ApiKeyStatisticPoint sourceItem : sourceLine.getItems()) {
+                        Map<String, Object> item = new LinkedHashMap<String, Object>();
+                        item.put("key", sourceItem.getKey());
+                        item.put("value", sourceItem.getValue());
+                        items.add(item);
+                    }
+                }
+                line.put("items", items);
+                lines.add(line);
+            }
+        }
+        chart.put("lines", lines);
+        return chart;
+    }
+
     private List<String> apiKeyIds(Map<String, Object> request) {
         List<String> keys = splitList(request == null ? null : request.get("apiKeyIds"));
         if (keys.contains("ALL")) {
@@ -461,6 +565,69 @@ public class WanwuStatisticApiController {
 
     private String apiKeyValue(ApiKeyInfo info) {
         return info == null ? "Deleted API Key" : defaultIfBlank(info.getKey(), "");
+    }
+
+    private ApiKeyStatisticResult persistentApiStatistic(UserContext ctx,
+                                                        DateRange range,
+                                                        List<String> apiKeyIds,
+                                                        List<String> methodPaths) {
+        try {
+            return appService == null ? null : appService.getApiKeyStatistic(apiQuery(ctx, range, apiKeyIds, methodPaths));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private ApiKeyStatisticListResult persistentApiStatisticList(UserContext ctx,
+                                                                 DateRange range,
+                                                                 List<String> apiKeyIds,
+                                                                 List<String> methodPaths,
+                                                                 int pageNo,
+                                                                 int pageSize) {
+        try {
+            return appService == null ? null : appService.listApiKeyStatistics(
+                    apiPageQuery(ctx, range, apiKeyIds, methodPaths, pageNo, pageSize));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private ApiKeyStatisticRecordResult persistentApiStatisticRecords(UserContext ctx,
+                                                                      DateRange range,
+                                                                      List<String> apiKeyIds,
+                                                                      List<String> methodPaths,
+                                                                      int pageNo,
+                                                                      int pageSize) {
+        try {
+            return appService == null ? null : appService.listApiKeyStatisticRecords(
+                    apiPageQuery(ctx, range, apiKeyIds, methodPaths, pageNo, pageSize));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private ApiKeyStatisticPageQuery apiPageQuery(UserContext ctx,
+                                                  DateRange range,
+                                                  List<String> apiKeyIds,
+                                                  List<String> methodPaths,
+                                                  int pageNo,
+                                                  int pageSize) {
+        return new ApiKeyStatisticPageQuery(
+                ctx.userId,
+                ctx.orgId,
+                range.startDate.toString(),
+                range.endDate.toString(),
+                apiKeyIds,
+                methodPaths,
+                pageNo,
+                pageSize);
+    }
+
+    private ApiKeyStatisticPageQuery apiQuery(UserContext ctx,
+                                              DateRange range,
+                                              List<String> apiKeyIds,
+                                              List<String> methodPaths) {
+        return apiPageQuery(ctx, range, apiKeyIds, methodPaths, 1, 10);
     }
 
     private String formatTime(long epochMillis) {
@@ -572,6 +739,14 @@ public class WanwuStatisticApiController {
 
     private List<ApiKeyInfo> safeApiKeys(List<ApiKeyInfo> rows) {
         return rows == null ? Collections.<ApiKeyInfo>emptyList() : rows;
+    }
+
+    private List<ApiKeyStatisticItem> safeStatisticItems(List<ApiKeyStatisticItem> rows) {
+        return rows == null ? Collections.<ApiKeyStatisticItem>emptyList() : rows;
+    }
+
+    private List<ApiKeyStatisticRecordItem> safeStatisticRecords(List<ApiKeyStatisticRecordItem> rows) {
+        return rows == null ? Collections.<ApiKeyStatisticRecordItem>emptyList() : rows;
     }
 
     private List<String> split(String value) {

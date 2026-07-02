@@ -28,6 +28,19 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApiKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyPageResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatusCommand;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticChart;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticLine;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticOverview;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticOverviewItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPoint;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordItem;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticResult;
+import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticTrend;
 import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
@@ -59,6 +72,7 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -77,6 +91,8 @@ import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -97,6 +113,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -866,6 +883,120 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("api key not found");
         }
         return toApiKeyInfo(record);
+    }
+
+    @Override
+    public void recordApiKeyStatistic(RecordApiKeyStatisticCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("api key statistic command is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (isBlank(command.getApiKeyId())) {
+            throw new IllegalArgumentException("api key id is required");
+        }
+        if (isBlank(command.getMethodPath())) {
+            throw new IllegalArgumentException("method path is required");
+        }
+        long now = clock.millis();
+        long callTime = command.getCallTime() <= 0L ? now : command.getCallTime();
+        String date = formatDateOnly(callTime);
+        String status = defaultIfBlank(command.getHttpStatus(), "200");
+        boolean success = "200".equals(status);
+
+        ApiKeyUsageRecord record = new ApiKeyUsageRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setApiKeyId(command.getApiKeyId());
+        record.setMethodPath(command.getMethodPath());
+        record.setCallTime(callTime);
+        record.setResponseStatus(status);
+        record.setStream(command.isStream());
+        record.setStreamCosts(command.getStreamCosts());
+        record.setNonStreamCosts(command.getNonStreamCosts());
+        record.setRequestBody(defaultIfBlank(command.getRequestBody(), ""));
+        record.setResponseBody(defaultIfBlank(command.getResponseBody(), ""));
+        record.setDate(date);
+
+        ApiKeyUsageAggregateRecord aggregate = new ApiKeyUsageAggregateRecord();
+        aggregate.setCreatedAt(now);
+        aggregate.setUpdatedAt(now);
+        aggregate.setUserId(userId);
+        aggregate.setOrgId(orgId);
+        aggregate.setApiKeyId(command.getApiKeyId());
+        aggregate.setMethodPath(command.getMethodPath());
+        aggregate.setDate(date);
+        aggregate.setCallCount(1L);
+        aggregate.setCallFailure(success ? 0L : 1L);
+        aggregate.setStreamCount(command.isStream() ? 1L : 0L);
+        aggregate.setNonStreamCount(command.isStream() ? 0L : 1L);
+        aggregate.setStreamFailure(command.isStream() && !success ? 1L : 0L);
+        aggregate.setNonStreamFailure(!command.isStream() && !success ? 1L : 0L);
+        aggregate.setStreamCosts(command.getStreamCosts());
+        aggregate.setNonStreamCosts(command.getNonStreamCosts());
+        applicationRepository.recordApiKeyUsage(record, aggregate);
+    }
+
+    @Override
+    public ApiKeyStatisticResult getApiKeyStatistic(ApiKeyStatisticQuery query) {
+        ApiKeyQueryContext ctx = apiKeyQuery(query);
+        ApiKeyUsageAggregateRecord current = applicationRepository.sumApiKeyUsage(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths);
+        ApiKeyUsageAggregateRecord previous = applicationRepository.sumApiKeyUsage(
+                ctx.userId, ctx.orgId, ctx.previousStartDate, ctx.previousEndDate, ctx.apiKeyIds, ctx.methodPaths);
+
+        ApiKeyStatisticResult result = new ApiKeyStatisticResult();
+        result.setOverview(toStatisticOverview(current, previous));
+        result.setTrend(toStatisticTrend(applicationRepository.listApiKeyUsageTrend(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths),
+                ctx.dates));
+        return result;
+    }
+
+    @Override
+    public ApiKeyStatisticListResult listApiKeyStatistics(ApiKeyStatisticPageQuery query) {
+        ApiKeyQueryContext ctx = apiKeyQuery(query);
+        int pageNo = normalizePageNo(query == null ? 1 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 10 : query.getPageSize());
+        List<ApiKeyUsageAggregateRecord> records = applicationRepository.listApiKeyUsageAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths,
+                offset(pageNo, pageSize), pageSize);
+
+        List<ApiKeyStatisticItem> items = new ArrayList<ApiKeyStatisticItem>(records.size());
+        for (ApiKeyUsageAggregateRecord record : records) {
+            items.add(toStatisticItem(record));
+        }
+        ApiKeyStatisticListResult result = new ApiKeyStatisticListResult();
+        result.setList(items);
+        result.setTotal(applicationRepository.countApiKeyUsageAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths));
+        result.setPageNo(pageNo);
+        result.setPageSize(pageSize);
+        return result;
+    }
+
+    @Override
+    public ApiKeyStatisticRecordResult listApiKeyStatisticRecords(ApiKeyStatisticPageQuery query) {
+        ApiKeyQueryContext ctx = apiKeyQuery(query);
+        int pageNo = normalizePageNo(query == null ? 1 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 10 : query.getPageSize());
+        List<ApiKeyUsageRecord> records = applicationRepository.listApiKeyUsageRecords(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths,
+                offset(pageNo, pageSize), pageSize);
+
+        List<ApiKeyStatisticRecordItem> items = new ArrayList<ApiKeyStatisticRecordItem>(records.size());
+        for (ApiKeyUsageRecord record : records) {
+            items.add(toStatisticRecordItem(record));
+        }
+        ApiKeyStatisticRecordResult result = new ApiKeyStatisticRecordResult();
+        result.setList(items);
+        result.setTotal(applicationRepository.countApiKeyUsageRecords(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths));
+        result.setPageNo(pageNo);
+        result.setPageSize(pageSize);
+        return result;
     }
 
     @Override
@@ -2050,6 +2181,93 @@ public class AppServiceImpl implements AppService {
         return info;
     }
 
+    private ApiKeyStatisticOverview toStatisticOverview(ApiKeyUsageAggregateRecord current,
+                                                        ApiKeyUsageAggregateRecord previous) {
+        ApiKeyStatisticOverview overview = new ApiKeyStatisticOverview();
+        overview.setCallCount(overviewItem(current.getCallCount(), previous.getCallCount()));
+        overview.setCallFailure(overviewItem(current.getCallFailure(), previous.getCallFailure()));
+        overview.setAvgStreamCosts(overviewItem(avg(current.getStreamCosts(), current.getStreamCount()),
+                avg(previous.getStreamCosts(), previous.getStreamCount())));
+        overview.setAvgNonStreamCosts(overviewItem(avg(current.getNonStreamCosts(), current.getNonStreamCount()),
+                avg(previous.getNonStreamCosts(), previous.getNonStreamCount())));
+        overview.setStreamCount(overviewItem(current.getStreamCount(), previous.getStreamCount()));
+        overview.setNonStreamCount(overviewItem(current.getNonStreamCount(), previous.getNonStreamCount()));
+        return overview;
+    }
+
+    private ApiKeyStatisticOverviewItem overviewItem(double current, double previous) {
+        return new ApiKeyStatisticOverviewItem(current, previous == 0D ? -9999D : ((current - previous) / previous) * 100D);
+    }
+
+    private ApiKeyStatisticTrend toStatisticTrend(List<ApiKeyUsageAggregateRecord> records, List<String> dates) {
+        Map<String, ApiKeyUsageAggregateRecord> byDate = new HashMap<String, ApiKeyUsageAggregateRecord>();
+        for (ApiKeyUsageAggregateRecord record : records) {
+            byDate.put(record.getDate(), record);
+        }
+        ApiKeyStatisticChart chart = new ApiKeyStatisticChart();
+        chart.setTableName("app_statistic_api_key_call_trend");
+        List<ApiKeyStatisticLine> lines = new ArrayList<ApiKeyStatisticLine>();
+        lines.add(statisticLine("app_statistic_api_call_count_total", dates, byDate, "total"));
+        lines.add(statisticLine("app_statistic_api_call_success", dates, byDate, "success"));
+        lines.add(statisticLine("app_statistic_api_call_failure", dates, byDate, "failure"));
+        chart.setLines(lines);
+        ApiKeyStatisticTrend trend = new ApiKeyStatisticTrend();
+        trend.setApiCalls(chart);
+        return trend;
+    }
+
+    private ApiKeyStatisticLine statisticLine(String name,
+                                              List<String> dates,
+                                              Map<String, ApiKeyUsageAggregateRecord> byDate,
+                                              String field) {
+        List<ApiKeyStatisticPoint> points = new ArrayList<ApiKeyStatisticPoint>();
+        for (String date : dates) {
+            ApiKeyUsageAggregateRecord record = byDate.get(date);
+            double value = 0D;
+            if (record != null) {
+                if ("total".equals(field)) {
+                    value = record.getCallCount();
+                } else if ("success".equals(field)) {
+                    value = record.getCallCount() - record.getCallFailure();
+                } else if ("failure".equals(field)) {
+                    value = record.getCallFailure();
+                }
+            }
+            points.add(new ApiKeyStatisticPoint(date, value));
+        }
+        return new ApiKeyStatisticLine(name, points);
+    }
+
+    private ApiKeyStatisticItem toStatisticItem(ApiKeyUsageAggregateRecord record) {
+        ApiKeyStatisticItem item = new ApiKeyStatisticItem();
+        item.setApiKeyId(defaultIfBlank(record.getApiKeyId(), ""));
+        item.setMethodPath(defaultIfBlank(record.getMethodPath(), ""));
+        item.setCallCount(record.getCallCount());
+        item.setCallFailure(record.getCallFailure());
+        item.setAvgStreamCosts(avg(record.getStreamCosts(), record.getStreamCount()));
+        item.setAvgNonStreamCosts(avg(record.getNonStreamCosts(), record.getNonStreamCount()));
+        item.setStreamCount(record.getStreamCount());
+        item.setNonStreamCount(record.getNonStreamCount());
+        return item;
+    }
+
+    private ApiKeyStatisticRecordItem toStatisticRecordItem(ApiKeyUsageRecord record) {
+        ApiKeyStatisticRecordItem item = new ApiKeyStatisticRecordItem();
+        item.setApiKeyId(defaultIfBlank(record.getApiKeyId(), ""));
+        item.setMethodPath(defaultIfBlank(record.getMethodPath(), ""));
+        item.setCallTime(record.getCallTime());
+        item.setResponseStatus(defaultIfBlank(record.getResponseStatus(), ""));
+        item.setStreamCosts(record.getStreamCosts());
+        item.setNonStreamCosts(record.getNonStreamCosts());
+        item.setRequestBody(defaultIfBlank(record.getRequestBody(), ""));
+        item.setResponseBody(defaultIfBlank(record.getResponseBody(), ""));
+        return item;
+    }
+
+    private double avg(long total, long count) {
+        return count <= 0L ? 0D : ((double) total) / ((double) count);
+    }
+
     private AppKeyInfo toAppKeyInfo(AppKeyRecord record) {
         AppKeyInfo info = new AppKeyInfo();
         info.setApiId(record.getId() == null ? "" : String.valueOf(record.getId()));
@@ -2169,6 +2387,63 @@ public class AppServiceImpl implements AppService {
 
     private int offset(int pageNo, int pageSize) {
         return (normalizePageNo(pageNo) - 1) * normalizePageSize(pageSize);
+    }
+
+    private ApiKeyQueryContext apiKeyQuery(ApiKeyStatisticQuery query) {
+        LocalDate end = parseStatisticDate(query == null ? "" : query.getEndDate(),
+                Instant.ofEpochMilli(clock.millis()).atZone(APP_ZONE).toLocalDate());
+        LocalDate start = parseStatisticDate(query == null ? "" : query.getStartDate(), end.minusDays(6));
+        if (start.isAfter(end)) {
+            start = end;
+        }
+        long days = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1L;
+        LocalDate previousEnd = start.minusDays(1);
+        LocalDate previousStart = previousEnd.minusDays(Math.max(0L, days - 1L));
+        return new ApiKeyQueryContext(
+                query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID),
+                query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID),
+                start.toString(),
+                end.toString(),
+                previousStart.toString(),
+                previousEnd.toString(),
+                normalizeStatisticFilter(query == null ? null : query.getApiKeyIds()),
+                normalizeStatisticFilter(query == null ? null : query.getMethodPaths()),
+                statisticDates(start, end));
+    }
+
+    private LocalDate parseStatisticDate(String value, LocalDate fallback) {
+        if (isBlank(value)) {
+            return fallback;
+        }
+        try {
+            return LocalDate.parse(value.trim(), DATE_ONLY_FORMATTER);
+        } catch (RuntimeException ex) {
+            return fallback;
+        }
+    }
+
+    private List<String> normalizeStatisticFilter(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> result = new ArrayList<String>();
+        for (String value : values) {
+            if (isBlank(value) || "ALL".equalsIgnoreCase(value.trim())) {
+                continue;
+            }
+            result.add(value.trim());
+        }
+        return result;
+    }
+
+    private List<String> statisticDates(LocalDate start, LocalDate end) {
+        List<String> dates = new ArrayList<String>();
+        LocalDate cursor = start;
+        while (!cursor.isAfter(end) && dates.size() < 366) {
+            dates.add(cursor.toString());
+            cursor = cursor.plusDays(1);
+        }
+        return dates;
     }
 
     private String conversationTitle(String prompt) {
@@ -3447,6 +3722,38 @@ public class AppServiceImpl implements AppService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static class ApiKeyQueryContext {
+        private final String userId;
+        private final String orgId;
+        private final String startDate;
+        private final String endDate;
+        private final String previousStartDate;
+        private final String previousEndDate;
+        private final List<String> apiKeyIds;
+        private final List<String> methodPaths;
+        private final List<String> dates;
+
+        private ApiKeyQueryContext(String userId,
+                                   String orgId,
+                                   String startDate,
+                                   String endDate,
+                                   String previousStartDate,
+                                   String previousEndDate,
+                                   List<String> apiKeyIds,
+                                   List<String> methodPaths,
+                                   List<String> dates) {
+            this.userId = userId;
+            this.orgId = orgId;
+            this.startDate = startDate;
+            this.endDate = endDate;
+            this.previousStartDate = previousStartDate;
+            this.previousEndDate = previousEndDate;
+            this.apiKeyIds = apiKeyIds;
+            this.methodPaths = methodPaths;
+            this.dates = dates;
+        }
     }
 
     private static class VersionContext {

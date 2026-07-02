@@ -17,8 +17,12 @@ Date: 2026-07-01
   - Skips MCP and OAuth public runtime routes, which are not wired through Go `APIKeyRecord`.
   - Uses `METHOD-/service/api/openapi/v1/...` as `methodPath`.
   - Treats `/chatflow/chat` as stream and detects `stream=true` from JSON request bodies for request-driven routes.
-- `OpenApiUsageMeter` keeps a BFF-local rolling record buffer and aggregates by `userId`, `orgId`, `apiKeyId`, `methodPath`, and date.
-- `WanwuStatisticApiController` now uses that meter for:
+- The filter calls `AppService.recordApiKeyStatistic` so runtime calls are persisted in MySQL:
+  - `api_key_records` stores detailed request/response records.
+  - `api_key_statistics` stores daily aggregate counters by `userId`, `orgId`, `apiKeyId`, `methodPath`, and date.
+  - The aggregate write uses a MySQL upsert so repeated calls increment totals atomically.
+- `OpenApiUsageMeter` still keeps a BFF-local rolling record buffer as a runtime fallback.
+- `WanwuStatisticApiController` now prefers AppService/MySQL statistics and falls back to the local meter for:
   - `POST /user/api/v1/statistic/api`
   - `POST /user/api/v1/statistic/api/list`
   - `POST /user/api/v1/statistic/api/record`
@@ -27,7 +31,9 @@ Date: 2026-07-01
 ## Verification
 
 - `WanwuStatisticApiControllerTest#openApiCallsAreVisibleInApiKeyStatistics` verifies that one OpenAPI RAG stream call appears in API Key overview, aggregate list, and detailed record responses.
+- `AppServiceImplTest#apiKeyStatisticPersistsAggregatesAndRecords` verifies current/previous period aggregation, trend output, stream/non-stream costs, and detailed record data.
+- `WanwuStatisticApiControllerTest#apiKeyStatisticsUsePersistentAppServiceWhenAvailable` verifies that the BFF reads AppService statistics before using the fallback meter.
 
 ## Remaining Gap
 
-This is the runtime compatibility loop needed by the zero-change frontend. Full Go parity still needs AppService RPC methods for API Key statistics, Redis daily aggregation, MySQL persistence for aggregate/detail tables, export from persisted data, and exact authorization middleware behavior.
+This is the runtime compatibility loop needed by the zero-change frontend. Full Go parity still needs the Redis daily aggregation and cron synchronization path, export from persisted data, real runtime cost values from provider execution, and exact authorization middleware behavior.
