@@ -9,8 +9,10 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
+import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
@@ -20,6 +22,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageAggregateEnt
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageRecordEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppStatisticEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
@@ -29,6 +32,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.ModelStatisticEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
@@ -36,6 +40,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageAggregateMap
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageRecordMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppStatisticMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
@@ -45,6 +50,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.ModelStatisticMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.WorkflowDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.WorkflowSnapshotMapper;
 import org.springframework.stereotype.Repository;
@@ -67,6 +73,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final ApiKeyMapper apiKeyMapper;
     private final ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper;
     private final ApiKeyUsageRecordMapper apiKeyUsageRecordMapper;
+    private final AppStatisticMapper appStatisticMapper;
+    private final ModelStatisticMapper modelStatisticMapper;
     private final AppKeyMapper appKeyMapper;
     private final AppUrlMapper appUrlMapper;
     private final AssistantConversationMapper assistantConversationMapper;
@@ -84,6 +92,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         ApiKeyMapper apiKeyMapper,
                                         ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper,
                                         ApiKeyUsageRecordMapper apiKeyUsageRecordMapper,
+                                        AppStatisticMapper appStatisticMapper,
+                                        ModelStatisticMapper modelStatisticMapper,
                                         AppKeyMapper appKeyMapper,
                                         AppUrlMapper appUrlMapper,
                                         AssistantConversationMapper assistantConversationMapper,
@@ -100,6 +110,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.apiKeyMapper = apiKeyMapper;
         this.apiKeyUsageAggregateMapper = apiKeyUsageAggregateMapper;
         this.apiKeyUsageRecordMapper = apiKeyUsageRecordMapper;
+        this.appStatisticMapper = appStatisticMapper;
+        this.modelStatisticMapper = modelStatisticMapper;
         this.appKeyMapper = appKeyMapper;
         this.appUrlMapper = appUrlMapper;
         this.assistantConversationMapper = assistantConversationMapper;
@@ -670,6 +682,103 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     public List<String> listApiKeyUsageMethodPaths(String userId, String orgId) {
         return apiKeyUsageAggregateMapper.selectMethodPaths(userId, orgId);
+    }
+
+    @Override
+    public void recordAppStatistic(AppStatisticAggregateRecord aggregate) {
+        appStatisticMapper.upsertDelta(toEntity(aggregate));
+    }
+
+    @Override
+    public AppStatisticAggregateRecord sumAppStatistic(String userId,
+                                                       String orgId,
+                                                       String startDate,
+                                                       String endDate,
+                                                       List<String> appIds,
+                                                       String appType) {
+        return toRecord(appStatisticMapper.selectSum(userId, orgId, startDate, endDate, appIds, appType));
+    }
+
+    @Override
+    public List<AppStatisticAggregateRecord> listAppStatisticTrend(String userId,
+                                                                   String orgId,
+                                                                   String startDate,
+                                                                   String endDate,
+                                                                   List<String> appIds,
+                                                                   String appType) {
+        return toAppStatisticRecords(appStatisticMapper.selectTrend(userId, orgId, startDate, endDate, appIds, appType));
+    }
+
+    @Override
+    public List<AppStatisticAggregateRecord> listAppStatisticAggregates(String userId,
+                                                                        String orgId,
+                                                                        String startDate,
+                                                                        String endDate,
+                                                                        List<String> appIds,
+                                                                        String appType,
+                                                                        int offset,
+                                                                        int limit) {
+        return toAppStatisticRecords(appStatisticMapper.selectGroupedPage(
+                userId, orgId, startDate, endDate, appIds, appType, offset, limit));
+    }
+
+    @Override
+    public long countAppStatisticAggregates(String userId,
+                                            String orgId,
+                                            String startDate,
+                                            String endDate,
+                                            List<String> appIds,
+                                            String appType) {
+        return appStatisticMapper.countGrouped(userId, orgId, startDate, endDate, appIds, appType);
+    }
+
+    @Override
+    public void recordModelStatistic(ModelStatisticAggregateRecord aggregate) {
+        modelStatisticMapper.upsertDelta(toEntity(aggregate));
+    }
+
+    @Override
+    public ModelStatisticAggregateRecord sumModelStatistic(String userId,
+                                                           String orgId,
+                                                           String startDate,
+                                                           String endDate,
+                                                           List<String> modelIds,
+                                                           String modelType) {
+        return toRecord(modelStatisticMapper.selectSum(userId, orgId, startDate, endDate, modelIds, modelType));
+    }
+
+    @Override
+    public List<ModelStatisticAggregateRecord> listModelStatisticTrend(String userId,
+                                                                       String orgId,
+                                                                       String startDate,
+                                                                       String endDate,
+                                                                       List<String> modelIds,
+                                                                       String modelType) {
+        return toModelStatisticRecords(modelStatisticMapper.selectTrend(
+                userId, orgId, startDate, endDate, modelIds, modelType));
+    }
+
+    @Override
+    public List<ModelStatisticAggregateRecord> listModelStatisticAggregates(String userId,
+                                                                           String orgId,
+                                                                           String startDate,
+                                                                           String endDate,
+                                                                           List<String> modelIds,
+                                                                           String modelType,
+                                                                           int offset,
+                                                                           int limit) {
+        return toModelStatisticRecords(modelStatisticMapper.selectGroupedPage(
+                userId, orgId, startDate, endDate, modelIds, modelType, offset, limit));
+    }
+
+    @Override
+    public long countModelStatisticAggregates(String userId,
+                                              String orgId,
+                                              String startDate,
+                                              String endDate,
+                                              List<String> modelIds,
+                                              String modelType) {
+        return modelStatisticMapper.countGrouped(userId, orgId, startDate, endDate, modelIds, modelType);
     }
 
     @Override
@@ -1246,6 +1355,134 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setRequestBody(entity.getRequestBody());
         record.setResponseBody(entity.getResponseBody());
         record.setDate(entity.getDate());
+        return record;
+    }
+
+    private AppStatisticEntity toEntity(AppStatisticAggregateRecord record) {
+        AppStatisticEntity entity = new AppStatisticEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setAppId(record.getAppId());
+        entity.setAppType(record.getAppType());
+        entity.setDate(record.getDate());
+        entity.setCallCount(record.getCallCount());
+        entity.setCallFailure(record.getCallFailure());
+        entity.setStreamCount(record.getStreamCount());
+        entity.setStreamFailure(record.getStreamFailure());
+        entity.setStreamCosts(record.getStreamCosts());
+        entity.setNonStreamCount(record.getNonStreamCount());
+        entity.setNonStreamFailure(record.getNonStreamFailure());
+        entity.setNonStreamCosts(record.getNonStreamCosts());
+        entity.setWebCallCount(record.getWebCallCount());
+        entity.setWebCallFailure(record.getWebCallFailure());
+        entity.setOpenapiCallCount(record.getOpenapiCallCount());
+        entity.setOpenapiCallFailure(record.getOpenapiCallFailure());
+        entity.setWebUrlCallCount(record.getWebUrlCallCount());
+        entity.setWebUrlCallFailure(record.getWebUrlCallFailure());
+        return entity;
+    }
+
+    private List<AppStatisticAggregateRecord> toAppStatisticRecords(List<AppStatisticEntity> entities) {
+        List<AppStatisticAggregateRecord> records = new java.util.ArrayList<>();
+        for (AppStatisticEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppStatisticAggregateRecord toRecord(AppStatisticEntity entity) {
+        AppStatisticAggregateRecord record = new AppStatisticAggregateRecord();
+        if (entity == null) {
+            return record;
+        }
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setAppId(entity.getAppId());
+        record.setAppType(entity.getAppType());
+        record.setDate(entity.getDate());
+        record.setCallCount(value(entity.getCallCount()));
+        record.setCallFailure(value(entity.getCallFailure()));
+        record.setStreamCount(value(entity.getStreamCount()));
+        record.setStreamFailure(value(entity.getStreamFailure()));
+        record.setStreamCosts(value(entity.getStreamCosts()));
+        record.setNonStreamCount(value(entity.getNonStreamCount()));
+        record.setNonStreamFailure(value(entity.getNonStreamFailure()));
+        record.setNonStreamCosts(value(entity.getNonStreamCosts()));
+        record.setWebCallCount(value(entity.getWebCallCount()));
+        record.setWebCallFailure(value(entity.getWebCallFailure()));
+        record.setOpenapiCallCount(value(entity.getOpenapiCallCount()));
+        record.setOpenapiCallFailure(value(entity.getOpenapiCallFailure()));
+        record.setWebUrlCallCount(value(entity.getWebUrlCallCount()));
+        record.setWebUrlCallFailure(value(entity.getWebUrlCallFailure()));
+        return record;
+    }
+
+    private ModelStatisticEntity toEntity(ModelStatisticAggregateRecord record) {
+        ModelStatisticEntity entity = new ModelStatisticEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setOrgId(record.getOrgId());
+        entity.setUserId(record.getUserId());
+        entity.setModelId(record.getModelId());
+        entity.setModel(record.getModel());
+        entity.setProvider(record.getProvider());
+        entity.setModelType(record.getModelType());
+        entity.setDate(record.getDate());
+        entity.setPromptTokens(record.getPromptTokens());
+        entity.setCompletionTokens(record.getCompletionTokens());
+        entity.setTotalTokens(record.getTotalTokens());
+        entity.setFirstTokenLatency(record.getFirstTokenLatency());
+        entity.setCosts(record.getCosts());
+        entity.setCallCount(record.getCallCount());
+        entity.setStreamCount(record.getStreamCount());
+        entity.setNonStreamCount(record.getNonStreamCount());
+        entity.setCallFailure(record.getCallFailure());
+        entity.setStreamFailure(record.getStreamFailure());
+        entity.setNonStreamFailure(record.getNonStreamFailure());
+        return entity;
+    }
+
+    private List<ModelStatisticAggregateRecord> toModelStatisticRecords(List<ModelStatisticEntity> entities) {
+        List<ModelStatisticAggregateRecord> records = new java.util.ArrayList<>();
+        for (ModelStatisticEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private ModelStatisticAggregateRecord toRecord(ModelStatisticEntity entity) {
+        ModelStatisticAggregateRecord record = new ModelStatisticAggregateRecord();
+        if (entity == null) {
+            return record;
+        }
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setOrgId(entity.getOrgId());
+        record.setUserId(entity.getUserId());
+        record.setModelId(entity.getModelId());
+        record.setModel(entity.getModel());
+        record.setProvider(entity.getProvider());
+        record.setModelType(entity.getModelType());
+        record.setDate(entity.getDate());
+        record.setPromptTokens(value(entity.getPromptTokens()));
+        record.setCompletionTokens(value(entity.getCompletionTokens()));
+        record.setTotalTokens(value(entity.getTotalTokens()));
+        record.setFirstTokenLatency(value(entity.getFirstTokenLatency()));
+        record.setCosts(value(entity.getCosts()));
+        record.setCallCount(value(entity.getCallCount()));
+        record.setStreamCount(value(entity.getStreamCount()));
+        record.setNonStreamCount(value(entity.getNonStreamCount()));
+        record.setCallFailure(value(entity.getCallFailure()));
+        record.setStreamFailure(value(entity.getStreamFailure()));
+        record.setNonStreamFailure(value(entity.getNonStreamFailure()));
         return record;
     }
 

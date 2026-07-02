@@ -37,6 +37,10 @@ import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -51,6 +55,10 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -61,6 +69,8 @@ import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -234,6 +244,18 @@ public interface AppService {
     ApiKeyStatisticListResult listApiKeyStatistics(ApiKeyStatisticPageQuery query);
 
     ApiKeyStatisticRecordResult listApiKeyStatisticRecords(ApiKeyStatisticPageQuery query);
+
+    void recordAppStatistic(RecordAppStatisticCommand command);
+
+    AppStatisticResult getAppStatistic(AppStatisticQuery query);
+
+    AppStatisticListResult listAppStatistics(AppStatisticPageQuery query);
+
+    void recordModelStatistic(RecordModelStatisticCommand command);
+
+    ModelStatisticResult getModelStatistic(ModelStatisticQuery query);
+
+    ModelStatisticListResult listModelStatistics(ModelStatisticPageQuery query);
 
     AppKeyInfo createAppKey(AppKeyCreateCommand command);
 

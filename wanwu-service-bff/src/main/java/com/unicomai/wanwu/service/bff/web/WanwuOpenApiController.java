@@ -22,6 +22,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
@@ -61,7 +62,9 @@ public class WanwuOpenApiController {
     private static final String DEV_APP_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
     private static final String AGENT_APP_TYPE = "agent";
+    private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
+    private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -312,6 +315,7 @@ public class WanwuOpenApiController {
     public ResponseEntity<Map<String, Object>> chatAgent(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
+        long startedAt = System.currentTimeMillis();
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> body = body(request);
@@ -324,6 +328,7 @@ public class WanwuOpenApiController {
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
+            recordAppStatistic(ctx, command.getAssistantId(), AGENT_APP_TYPE, true, false, startedAt);
             return ResponseEntity.ok(openApiAgentChat(result));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(errorBody(ex.getMessage()));
@@ -334,6 +339,7 @@ public class WanwuOpenApiController {
     public ResponseEntity<?> chatRag(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
+        long startedAt = System.currentTimeMillis();
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> body = body(request);
@@ -347,7 +353,9 @@ public class WanwuOpenApiController {
             command.setOrgId(ctx.orgId);
             RagChatResult result = appService.streamRagChat(command);
             Map<String, Object> response = openApiRagChat(result);
-            if (booleanValue(body.get("stream"), false)) {
+            boolean stream = booleanValue(body.get("stream"), false);
+            recordAppStatistic(ctx, command.getRagId(), RAG_APP_TYPE, true, stream, startedAt);
+            if (stream) {
                 return ResponseEntity.ok()
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .body(legacyRagSse(response));
@@ -362,6 +370,7 @@ public class WanwuOpenApiController {
     public FrontendResponse<Map<String, Object>> runWorkflow(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
+        long startedAt = System.currentTimeMillis();
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> body = body(request);
@@ -374,6 +383,7 @@ public class WanwuOpenApiController {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("workflow_id", result == null ? text(body, "uuid") : defaultIfBlank(result.getWorkflowId(), text(body, "uuid")));
             data.put("output", result == null || result.getOutput() == null ? Collections.emptyMap() : result.getOutput());
+            recordAppStatistic(ctx, command.getWorkflowId(), WORKFLOW_APP_TYPE, true, false, startedAt);
             return FrontendResponse.ok(data);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -758,6 +768,32 @@ public class WanwuOpenApiController {
         }
         List<String> values = headers.get(name);
         return values == null || values.isEmpty() ? "" : values.get(0);
+    }
+
+    private void recordAppStatistic(OpenApiContext ctx,
+                                    String appId,
+                                    String appType,
+                                    boolean success,
+                                    boolean stream,
+                                    long startedAt) {
+        if (appService == null || ctx == null || isBlank(appId)) {
+            return;
+        }
+        try {
+            long costs = Math.max(0L, System.currentTimeMillis() - startedAt);
+            RecordAppStatisticCommand command = new RecordAppStatisticCommand();
+            command.setUserId(ctx.userId);
+            command.setOrgId(ctx.orgId);
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setSuccess(success);
+            command.setStream(stream);
+            command.setStreamCosts(stream ? costs : 0L);
+            command.setNonStreamCosts(stream ? 0L : costs);
+            command.setSource(STAT_SOURCE_OPENAPI);
+            appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private AssistantConfigUpdateCommand openApiAgentConfig(OpenApiContext ctx, Map<String, Object> body) {

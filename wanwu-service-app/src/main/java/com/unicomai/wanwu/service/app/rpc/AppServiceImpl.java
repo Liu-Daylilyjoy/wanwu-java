@@ -46,6 +46,13 @@ import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticItem;
+import com.unicomai.wanwu.api.app.dto.AppStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.AppStatisticOverview;
+import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
+import com.unicomai.wanwu.api.app.dto.AppStatisticTrend;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -63,6 +70,13 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticItem;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticOverview;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticQuery;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticTrend;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -73,6 +87,12 @@ import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.StatisticChart;
+import com.unicomai.wanwu.api.app.dto.StatisticLine;
+import com.unicomai.wanwu.api.app.dto.StatisticOverviewItem;
+import com.unicomai.wanwu.api.app.dto.StatisticPoint;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -95,8 +115,10 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
+import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
@@ -128,6 +150,9 @@ public class AppServiceImpl implements AppService {
     private static final String APP_TYPE_RAG = "rag";
     private static final String APP_TYPE_WORKFLOW = "workflow";
     private static final String APP_TYPE_CHATFLOW = "chatflow";
+    private static final String STAT_SOURCE_WEB = "web";
+    private static final String STAT_SOURCE_OPENAPI = "openapi";
+    private static final String STAT_SOURCE_WEB_URL = "webURL";
     private static final String PUBLISH_TYPE_UNPUBLISHED = "";
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
@@ -994,6 +1019,155 @@ public class AppServiceImpl implements AppService {
         result.setList(items);
         result.setTotal(applicationRepository.countApiKeyUsageRecords(
                 ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.apiKeyIds, ctx.methodPaths));
+        result.setPageNo(pageNo);
+        result.setPageSize(pageSize);
+        return result;
+    }
+
+    @Override
+    public void recordAppStatistic(RecordAppStatisticCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app statistic command is required");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String appType = normalizeAppType(command.getAppType());
+        long now = clock.millis();
+        long callTime = command.getCallTime() <= 0L ? now : command.getCallTime();
+
+        AppStatisticAggregateRecord aggregate = new AppStatisticAggregateRecord();
+        aggregate.setCreatedAt(now);
+        aggregate.setUpdatedAt(now);
+        aggregate.setUserId(userId);
+        aggregate.setOrgId(orgId);
+        aggregate.setAppId(command.getAppId());
+        aggregate.setAppType(appType);
+        aggregate.setDate(formatDateOnly(callTime));
+        aggregate.setCallCount(1L);
+        aggregate.setCallFailure(command.isSuccess() ? 0L : 1L);
+        aggregate.setStreamCount(command.isStream() ? 1L : 0L);
+        aggregate.setStreamFailure(command.isStream() && !command.isSuccess() ? 1L : 0L);
+        aggregate.setStreamCosts(command.getStreamCosts());
+        aggregate.setNonStreamCount(command.isStream() ? 0L : 1L);
+        aggregate.setNonStreamFailure(!command.isStream() && !command.isSuccess() ? 1L : 0L);
+        aggregate.setNonStreamCosts(command.getNonStreamCosts());
+        String source = defaultIfBlank(command.getSource(), STAT_SOURCE_WEB);
+        if (STAT_SOURCE_OPENAPI.equals(source)) {
+            aggregate.setOpenapiCallCount(1L);
+            aggregate.setOpenapiCallFailure(command.isSuccess() ? 0L : 1L);
+        } else if (STAT_SOURCE_WEB_URL.equals(source)) {
+            aggregate.setWebUrlCallCount(1L);
+            aggregate.setWebUrlCallFailure(command.isSuccess() ? 0L : 1L);
+        } else {
+            aggregate.setWebCallCount(1L);
+            aggregate.setWebCallFailure(command.isSuccess() ? 0L : 1L);
+        }
+        applicationRepository.recordAppStatistic(aggregate);
+    }
+
+    @Override
+    public AppStatisticResult getAppStatistic(AppStatisticQuery query) {
+        StatisticQueryContext ctx = appStatisticQuery(query);
+        AppStatisticAggregateRecord current = applicationRepository.sumAppStatistic(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type);
+        AppStatisticAggregateRecord previous = applicationRepository.sumAppStatistic(
+                ctx.userId, ctx.orgId, ctx.previousStartDate, ctx.previousEndDate, ctx.ids, ctx.type);
+        AppStatisticResult result = new AppStatisticResult();
+        result.setOverview(toAppStatisticOverview(current, previous));
+        result.setTrend(toAppStatisticTrend(applicationRepository.listAppStatisticTrend(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type), ctx.dates, ctx.type));
+        return result;
+    }
+
+    @Override
+    public AppStatisticListResult listAppStatistics(AppStatisticPageQuery query) {
+        StatisticQueryContext ctx = appStatisticQuery(query);
+        int pageNo = normalizePageNo(query == null ? 1 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 10 : query.getPageSize());
+        List<AppStatisticAggregateRecord> records = applicationRepository.listAppStatisticAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type, offset(pageNo, pageSize), pageSize);
+        List<AppStatisticItem> items = new ArrayList<AppStatisticItem>(records.size());
+        for (AppStatisticAggregateRecord record : records) {
+            items.add(toAppStatisticItem(record));
+        }
+        AppStatisticListResult result = new AppStatisticListResult();
+        result.setList(items);
+        result.setTotal(applicationRepository.countAppStatisticAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type));
+        result.setPageNo(pageNo);
+        result.setPageSize(pageSize);
+        return result;
+    }
+
+    @Override
+    public void recordModelStatistic(RecordModelStatisticCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("model statistic command is required");
+        }
+        if (isBlank(command.getModelId())) {
+            throw new IllegalArgumentException("model id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        long now = clock.millis();
+        long callTime = command.getCallTime() <= 0L ? now : command.getCallTime();
+
+        ModelStatisticAggregateRecord aggregate = new ModelStatisticAggregateRecord();
+        aggregate.setCreatedAt(now);
+        aggregate.setUpdatedAt(now);
+        aggregate.setUserId(userId);
+        aggregate.setOrgId(orgId);
+        aggregate.setModelId(command.getModelId());
+        aggregate.setModel(defaultIfBlank(command.getModel(), command.getModelId()));
+        aggregate.setProvider(defaultIfBlank(command.getProvider(), ""));
+        aggregate.setModelType(defaultIfBlank(command.getModelType(), "llm"));
+        aggregate.setDate(formatDateOnly(callTime));
+        aggregate.setPromptTokens(command.getPromptTokens());
+        aggregate.setCompletionTokens(command.getCompletionTokens());
+        aggregate.setTotalTokens(command.getTotalTokens());
+        aggregate.setFirstTokenLatency(command.getFirstTokenLatency());
+        aggregate.setCosts(command.getCosts());
+        aggregate.setCallCount(1L);
+        aggregate.setStreamCount(command.isStream() ? 1L : 0L);
+        aggregate.setNonStreamCount(command.isStream() ? 0L : 1L);
+        aggregate.setCallFailure(command.isSuccess() ? 0L : 1L);
+        aggregate.setStreamFailure(command.isStream() && !command.isSuccess() ? 1L : 0L);
+        aggregate.setNonStreamFailure(!command.isStream() && !command.isSuccess() ? 1L : 0L);
+        applicationRepository.recordModelStatistic(aggregate);
+    }
+
+    @Override
+    public ModelStatisticResult getModelStatistic(ModelStatisticQuery query) {
+        StatisticQueryContext ctx = modelStatisticQuery(query);
+        ModelStatisticAggregateRecord current = applicationRepository.sumModelStatistic(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type);
+        ModelStatisticAggregateRecord previous = applicationRepository.sumModelStatistic(
+                ctx.userId, ctx.orgId, ctx.previousStartDate, ctx.previousEndDate, ctx.ids, ctx.type);
+        ModelStatisticResult result = new ModelStatisticResult();
+        result.setOverview(toModelStatisticOverview(current, previous));
+        result.setTrend(toModelStatisticTrend(applicationRepository.listModelStatisticTrend(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type), ctx.dates));
+        return result;
+    }
+
+    @Override
+    public ModelStatisticListResult listModelStatistics(ModelStatisticPageQuery query) {
+        StatisticQueryContext ctx = modelStatisticQuery(query);
+        int pageNo = normalizePageNo(query == null ? 1 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 10 : query.getPageSize());
+        List<ModelStatisticAggregateRecord> records = applicationRepository.listModelStatisticAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type, offset(pageNo, pageSize), pageSize);
+        List<ModelStatisticItem> items = new ArrayList<ModelStatisticItem>(records.size());
+        for (ModelStatisticAggregateRecord record : records) {
+            items.add(toModelStatisticItem(record));
+        }
+        ModelStatisticListResult result = new ModelStatisticListResult();
+        result.setList(items);
+        result.setTotal(applicationRepository.countModelStatisticAggregates(
+                ctx.userId, ctx.orgId, ctx.startDate, ctx.endDate, ctx.ids, ctx.type));
         result.setPageNo(pageNo);
         result.setPageSize(pageSize);
         return result;
@@ -2264,6 +2438,184 @@ public class AppServiceImpl implements AppService {
         return item;
     }
 
+    private AppStatisticOverview toAppStatisticOverview(AppStatisticAggregateRecord current,
+                                                        AppStatisticAggregateRecord previous) {
+        AppStatisticOverview overview = new AppStatisticOverview();
+        overview.setCallCount(statisticOverviewItem(current.getCallCount(), previous.getCallCount()));
+        overview.setCallFailure(statisticOverviewItem(current.getCallFailure(), previous.getCallFailure()));
+        overview.setStreamCount(statisticOverviewItem(current.getStreamCount(), previous.getStreamCount()));
+        overview.setNonStreamCount(statisticOverviewItem(current.getNonStreamCount(), previous.getNonStreamCount()));
+        overview.setAvgStreamCosts(statisticOverviewItem(
+                avg(current.getStreamCosts(), successCount(current.getStreamCount(), current.getStreamFailure())),
+                avg(previous.getStreamCosts(), successCount(previous.getStreamCount(), previous.getStreamFailure()))));
+        overview.setAvgNonStreamCosts(statisticOverviewItem(
+                avg(current.getNonStreamCosts(), successCount(current.getNonStreamCount(), current.getNonStreamFailure())),
+                avg(previous.getNonStreamCosts(), successCount(previous.getNonStreamCount(), previous.getNonStreamFailure()))));
+        return overview;
+    }
+
+    private AppStatisticTrend toAppStatisticTrend(List<AppStatisticAggregateRecord> records,
+                                                  List<String> dates,
+                                                  String appType) {
+        Map<String, AppStatisticAggregateRecord> byDate = new HashMap<String, AppStatisticAggregateRecord>();
+        for (AppStatisticAggregateRecord record : records) {
+            byDate.put(record.getDate(), record);
+        }
+        StatisticChart chart = new StatisticChart();
+        chart.setTableName("app_statistic_app_call_trend");
+        List<StatisticLine> lines = new ArrayList<StatisticLine>();
+        lines.add(appStatisticLine("app_statistic_call_count_total", dates, byDate, "total"));
+        lines.add(appStatisticLine("app_statistic_web_call_count", dates, byDate, "web"));
+        lines.add(appStatisticLine("app_statistic_openapi_call_count", dates, byDate, "openapi"));
+        if (APP_TYPE_AGENT.equals(appType)) {
+            lines.add(appStatisticLine("app_statistic_web_url_call_count", dates, byDate, "webUrl"));
+        }
+        chart.setLines(lines);
+        AppStatisticTrend trend = new AppStatisticTrend();
+        trend.setCallTrend(chart);
+        return trend;
+    }
+
+    private StatisticLine appStatisticLine(String name,
+                                           List<String> dates,
+                                           Map<String, AppStatisticAggregateRecord> byDate,
+                                           String field) {
+        List<StatisticPoint> points = new ArrayList<StatisticPoint>();
+        for (String date : dates) {
+            AppStatisticAggregateRecord record = byDate.get(date);
+            double value = 0D;
+            if (record != null) {
+                if ("total".equals(field)) {
+                    value = record.getCallCount();
+                } else if ("web".equals(field)) {
+                    value = record.getWebCallCount();
+                } else if ("openapi".equals(field)) {
+                    value = record.getOpenapiCallCount();
+                } else if ("webUrl".equals(field)) {
+                    value = record.getWebUrlCallCount();
+                }
+            }
+            points.add(new StatisticPoint(date, value));
+        }
+        return new StatisticLine(name, points);
+    }
+
+    private AppStatisticItem toAppStatisticItem(AppStatisticAggregateRecord record) {
+        AppStatisticItem item = new AppStatisticItem();
+        item.setAppId(defaultIfBlank(record.getAppId(), ""));
+        item.setAppType(defaultIfBlank(record.getAppType(), ""));
+        item.setOrgId(defaultIfBlank(record.getOrgId(), ""));
+        item.setCallCount(record.getCallCount());
+        item.setCallFailure(record.getCallFailure());
+        item.setFailureRate(failureRate(record.getCallCount(), record.getCallFailure()));
+        item.setStreamCount(record.getStreamCount());
+        item.setNonStreamCount(record.getNonStreamCount());
+        item.setAvgStreamCosts(avg(record.getStreamCosts(), successCount(record.getStreamCount(), record.getStreamFailure())));
+        item.setAvgNonStreamCosts(avg(record.getNonStreamCosts(), successCount(record.getNonStreamCount(), record.getNonStreamFailure())));
+        return item;
+    }
+
+    private ModelStatisticOverview toModelStatisticOverview(ModelStatisticAggregateRecord current,
+                                                            ModelStatisticAggregateRecord previous) {
+        ModelStatisticOverview overview = new ModelStatisticOverview();
+        overview.setCallCount(statisticOverviewItem(current.getCallCount(), previous.getCallCount()));
+        overview.setCallFailure(statisticOverviewItem(current.getCallFailure(), previous.getCallFailure()));
+        overview.setTotalTokens(statisticOverviewItem(current.getTotalTokens(), previous.getTotalTokens()));
+        overview.setCompletionTokens(statisticOverviewItem(current.getCompletionTokens(), previous.getCompletionTokens()));
+        overview.setPromptTokens(statisticOverviewItem(current.getPromptTokens(), previous.getPromptTokens()));
+        overview.setAvgCosts(statisticOverviewItem(
+                avg(current.getCosts(), successCount(current.getNonStreamCount(), current.getNonStreamFailure())),
+                avg(previous.getCosts(), successCount(previous.getNonStreamCount(), previous.getNonStreamFailure()))));
+        overview.setAvgFirstTokenLatency(statisticOverviewItem(
+                avg(current.getFirstTokenLatency(), successCount(current.getStreamCount(), current.getStreamFailure())),
+                avg(previous.getFirstTokenLatency(), successCount(previous.getStreamCount(), previous.getStreamFailure()))));
+        return overview;
+    }
+
+    private ModelStatisticTrend toModelStatisticTrend(List<ModelStatisticAggregateRecord> records, List<String> dates) {
+        Map<String, ModelStatisticAggregateRecord> byDate = new HashMap<String, ModelStatisticAggregateRecord>();
+        for (ModelStatisticAggregateRecord record : records) {
+            byDate.put(record.getDate(), record);
+        }
+        StatisticChart modelCalls = new StatisticChart();
+        modelCalls.setTableName("app_statistic_model_call_trend");
+        List<StatisticLine> callLines = new ArrayList<StatisticLine>();
+        callLines.add(modelStatisticLine("app_statistic_call_count_total", dates, byDate, "total"));
+        callLines.add(modelStatisticLine("app_statistic_call_success", dates, byDate, "success"));
+        callLines.add(modelStatisticLine("app_statistic_call_failure", dates, byDate, "failure"));
+        modelCalls.setLines(callLines);
+
+        StatisticChart tokensUsage = new StatisticChart();
+        tokensUsage.setTableName("app_statistic_model_tokens_usage_trend");
+        List<StatisticLine> tokenLines = new ArrayList<StatisticLine>();
+        tokenLines.add(modelStatisticLine("app_statistic_total_tokens", dates, byDate, "totalTokens"));
+        tokenLines.add(modelStatisticLine("app_statistic_completion_tokens", dates, byDate, "completionTokens"));
+        tokenLines.add(modelStatisticLine("app_statistic_prompt_tokens", dates, byDate, "promptTokens"));
+        tokensUsage.setLines(tokenLines);
+
+        ModelStatisticTrend trend = new ModelStatisticTrend();
+        trend.setModelCalls(modelCalls);
+        trend.setTokensUsage(tokensUsage);
+        return trend;
+    }
+
+    private StatisticLine modelStatisticLine(String name,
+                                             List<String> dates,
+                                             Map<String, ModelStatisticAggregateRecord> byDate,
+                                             String field) {
+        List<StatisticPoint> points = new ArrayList<StatisticPoint>();
+        for (String date : dates) {
+            ModelStatisticAggregateRecord record = byDate.get(date);
+            double value = 0D;
+            if (record != null) {
+                if ("total".equals(field)) {
+                    value = record.getCallCount();
+                } else if ("success".equals(field)) {
+                    value = record.getCallCount() - record.getCallFailure();
+                } else if ("failure".equals(field)) {
+                    value = record.getCallFailure();
+                } else if ("totalTokens".equals(field)) {
+                    value = record.getTotalTokens();
+                } else if ("completionTokens".equals(field)) {
+                    value = record.getCompletionTokens();
+                } else if ("promptTokens".equals(field)) {
+                    value = record.getPromptTokens();
+                }
+            }
+            points.add(new StatisticPoint(date, value));
+        }
+        return new StatisticLine(name, points);
+    }
+
+    private ModelStatisticItem toModelStatisticItem(ModelStatisticAggregateRecord record) {
+        ModelStatisticItem item = new ModelStatisticItem();
+        item.setModelId(defaultIfBlank(record.getModelId(), ""));
+        item.setModel(defaultIfBlank(record.getModel(), ""));
+        item.setProvider(defaultIfBlank(record.getProvider(), ""));
+        item.setOrgId(defaultIfBlank(record.getOrgId(), ""));
+        item.setCallCount(record.getCallCount());
+        item.setCallFailure(record.getCallFailure());
+        item.setFailureRate(failureRate(record.getCallCount(), record.getCallFailure()));
+        item.setPromptTokens(record.getPromptTokens());
+        item.setCompletionTokens(record.getCompletionTokens());
+        item.setTotalTokens(record.getTotalTokens());
+        item.setAvgCosts(avg(record.getCosts(), successCount(record.getNonStreamCount(), record.getNonStreamFailure())));
+        item.setAvgFirstTokenLatency(avg(record.getFirstTokenLatency(), successCount(record.getStreamCount(), record.getStreamFailure())));
+        return item;
+    }
+
+    private StatisticOverviewItem statisticOverviewItem(double current, double previous) {
+        return new StatisticOverviewItem(current, previous == 0D ? -9999D : ((current - previous) / previous) * 100D);
+    }
+
+    private long successCount(long total, long failures) {
+        return Math.max(0L, total - failures);
+    }
+
+    private double failureRate(long callCount, long callFailure) {
+        return callCount <= 0L ? 0D : ((double) callFailure / (double) callCount) * 100D;
+    }
+
     private double avg(long total, long count) {
         return count <= 0L ? 0D : ((double) total) / ((double) count);
     }
@@ -2408,6 +2760,54 @@ public class AppServiceImpl implements AppService {
                 previousEnd.toString(),
                 normalizeStatisticFilter(query == null ? null : query.getApiKeyIds()),
                 normalizeStatisticFilter(query == null ? null : query.getMethodPaths()),
+                statisticDates(start, end));
+    }
+
+    private StatisticQueryContext appStatisticQuery(AppStatisticQuery query) {
+        String appType = query == null ? APP_TYPE_AGENT : normalizeAppType(query.getAppType());
+        return statisticQuery(
+                query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID),
+                query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID),
+                query == null ? "" : query.getStartDate(),
+                query == null ? "" : query.getEndDate(),
+                normalizeStatisticFilter(query == null ? null : query.getAppIds()),
+                appType);
+    }
+
+    private StatisticQueryContext modelStatisticQuery(ModelStatisticQuery query) {
+        return statisticQuery(
+                query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID),
+                query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID),
+                query == null ? "" : query.getStartDate(),
+                query == null ? "" : query.getEndDate(),
+                normalizeStatisticFilter(query == null ? null : query.getModelIds()),
+                query == null ? "llm" : defaultIfBlank(query.getModelType(), "llm"));
+    }
+
+    private StatisticQueryContext statisticQuery(String userId,
+                                                String orgId,
+                                                String startDateValue,
+                                                String endDateValue,
+                                                List<String> ids,
+                                                String type) {
+        LocalDate end = parseStatisticDate(endDateValue,
+                Instant.ofEpochMilli(clock.millis()).atZone(APP_ZONE).toLocalDate());
+        LocalDate start = parseStatisticDate(startDateValue, end.minusDays(6));
+        if (start.isAfter(end)) {
+            start = end;
+        }
+        long days = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1L;
+        LocalDate previousEnd = start.minusDays(1);
+        LocalDate previousStart = previousEnd.minusDays(Math.max(0L, days - 1L));
+        return new StatisticQueryContext(
+                userId,
+                orgId,
+                start.toString(),
+                end.toString(),
+                previousStart.toString(),
+                previousEnd.toString(),
+                ids,
+                type,
                 statisticDates(start, end));
     }
 
@@ -3722,6 +4122,38 @@ public class AppServiceImpl implements AppService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static class StatisticQueryContext {
+        private final String userId;
+        private final String orgId;
+        private final String startDate;
+        private final String endDate;
+        private final String previousStartDate;
+        private final String previousEndDate;
+        private final List<String> ids;
+        private final String type;
+        private final List<String> dates;
+
+        private StatisticQueryContext(String userId,
+                                      String orgId,
+                                      String startDate,
+                                      String endDate,
+                                      String previousStartDate,
+                                      String previousEndDate,
+                                      List<String> ids,
+                                      String type,
+                                      List<String> dates) {
+            this.userId = userId;
+            this.orgId = orgId;
+            this.startDate = startDate;
+            this.endDate = endDate;
+            this.previousStartDate = previousStartDate;
+            this.previousEndDate = previousEndDate;
+            this.ids = ids;
+            this.type = type;
+            this.dates = dates;
+        }
     }
 
     private static class ApiKeyQueryContext {

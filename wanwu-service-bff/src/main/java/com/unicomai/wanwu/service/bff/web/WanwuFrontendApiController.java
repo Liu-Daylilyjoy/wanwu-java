@@ -58,6 +58,8 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -131,6 +133,7 @@ public class WanwuFrontendApiController {
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CHATFLOW_APP_TYPE = "chatflow";
+    private static final String STAT_SOURCE_WEB = "web";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
@@ -570,6 +573,7 @@ public class WanwuFrontendApiController {
     public ResponseEntity<String> modelExperienceLlm(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody ModelExperienceLlmRequest request) {
+        long startedAt = System.currentTimeMillis();
         try {
             UserContext userContext = userContext(authorization);
             ModelExperienceLlmRequest safe = request == null ? new ModelExperienceLlmRequest() : request;
@@ -586,6 +590,7 @@ public class WanwuFrontendApiController {
             modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
                     userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
                     safe.getSessionId(), answer, "", "", "assistant"));
+            recordModelStatistic(userContext, model, safe, answer, startedAt);
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), answer));
@@ -1167,12 +1172,15 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> runWorkflow(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) WorkflowRunRequest request) {
+        long startedAt = System.currentTimeMillis();
         try {
             UserContext userContext = userContext(authorization);
             WorkflowRunCommand command = request == null ? new WorkflowRunRequest().toCommand() : request.toCommand();
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
-            return FrontendResponse.ok(workflowRunResult(appService.runWorkflow(command)));
+            Map<String, Object> result = workflowRunResult(appService.runWorkflow(command));
+            recordAppStatistic(userContext, command.getWorkflowId(), WORKFLOW_APP_TYPE, true, false, startedAt, STAT_SOURCE_WEB);
+            return FrontendResponse.ok(result);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -3087,6 +3095,7 @@ public class WanwuFrontendApiController {
     private ResponseEntity<String> streamAssistantConversation(String authorization,
                                                                ConversationStreamRequest request,
                                                                boolean draft) {
+        long startedAt = System.currentTimeMillis();
         try {
             UserContext userContext = userContext(authorization);
             AssistantConversationStreamCommand command = request == null
@@ -3095,6 +3104,9 @@ public class WanwuFrontendApiController {
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
+            if (!draft) {
+                recordAppStatistic(userContext, command.getAssistantId(), AGENT_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
+            }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(toSseFrame(result));
@@ -3108,12 +3120,16 @@ public class WanwuFrontendApiController {
     private ResponseEntity<String> streamRagChat(String authorization,
                                                  RagChatRequest request,
                                                  boolean draft) {
+        long startedAt = System.currentTimeMillis();
         try {
             UserContext userContext = userContext(authorization);
             RagChatCommand command = request == null ? new RagChatRequest().toCommand(draft) : request.toCommand(draft);
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
             RagChatResult result = appService.streamRagChat(command);
+            if (!draft) {
+                recordAppStatistic(userContext, command.getRagId(), RAG_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
+            }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(toRagAgUiSseFrames(result));
@@ -3122,6 +3138,72 @@ public class WanwuFrontendApiController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
         }
+    }
+
+    private void recordAppStatistic(UserContext userContext,
+                                    String appId,
+                                    String appType,
+                                    boolean success,
+                                    boolean stream,
+                                    long startedAt,
+                                    String source) {
+        if (appService == null || isBlank(appId)) {
+            return;
+        }
+        try {
+            long costs = elapsedMillis(startedAt);
+            RecordAppStatisticCommand command = new RecordAppStatisticCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            command.setAppId(appId);
+            command.setAppType(appType);
+            command.setSuccess(success);
+            command.setStream(stream);
+            command.setStreamCosts(stream ? costs : 0L);
+            command.setNonStreamCosts(stream ? 0L : costs);
+            command.setSource(source);
+            appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void recordModelStatistic(UserContext userContext,
+                                      ModelInfo model,
+                                      ModelExperienceLlmRequest request,
+                                      String answer,
+                                      long startedAt) {
+        if (appService == null || model == null || request == null || isBlank(request.getModelId())) {
+            return;
+        }
+        try {
+            RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            command.setModelId(request.getModelId());
+            command.setModel(defaultIfBlank(model.getModel(), request.getModelId()));
+            command.setProvider(defaultIfBlank(model.getProvider(), ""));
+            command.setModelType(defaultIfBlank(model.getModelType(), "llm"));
+            command.setPromptTokens(estimateTokens(request.getContent()));
+            command.setCompletionTokens(estimateTokens(answer));
+            command.setTotalTokens(command.getPromptTokens() + command.getCompletionTokens());
+            command.setSuccess(true);
+            command.setStream(true);
+            command.setFirstTokenLatency(elapsedMillis(startedAt));
+            command.setCosts(0L);
+            appService.recordModelStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return Math.max(0L, System.currentTimeMillis() - startedAt);
+    }
+
+    private long estimateTokens(String value) {
+        if (isBlank(value)) {
+            return 0L;
+        }
+        return Math.max(1L, (value.trim().length() + 3L) / 4L);
     }
 
     private Map<String, Object> resolveRecommendAssistant(UserContext userContext,

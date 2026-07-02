@@ -176,6 +176,70 @@ public interface ApplicationRepository {
 
     List<String> listApiKeyUsageMethodPaths(String userId, String orgId);
 
+    void recordAppStatistic(AppStatisticAggregateRecord aggregate);
+
+    AppStatisticAggregateRecord sumAppStatistic(String userId,
+                                                String orgId,
+                                                String startDate,
+                                                String endDate,
+                                                List<String> appIds,
+                                                String appType);
+
+    List<AppStatisticAggregateRecord> listAppStatisticTrend(String userId,
+                                                            String orgId,
+                                                            String startDate,
+                                                            String endDate,
+                                                            List<String> appIds,
+                                                            String appType);
+
+    List<AppStatisticAggregateRecord> listAppStatisticAggregates(String userId,
+                                                                 String orgId,
+                                                                 String startDate,
+                                                                 String endDate,
+                                                                 List<String> appIds,
+                                                                 String appType,
+                                                                 int offset,
+                                                                 int limit);
+
+    long countAppStatisticAggregates(String userId,
+                                     String orgId,
+                                     String startDate,
+                                     String endDate,
+                                     List<String> appIds,
+                                     String appType);
+
+    void recordModelStatistic(ModelStatisticAggregateRecord aggregate);
+
+    ModelStatisticAggregateRecord sumModelStatistic(String userId,
+                                                    String orgId,
+                                                    String startDate,
+                                                    String endDate,
+                                                    List<String> modelIds,
+                                                    String modelType);
+
+    List<ModelStatisticAggregateRecord> listModelStatisticTrend(String userId,
+                                                                String orgId,
+                                                                String startDate,
+                                                                String endDate,
+                                                                List<String> modelIds,
+                                                                String modelType);
+
+    List<ModelStatisticAggregateRecord> listModelStatisticAggregates(String userId,
+                                                                     String orgId,
+                                                                     String startDate,
+                                                                     String endDate,
+                                                                     List<String> modelIds,
+                                                                     String modelType,
+                                                                     int offset,
+                                                                     int limit);
+
+    long countModelStatisticAggregates(String userId,
+                                       String orgId,
+                                       String startDate,
+                                       String endDate,
+                                       List<String> modelIds,
+                                       String modelType);
+
     AppKeyRecord saveAppKey(AppKeyRecord record);
 
     List<AppKeyRecord> listAppKeys(String userId, String orgId, String appId, String appType);

@@ -41,6 +41,9 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticRecordResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AppStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
@@ -50,6 +53,9 @@ import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
+import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -70,6 +76,8 @@ import com.unicomai.wanwu.api.app.dto.WorkflowImportCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
@@ -79,8 +87,10 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
+import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
@@ -616,6 +626,114 @@ public class AppServiceImplTest {
         assertEquals(2, records.getTotal());
         assertEquals("500", records.getList().get(0).getResponseStatus());
         assertEquals("{\"stream\":true}", records.getList().get(0).getRequestBody());
+    }
+
+    @Test
+    public void appAndModelStatisticsPersistAggregates() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        service.recordAppStatistic(appUsage(
+                "agent-001",
+                "agent",
+                Instant.parse("2026-06-28T03:00:00Z").toEpochMilli(),
+                true,
+                true,
+                60L,
+                0L,
+                "web"));
+        service.recordAppStatistic(appUsage(
+                "agent-001",
+                "agent",
+                Instant.parse("2026-06-29T03:00:00Z").toEpochMilli(),
+                true,
+                true,
+                100L,
+                0L,
+                "web"));
+        service.recordAppStatistic(appUsage(
+                "agent-001",
+                "agent",
+                Instant.parse("2026-06-29T04:00:00Z").toEpochMilli(),
+                false,
+                false,
+                0L,
+                80L,
+                "openapi"));
+
+        AppStatisticPageQuery appQuery = new AppStatisticPageQuery(
+                "dev-admin", "default-org", "2026-06-29", "2026-06-29",
+                Collections.singletonList("agent-001"), "agent", 1, 10);
+        AppStatisticResult appOverview = service.getAppStatistic(appQuery);
+        assertEquals(2D, appOverview.getOverview().getCallCount().getValue(), 0.001D);
+        assertEquals(100D, appOverview.getOverview().getCallCount().getPeriodOverPeriod(), 0.001D);
+        assertEquals(1D, appOverview.getOverview().getCallFailure().getValue(), 0.001D);
+        assertEquals(100D, appOverview.getOverview().getAvgStreamCosts().getValue(), 0.001D);
+        assertEquals(0D, appOverview.getOverview().getAvgNonStreamCosts().getValue(), 0.001D);
+        assertEquals(1D, appOverview.getTrend().getCallTrend().getLines().get(1).getItems().get(0).getValue(), 0.001D);
+        assertEquals(1D, appOverview.getTrend().getCallTrend().getLines().get(2).getItems().get(0).getValue(), 0.001D);
+
+        AppStatisticListResult appList = service.listAppStatistics(appQuery);
+        assertEquals(1, appList.getTotal());
+        assertEquals(50D, appList.getList().get(0).getFailureRate(), 0.001D);
+        assertEquals(1, appList.getList().get(0).getStreamCount());
+        assertEquals(1, appList.getList().get(0).getNonStreamCount());
+
+        service.recordModelStatistic(modelUsage(
+                "model-001",
+                "qwen-local",
+                "local",
+                "llm",
+                Instant.parse("2026-06-28T03:00:00Z").toEpochMilli(),
+                5L,
+                7L,
+                true,
+                true,
+                40L,
+                0L));
+        service.recordModelStatistic(modelUsage(
+                "model-001",
+                "qwen-local",
+                "local",
+                "llm",
+                Instant.parse("2026-06-29T03:00:00Z").toEpochMilli(),
+                10L,
+                20L,
+                true,
+                true,
+                120L,
+                0L));
+        service.recordModelStatistic(modelUsage(
+                "model-001",
+                "qwen-local",
+                "local",
+                "llm",
+                Instant.parse("2026-06-29T04:00:00Z").toEpochMilli(),
+                8L,
+                0L,
+                false,
+                false,
+                0L,
+                90L));
+
+        ModelStatisticPageQuery modelQuery = new ModelStatisticPageQuery(
+                "dev-admin", "default-org", "2026-06-29", "2026-06-29",
+                Collections.singletonList("model-001"), "llm", 1, 10);
+        ModelStatisticResult modelOverview = service.getModelStatistic(modelQuery);
+        assertEquals(2D, modelOverview.getOverview().getCallCount().getValue(), 0.001D);
+        assertEquals(38D, modelOverview.getOverview().getTotalTokens().getValue(), 0.001D);
+        assertEquals(18D, modelOverview.getOverview().getPromptTokens().getValue(), 0.001D);
+        assertEquals(20D, modelOverview.getOverview().getCompletionTokens().getValue(), 0.001D);
+        assertEquals(120D, modelOverview.getOverview().getAvgFirstTokenLatency().getValue(), 0.001D);
+        assertEquals(0D, modelOverview.getOverview().getAvgCosts().getValue(), 0.001D);
+        assertEquals(1D, modelOverview.getTrend().getModelCalls().getLines().get(1).getItems().get(0).getValue(), 0.001D);
+        assertEquals(38D, modelOverview.getTrend().getTokensUsage().getLines().get(0).getItems().get(0).getValue(), 0.001D);
+
+        ModelStatisticListResult modelList = service.listModelStatistics(modelQuery);
+        assertEquals(1, modelList.getTotal());
+        assertEquals("model-001", modelList.getList().get(0).getModelId());
+        assertEquals(50D, modelList.getList().get(0).getFailureRate(), 0.001D);
+        assertEquals(120D, modelList.getList().get(0).getAvgFirstTokenLatency(), 0.001D);
     }
 
     @Test
@@ -1359,6 +1477,57 @@ public class AppServiceImplTest {
         return command;
     }
 
+    private RecordAppStatisticCommand appUsage(String appId,
+                                               String appType,
+                                               long callTime,
+                                               boolean success,
+                                               boolean stream,
+                                               long streamCosts,
+                                               long nonStreamCosts,
+                                               String source) {
+        RecordAppStatisticCommand command = new RecordAppStatisticCommand();
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        command.setAppId(appId);
+        command.setAppType(appType);
+        command.setCallTime(callTime);
+        command.setSuccess(success);
+        command.setStream(stream);
+        command.setStreamCosts(streamCosts);
+        command.setNonStreamCosts(nonStreamCosts);
+        command.setSource(source);
+        return command;
+    }
+
+    private RecordModelStatisticCommand modelUsage(String modelId,
+                                                   String model,
+                                                   String provider,
+                                                   String modelType,
+                                                   long callTime,
+                                                   long promptTokens,
+                                                   long completionTokens,
+                                                   boolean success,
+                                                   boolean stream,
+                                                   long firstTokenLatency,
+                                                   long costs) {
+        RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        command.setModelId(modelId);
+        command.setModel(model);
+        command.setProvider(provider);
+        command.setModelType(modelType);
+        command.setCallTime(callTime);
+        command.setPromptTokens(promptTokens);
+        command.setCompletionTokens(completionTokens);
+        command.setTotalTokens(promptTokens + completionTokens);
+        command.setSuccess(success);
+        command.setStream(stream);
+        command.setFirstTokenLatency(firstTokenLatency);
+        command.setCosts(costs);
+        return command;
+    }
+
     private AppUrlCreateCommand appUrlCreateCommand(String assistantId, String name, String expiredAt) {
         AppUrlCreateCommand command = new AppUrlCreateCommand();
         command.setAppId(assistantId);
@@ -1559,6 +1728,8 @@ public class AppServiceImplTest {
         private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
         private final List<ApiKeyUsageAggregateRecord> apiKeyUsageAggregates = new ArrayList<>();
         private final List<ApiKeyUsageRecord> apiKeyUsageRecords = new ArrayList<>();
+        private final List<AppStatisticAggregateRecord> appStatisticAggregates = new ArrayList<>();
+        private final List<ModelStatisticAggregateRecord> modelStatisticAggregates = new ArrayList<>();
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
@@ -2435,6 +2606,159 @@ public class AppServiceImplTest {
         }
 
         @Override
+        public void recordAppStatistic(AppStatisticAggregateRecord aggregate) {
+            AppStatisticAggregateRecord existing = findAppStatisticAggregate(aggregate);
+            if (existing == null) {
+                aggregate.setId(ids.incrementAndGet());
+                appStatisticAggregates.add(aggregate);
+            } else {
+                addAppAggregate(existing, aggregate);
+            }
+        }
+
+        @Override
+        public AppStatisticAggregateRecord sumAppStatistic(String userId,
+                                                           String orgId,
+                                                           String startDate,
+                                                           String endDate,
+                                                           List<String> appIds,
+                                                           String appType) {
+            AppStatisticAggregateRecord sum = new AppStatisticAggregateRecord();
+            for (AppStatisticAggregateRecord record : appStatisticAggregates) {
+                if (matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getAppId(), record.getAppType(), userId, orgId, startDate, endDate, appIds, appType)) {
+                    addAppAggregate(sum, record);
+                }
+            }
+            return sum;
+        }
+
+        @Override
+        public List<AppStatisticAggregateRecord> listAppStatisticTrend(String userId,
+                                                                       String orgId,
+                                                                       String startDate,
+                                                                       String endDate,
+                                                                       List<String> appIds,
+                                                                       String appType) {
+            Map<String, AppStatisticAggregateRecord> byDate = new LinkedHashMap<>();
+            for (AppStatisticAggregateRecord record : appStatisticAggregates) {
+                if (!matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getAppId(), record.getAppType(), userId, orgId, startDate, endDate, appIds, appType)) {
+                    continue;
+                }
+                AppStatisticAggregateRecord sum = byDate.get(record.getDate());
+                if (sum == null) {
+                    sum = new AppStatisticAggregateRecord();
+                    sum.setDate(record.getDate());
+                    byDate.put(record.getDate(), sum);
+                }
+                addAppAggregate(sum, record);
+            }
+            return new ArrayList<>(byDate.values());
+        }
+
+        @Override
+        public List<AppStatisticAggregateRecord> listAppStatisticAggregates(String userId,
+                                                                            String orgId,
+                                                                            String startDate,
+                                                                            String endDate,
+                                                                            List<String> appIds,
+                                                                            String appType,
+                                                                            int offset,
+                                                                            int limit) {
+            List<AppStatisticAggregateRecord> grouped = groupedAppStatistics(userId, orgId, startDate, endDate, appIds, appType);
+            grouped.sort(Comparator.comparing(AppStatisticAggregateRecord::getCallCount).reversed());
+            return slice(grouped, offset, limit);
+        }
+
+        @Override
+        public long countAppStatisticAggregates(String userId,
+                                                String orgId,
+                                                String startDate,
+                                                String endDate,
+                                                List<String> appIds,
+                                                String appType) {
+            return groupedAppStatistics(userId, orgId, startDate, endDate, appIds, appType).size();
+        }
+
+        @Override
+        public void recordModelStatistic(ModelStatisticAggregateRecord aggregate) {
+            ModelStatisticAggregateRecord existing = findModelStatisticAggregate(aggregate);
+            if (existing == null) {
+                aggregate.setId(ids.incrementAndGet());
+                modelStatisticAggregates.add(aggregate);
+            } else {
+                addModelAggregate(existing, aggregate);
+            }
+        }
+
+        @Override
+        public ModelStatisticAggregateRecord sumModelStatistic(String userId,
+                                                               String orgId,
+                                                               String startDate,
+                                                               String endDate,
+                                                               List<String> modelIds,
+                                                               String modelType) {
+            ModelStatisticAggregateRecord sum = new ModelStatisticAggregateRecord();
+            for (ModelStatisticAggregateRecord record : modelStatisticAggregates) {
+                if (matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getModelId(), record.getModelType(), userId, orgId, startDate, endDate, modelIds, modelType)) {
+                    addModelAggregate(sum, record);
+                }
+            }
+            return sum;
+        }
+
+        @Override
+        public List<ModelStatisticAggregateRecord> listModelStatisticTrend(String userId,
+                                                                           String orgId,
+                                                                           String startDate,
+                                                                           String endDate,
+                                                                           List<String> modelIds,
+                                                                           String modelType) {
+            Map<String, ModelStatisticAggregateRecord> byDate = new LinkedHashMap<>();
+            for (ModelStatisticAggregateRecord record : modelStatisticAggregates) {
+                if (!matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getModelId(), record.getModelType(), userId, orgId, startDate, endDate, modelIds, modelType)) {
+                    continue;
+                }
+                ModelStatisticAggregateRecord sum = byDate.get(record.getDate());
+                if (sum == null) {
+                    sum = new ModelStatisticAggregateRecord();
+                    sum.setDate(record.getDate());
+                    byDate.put(record.getDate(), sum);
+                }
+                addModelAggregate(sum, record);
+            }
+            return new ArrayList<>(byDate.values());
+        }
+
+        @Override
+        public List<ModelStatisticAggregateRecord> listModelStatisticAggregates(String userId,
+                                                                                String orgId,
+                                                                                String startDate,
+                                                                                String endDate,
+                                                                                List<String> modelIds,
+                                                                                String modelType,
+                                                                                int offset,
+                                                                                int limit) {
+            List<ModelStatisticAggregateRecord> grouped = groupedModelStatistics(
+                    userId, orgId, startDate, endDate, modelIds, modelType);
+            grouped.sort(Comparator.comparing(ModelStatisticAggregateRecord::getCallCount).reversed());
+            return slice(grouped, offset, limit);
+        }
+
+        @Override
+        public long countModelStatisticAggregates(String userId,
+                                                  String orgId,
+                                                  String startDate,
+                                                  String endDate,
+                                                  List<String> modelIds,
+                                                  String modelType) {
+            return groupedModelStatistics(userId, orgId, startDate, endDate, modelIds, modelType).size();
+        }
+
+        @Override
         public AppKeyRecord saveAppKey(AppKeyRecord record) {
             record.setId(ids.incrementAndGet());
             appKeys.add(record);
@@ -2800,6 +3124,137 @@ public class AppServiceImplTest {
                 return false;
             }
             return methodPaths == null || methodPaths.isEmpty() || methodPaths.contains(recordMethodPath);
+        }
+
+        private AppStatisticAggregateRecord findAppStatisticAggregate(AppStatisticAggregateRecord target) {
+            for (AppStatisticAggregateRecord record : appStatisticAggregates) {
+                if (record.getUserId().equals(target.getUserId())
+                        && record.getOrgId().equals(target.getOrgId())
+                        && record.getAppId().equals(target.getAppId())
+                        && record.getAppType().equals(target.getAppType())
+                        && record.getDate().equals(target.getDate())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        private ModelStatisticAggregateRecord findModelStatisticAggregate(ModelStatisticAggregateRecord target) {
+            for (ModelStatisticAggregateRecord record : modelStatisticAggregates) {
+                if (record.getUserId().equals(target.getUserId())
+                        && record.getOrgId().equals(target.getOrgId())
+                        && record.getModelId().equals(target.getModelId())
+                        && record.getProvider().equals(target.getProvider())
+                        && record.getDate().equals(target.getDate())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        private void addAppAggregate(AppStatisticAggregateRecord target, AppStatisticAggregateRecord delta) {
+            target.setCallCount(target.getCallCount() + delta.getCallCount());
+            target.setCallFailure(target.getCallFailure() + delta.getCallFailure());
+            target.setStreamCount(target.getStreamCount() + delta.getStreamCount());
+            target.setStreamFailure(target.getStreamFailure() + delta.getStreamFailure());
+            target.setStreamCosts(target.getStreamCosts() + delta.getStreamCosts());
+            target.setNonStreamCount(target.getNonStreamCount() + delta.getNonStreamCount());
+            target.setNonStreamFailure(target.getNonStreamFailure() + delta.getNonStreamFailure());
+            target.setNonStreamCosts(target.getNonStreamCosts() + delta.getNonStreamCosts());
+            target.setWebCallCount(target.getWebCallCount() + delta.getWebCallCount());
+            target.setWebCallFailure(target.getWebCallFailure() + delta.getWebCallFailure());
+            target.setOpenapiCallCount(target.getOpenapiCallCount() + delta.getOpenapiCallCount());
+            target.setOpenapiCallFailure(target.getOpenapiCallFailure() + delta.getOpenapiCallFailure());
+            target.setWebUrlCallCount(target.getWebUrlCallCount() + delta.getWebUrlCallCount());
+            target.setWebUrlCallFailure(target.getWebUrlCallFailure() + delta.getWebUrlCallFailure());
+        }
+
+        private void addModelAggregate(ModelStatisticAggregateRecord target, ModelStatisticAggregateRecord delta) {
+            target.setPromptTokens(target.getPromptTokens() + delta.getPromptTokens());
+            target.setCompletionTokens(target.getCompletionTokens() + delta.getCompletionTokens());
+            target.setTotalTokens(target.getTotalTokens() + delta.getTotalTokens());
+            target.setFirstTokenLatency(target.getFirstTokenLatency() + delta.getFirstTokenLatency());
+            target.setCosts(target.getCosts() + delta.getCosts());
+            target.setCallCount(target.getCallCount() + delta.getCallCount());
+            target.setStreamCount(target.getStreamCount() + delta.getStreamCount());
+            target.setNonStreamCount(target.getNonStreamCount() + delta.getNonStreamCount());
+            target.setCallFailure(target.getCallFailure() + delta.getCallFailure());
+            target.setStreamFailure(target.getStreamFailure() + delta.getStreamFailure());
+            target.setNonStreamFailure(target.getNonStreamFailure() + delta.getNonStreamFailure());
+        }
+
+        private List<AppStatisticAggregateRecord> groupedAppStatistics(String userId,
+                                                                       String orgId,
+                                                                       String startDate,
+                                                                       String endDate,
+                                                                       List<String> appIds,
+                                                                       String appType) {
+            Map<String, AppStatisticAggregateRecord> grouped = new LinkedHashMap<>();
+            for (AppStatisticAggregateRecord record : appStatisticAggregates) {
+                if (!matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getAppId(), record.getAppType(), userId, orgId, startDate, endDate, appIds, appType)) {
+                    continue;
+                }
+                AppStatisticAggregateRecord sum = grouped.get(record.getAppId());
+                if (sum == null) {
+                    sum = new AppStatisticAggregateRecord();
+                    sum.setAppId(record.getAppId());
+                    sum.setAppType(record.getAppType());
+                    sum.setOrgId(record.getOrgId());
+                    grouped.put(record.getAppId(), sum);
+                }
+                addAppAggregate(sum, record);
+            }
+            return new ArrayList<>(grouped.values());
+        }
+
+        private List<ModelStatisticAggregateRecord> groupedModelStatistics(String userId,
+                                                                           String orgId,
+                                                                           String startDate,
+                                                                           String endDate,
+                                                                           List<String> modelIds,
+                                                                           String modelType) {
+            Map<String, ModelStatisticAggregateRecord> grouped = new LinkedHashMap<>();
+            for (ModelStatisticAggregateRecord record : modelStatisticAggregates) {
+                if (!matchesStatistic(record.getUserId(), record.getOrgId(), record.getDate(),
+                        record.getModelId(), record.getModelType(), userId, orgId, startDate, endDate, modelIds, modelType)) {
+                    continue;
+                }
+                ModelStatisticAggregateRecord sum = grouped.get(record.getModelId());
+                if (sum == null) {
+                    sum = new ModelStatisticAggregateRecord();
+                    sum.setModelId(record.getModelId());
+                    sum.setModel(record.getModel());
+                    sum.setProvider(record.getProvider());
+                    sum.setOrgId(record.getOrgId());
+                    grouped.put(record.getModelId(), sum);
+                }
+                addModelAggregate(sum, record);
+            }
+            return new ArrayList<>(grouped.values());
+        }
+
+        private boolean matchesStatistic(String recordUserId,
+                                         String recordOrgId,
+                                         String recordDate,
+                                         String recordId,
+                                         String recordType,
+                                         String userId,
+                                         String orgId,
+                                         String startDate,
+                                         String endDate,
+                                         List<String> ids,
+                                         String type) {
+            if (!userId.equals(recordUserId) || !orgId.equals(recordOrgId)) {
+                return false;
+            }
+            if (recordDate.compareTo(startDate) < 0 || recordDate.compareTo(endDate) > 0) {
+                return false;
+            }
+            if (type != null && !type.isEmpty() && !type.equals(recordType)) {
+                return false;
+            }
+            return ids == null || ids.isEmpty() || ids.contains(recordId);
         }
 
         private <T> List<T> slice(List<T> source, int offset, int limit) {
