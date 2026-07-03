@@ -647,7 +647,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, Object> safe = safe(request);
         String knowledgeId = string(safe.get("knowledgeId"));
         existingKnowledge(knowledgeId);
-        String segmentMethod = string(map(safe.get("docSegment")).get("segmentMethod"));
+        Map<String, Object> docSegment = map(safe.get("docSegment"));
+        String segmentMethod = string(docSegment.get("segmentMethod"));
         if (isBlank(segmentMethod)) {
             segmentMethod = "0";
         }
@@ -665,7 +666,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             doc.author = displayUserName(defaultIfBlank(userId, DEFAULT_USER_ID));
             doc.graphStatus = 0;
             docs(knowledgeId).add(doc);
-            createDefaultSegment(doc);
+            createImportedSegments(doc, docInfo, docSegment);
         }
         saveSnapshot();
     }
@@ -2379,16 +2380,190 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (!segments.isEmpty()) {
             return;
         }
+        segments.add(newSegment(doc.docId, "Imported document: " + doc.docName, segments.size() + 1));
+    }
+
+    private void createImportedSegments(DocState doc, Map<String, Object> docInfo, Map<String, Object> docSegment) {
+        List<SegmentState> segments = segments(doc.docId);
+        if (!segments.isEmpty()) {
+            return;
+        }
+        String content = importedContent(doc, docInfo);
+        List<String> chunks = splitContent(content, docSegment, false);
+        if (chunks.isEmpty()) {
+            createDefaultSegment(doc);
+            return;
+        }
+        boolean parentChild = "1".equals(string(docSegment.get("segmentMethod")));
+        for (String chunk : chunks) {
+            SegmentState segment = newSegment(doc.docId, chunk, segments.size() + 1);
+            segments.add(segment);
+            if (parentChild) {
+                List<String> children = splitContent(chunk, docSegment, true);
+                for (String childChunk : children) {
+                    ChildSegmentState child = new ChildSegmentState();
+                    child.childId = "child-segment-" + nextChildSegmentId.incrementAndGet();
+                    child.content = childChunk;
+                    child.childNum = segment.childSegments.size() + 1;
+                    segment.childSegments.add(child);
+                }
+                segment.parent = !segment.childSegments.isEmpty();
+                segment.childNum = segment.childSegments.size();
+            }
+        }
+    }
+
+    private SegmentState newSegment(String docId, String content, int contentNum) {
         SegmentState segment = new SegmentState();
         segment.contentId = "segment-" + nextSegmentId.incrementAndGet();
-        segment.docId = doc.docId;
-        segment.content = "Imported document: " + doc.docName;
+        segment.docId = docId;
+        segment.content = content;
         segment.available = true;
-        segment.contentNum = 1;
+        segment.contentNum = contentNum;
         segment.labels = new ArrayList<String>();
         segment.parent = false;
         segment.childNum = 0;
-        segments.add(segment);
+        return segment;
+    }
+
+    private String importedContent(DocState doc, Map<String, Object> docInfo) {
+        String content = firstText(docInfo, "content", "text", "docContent", "snippet");
+        if (isBlank(content)) {
+            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
+        }
+        if (!isBlank(content)) {
+            return content;
+        }
+        String docUrl = firstText(docInfo, "docUrl", "url", "filePath");
+        if (!isBlank(docUrl)) {
+            return "Imported URL document: " + doc.docName + "\nSource URL: " + docUrl;
+        }
+        return "Imported document: " + doc.docName;
+    }
+
+    private List<String> splitContent(String content, Map<String, Object> docSegment, boolean child) {
+        String normalized = normalizeContent(content);
+        if (isBlank(normalized)) {
+            return Collections.emptyList();
+        }
+        int maxLength = intValue(docSegment.get(child ? "subMaxSplitter" : "maxSplitter"), child ? 250 : 500);
+        if (maxLength <= 0) {
+            maxLength = child ? 250 : 500;
+        }
+        List<String> delimiters = stringList(docSegment.get(child ? "subSplitter" : "splitter"));
+        List<String> pieces = delimiters.isEmpty()
+                ? autoSplitPieces(normalized)
+                : splitByDelimiters(normalized, delimiters);
+        List<String> chunks = new ArrayList<String>();
+        double overlap = doubleValue(docSegment.get("overlap"), 0D);
+        for (String piece : pieces) {
+            addChunks(chunks, piece, maxLength, overlap);
+        }
+        return chunks;
+    }
+
+    private String normalizeContent(String content) {
+        return defaultIfBlank(content, "").replace("\r\n", "\n").replace('\r', '\n').trim();
+    }
+
+    private List<String> autoSplitPieces(String content) {
+        String prepared = content
+                .replace("。", "。\n")
+                .replace("！", "！\n")
+                .replace("？", "？\n")
+                .replace(". ", ".\n")
+                .replace("! ", "!\n")
+                .replace("? ", "?\n");
+        return nonBlankPieces(prepared.split("\\n+"));
+    }
+
+    private List<String> splitByDelimiters(String content, List<String> delimiters) {
+        List<String> pieces = new ArrayList<String>();
+        pieces.add(content);
+        for (String delimiter : delimiters) {
+            if (isBlank(delimiter)) {
+                continue;
+            }
+            List<String> next = new ArrayList<String>();
+            for (String piece : pieces) {
+                next.addAll(splitLiteral(piece, delimiter));
+            }
+            pieces = next;
+        }
+        return pieces;
+    }
+
+    private List<String> splitLiteral(String content, String delimiter) {
+        List<String> pieces = new ArrayList<String>();
+        int start = 0;
+        int next;
+        while ((next = content.indexOf(delimiter, start)) >= 0) {
+            String piece = content.substring(start, next).trim();
+            if (!isBlank(piece)) {
+                pieces.add(piece);
+            }
+            start = next + delimiter.length();
+        }
+        String tail = content.substring(start).trim();
+        if (!isBlank(tail)) {
+            pieces.add(tail);
+        }
+        return pieces;
+    }
+
+    private List<String> nonBlankPieces(String[] rawPieces) {
+        List<String> pieces = new ArrayList<String>();
+        for (String raw : rawPieces) {
+            String piece = defaultIfBlank(raw, "").trim();
+            if (!isBlank(piece)) {
+                pieces.add(piece);
+            }
+        }
+        return pieces;
+    }
+
+    private void addChunks(List<String> chunks, String piece, int maxLength, double overlapRatio) {
+        String normalized = defaultIfBlank(piece, "").trim();
+        if (isBlank(normalized)) {
+            return;
+        }
+        if (normalized.length() <= maxLength) {
+            chunks.add(normalized);
+            return;
+        }
+        int overlap = Math.max(0, Math.min(maxLength - 1, (int) Math.floor(maxLength * Math.max(0D, Math.min(overlapRatio, 0.9D)))));
+        int step = Math.max(1, maxLength - overlap);
+        for (int start = 0; start < normalized.length(); start += step) {
+            int end = Math.min(normalized.length(), start + maxLength);
+            String chunk = normalized.substring(start, end).trim();
+            if (!isBlank(chunk)) {
+                chunks.add(chunk);
+            }
+            if (end >= normalized.length()) {
+                break;
+            }
+        }
+    }
+
+    private String decodedText(String base64) {
+        if (isBlank(base64)) {
+            return "";
+        }
+        try {
+            return new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ex) {
+            return "";
+        }
+    }
+
+    private String firstText(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            String value = string(source.get(key));
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private void renumberSegments(List<SegmentState> segments) {

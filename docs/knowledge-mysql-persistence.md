@@ -38,11 +38,11 @@ This keeps the zero-frontend-change routes durable across Docker restarts withou
 
 ## Verified Behavior
 
-- Unit tests cover snapshot upsert, startup reload, restored knowledge/tag/keyword/doc/QA/report/external/export-record state, local export-file retrieval, and sequence continuation.
+- Unit tests cover snapshot upsert, startup reload, restored knowledge/tag/keyword/doc/QA/report/external/export-record state, request-content document chunking, local export-file retrieval, and sequence continuation.
 - Docker smoke should create a knowledge base through `localhost:3000`, recreate knowledge and BFF containers, verify the knowledge base still appears, and confirm a row exists in `knowledge_service.knowledge_records`.
 
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent tables such as `knowledge_base`, `knowledge_doc`, `knowledge_qa_pair`, `knowledge_keywords`, `knowledge_tag`, `knowledge_tag_relation`, `knowledge_splitter`, and `knowledge_permission`.
-- Implement real file byte ingestion, MinIO object lifecycle, document parsing, chunking, vector indexing, reimport, child segments, asynchronous MinIO export tasks, and async status callbacks.
+- Implement real uploaded object byte ingestion across BFF/MinIO, MinIO object lifecycle, parser-backed document conversion, vector indexing, reimport, asynchronous MinIO export tasks, and async status callbacks.
 - Implement real QA import/export parsing, asynchronous MinIO export task execution, vector/keyword/rerank retrieval, keyword extraction/sync, graph generation, report generation, and RAG query integration.

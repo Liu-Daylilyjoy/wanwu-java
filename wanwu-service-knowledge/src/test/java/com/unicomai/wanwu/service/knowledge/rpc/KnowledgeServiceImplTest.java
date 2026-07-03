@@ -361,6 +361,35 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void documentImportSplitsInlineContentIntoSearchableSegments() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Parsed Docs", 0)).get("knowledgeId");
+        String content = "Wanwu Java retrieval keeps frontend hit test useful.\n\n"
+                + "Workflow nodes can call tools and models.\n\n"
+                + "RAG retrieval uses persisted knowledge segments.";
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-parsed", "Parsed.txt", content));
+
+        Map<String, Object> allSegments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-parsed", ""));
+        assertEquals(3, allSegments.get("segmentTotalNum"));
+
+        Map<String, Object> ragSegments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-parsed", "RAG retrieval"));
+        assertEquals(1, ragSegments.get("segmentTotalNum"));
+        Map<String, Object> ragSegment = listOfMaps(ragSegments.get("contentList")).get(0);
+        assertEquals("RAG retrieval uses persisted knowledge segments.", ragSegment.get("content"));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "RAG retrieval"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Parsed.txt", searchList.get(0).get("title"));
+        assertEquals("RAG retrieval uses persisted knowledge segments.", searchList.get(0).get("snippet"));
+    }
+
+    @Test
     public void knowledgeHitReturnsImportedDocumentSegmentsForFrontendContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Hit KB", 0)).get("knowledgeId");
@@ -636,6 +665,12 @@ public class KnowledgeServiceImplTest {
         segment.put("maxSplitter", 500);
         request.put("docSegment", segment);
         request.put("docAnalyzer", Collections.singletonList("text"));
+        return request;
+    }
+
+    private Map<String, Object> docImportWithContent(String knowledgeId, String docId, String docName, String content) {
+        Map<String, Object> request = docImport(knowledgeId, docId, docName);
+        map(listOfMaps(request.get("docInfoList")).get(0)).put("content", content);
         return request;
     }
 
