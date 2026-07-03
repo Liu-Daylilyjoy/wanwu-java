@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
@@ -96,6 +98,10 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -103,6 +109,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.containsString;
@@ -1573,6 +1580,54 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listModelExperienceDialogRecords(any());
         verify(modelService).deleteModelExperienceDialog(any());
         verify(modelService, times(2)).saveModelExperienceDialogRecord(any());
+    }
+
+    @Test
+    public void modelExperienceLlmUsesConfiguredOpenAiCompatibleUpstreamWhenAvailable() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"chatcmpl-model-exp\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"upstream model answer\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+
+            mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\","
+                                    + "\"modelExperienceId\":\"exp-001\",\"content\":\"hello\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("\"content\":\"upstream model answer\"")))
+                    .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
+
+            assertEquals("Bearer local-key", authorization.get());
+            assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(upstreamBody.get().contains("\"content\":\"hello\""));
+            assertTrue(upstreamBody.get().contains("\"stream\":false"));
+
+            ArgumentCaptor<ModelExperienceDialogRecordSaveCommand> captor =
+                    forClass(ModelExperienceDialogRecordSaveCommand.class);
+            verify(modelService, times(2)).saveModelExperienceDialogRecord(captor.capture());
+            assertEquals("user", captor.getAllValues().get(0).getRole());
+            assertEquals("hello", captor.getAllValues().get(0).getOriginalContent());
+            assertEquals("assistant", captor.getAllValues().get(1).getRole());
+            assertEquals("upstream model answer", captor.getAllValues().get(1).getOriginalContent());
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -4007,6 +4062,25 @@ public class WanwuFrontendApiControllerTest {
             result.put(String.valueOf(pairs[i]), pairs[i + 1]);
         }
         return result;
+    }
+
+    private static String readBody(HttpExchange exchange) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[512];
+        int read;
+        while ((read = exchange.getRequestBody().read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private static void respondJson(HttpExchange exchange, String json) throws IOException {
+        byte[] response = json.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(response);
+        }
     }
 
     @SuppressWarnings("unchecked")

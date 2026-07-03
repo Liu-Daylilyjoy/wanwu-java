@@ -115,7 +115,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -140,6 +146,8 @@ public class WanwuFrontendApiController {
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String OPENURL_PUBLIC_PREFIX = "/service/url/openurl/v1/agent";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
+    private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -614,7 +622,8 @@ public class WanwuFrontendApiController {
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
-            String answer = "Echo: " + defaultIfBlank(safe.getContent(), "");
+            String answer = firstNonBlank(modelExperienceUpstreamAnswer(model, safe),
+                    "Echo: " + defaultIfBlank(safe.getContent(), ""));
             String outputSensitiveReply = matchGlobalSensitiveReply(userContext, answer);
             if (!isBlank(outputSensitiveReply)) {
                 answer = outputSensitiveReply;
@@ -3290,6 +3299,101 @@ public class WanwuFrontendApiController {
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private String modelExperienceUpstreamAnswer(ModelInfo model, ModelExperienceLlmRequest request) {
+        if (model == null || request == null || model.getConfig() == null) {
+            return "";
+        }
+        try {
+            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
+            String apiKey = firstText(model.getConfig(), "apiKey");
+            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
+                return "";
+            }
+            Map<String, Object> message = new LinkedHashMap<>();
+            message.put("role", "user");
+            message.put("content", defaultIfBlank(request.getContent(), ""));
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("model", defaultIfBlank(model.getModel(), request.getModelId()));
+            payload.put("messages", Collections.singletonList(message));
+            payload.put("stream", false);
+            String response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
+                    apiKey, JSON.writeValueAsString(payload));
+            return extractChatContent(response);
+        } catch (RuntimeException | IOException ignored) {
+            return "";
+        }
+    }
+
+    private String extractChatContent(String response) throws IOException {
+        if (isBlank(response)) {
+            return "";
+        }
+        JsonNode root = JSON.readTree(response);
+        return root.path("choices").path(0).path("message").path("content").asText("");
+    }
+
+    private String postJson(String endpoint, String apiKey, String json) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+        connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setDoOutput(true);
+        try (OutputStream body = connection.getOutputStream()) {
+            body.write(json.getBytes(StandardCharsets.UTF_8));
+        }
+        try {
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String response = readStream(stream);
+            if (status >= 400) {
+                throw new IOException("model experience upstream returned " + status);
+            }
+            return response;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String readStream(InputStream stream) throws IOException {
+        if (stream == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+        }
+        return builder.toString();
+    }
+
+    private String modelEndpointUrl(String endpoint, String suffix) {
+        String base = trimTrailingSlash(endpoint);
+        if (base.endsWith(suffix)) {
+            return base;
+        }
+        return base + suffix;
+    }
+
+    private String trimTrailingSlash(String value) {
+        String result = defaultIfBlank(value, "");
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
+    }
+
+    private boolean isDevelopmentApiKey(String value) {
+        String normalized = value == null ? "" : value.trim();
+        return "dev-model-key".equals(normalized)
+                || "useless-api-key".equals(normalized)
+                || "it-is-not-your-api-key".equals(normalized);
     }
 
     private long elapsedMillis(long startedAt) {
