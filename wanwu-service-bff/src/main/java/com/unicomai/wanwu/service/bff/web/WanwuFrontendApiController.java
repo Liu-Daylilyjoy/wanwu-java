@@ -82,6 +82,7 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
@@ -622,7 +623,7 @@ public class WanwuFrontendApiController {
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
-            String answer = firstNonBlank(modelExperienceUpstreamAnswer(model, safe),
+            String answer = firstNonBlank(modelExperienceUpstreamAnswer(userContext, model, safe),
                     "Echo: " + defaultIfBlank(safe.getContent(), ""));
             String outputSensitiveReply = matchGlobalSensitiveReply(userContext, answer);
             if (!isBlank(outputSensitiveReply)) {
@@ -3301,7 +3302,7 @@ public class WanwuFrontendApiController {
         }
     }
 
-    private String modelExperienceUpstreamAnswer(ModelInfo model, ModelExperienceLlmRequest request) {
+    private String modelExperienceUpstreamAnswer(UserContext userContext, ModelInfo model, ModelExperienceLlmRequest request) {
         if (model == null || request == null || model.getConfig() == null) {
             return "";
         }
@@ -3311,12 +3312,9 @@ public class WanwuFrontendApiController {
             if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
                 return "";
             }
-            Map<String, Object> message = new LinkedHashMap<>();
-            message.put("role", "user");
-            message.put("content", defaultIfBlank(request.getContent(), ""));
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("model", defaultIfBlank(model.getModel(), request.getModelId()));
-            payload.put("messages", Collections.singletonList(message));
+            payload.put("messages", modelExperienceMessages(userContext, request));
             payload.put("stream", false);
             String response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
                     apiKey, JSON.writeValueAsString(payload));
@@ -3324,6 +3322,33 @@ public class WanwuFrontendApiController {
         } catch (RuntimeException | IOException ignored) {
             return "";
         }
+    }
+
+    private List<Map<String, Object>> modelExperienceMessages(UserContext userContext, ModelExperienceLlmRequest request) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        try {
+            ModelExperienceDialogRecordListResult records = modelService.listModelExperienceDialogRecords(
+                    new ModelExperienceDialogRecordQuery(userContext.getUserId(), userContext.getOrgId(),
+                            defaultIfBlank(request.getModelExperienceId(), ""), defaultIfBlank(request.getSessionId(), "")));
+            if (records != null) {
+                for (ModelExperienceDialogRecordInfo record : records.getList()) {
+                    String content = firstNonBlank(record.getHandledContent(), record.getOriginalContent());
+                    if (!isBlank(content)) {
+                        messages.add(modelExperienceMessage(defaultIfBlank(record.getRole(), "user"), content));
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        messages.add(modelExperienceMessage("user", defaultIfBlank(request.getContent(), "")));
+        return messages;
+    }
+
+    private Map<String, Object> modelExperienceMessage(String role, String content) {
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", role);
+        message.put("content", content);
+        return message;
     }
 
     private String extractChatContent(String response) throws IOException {

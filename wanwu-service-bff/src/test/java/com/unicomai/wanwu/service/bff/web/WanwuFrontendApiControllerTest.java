@@ -1631,6 +1631,54 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void modelExperienceLlmIncludesDialogHistoryInConfiguredUpstreamRequest() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"chatcmpl-history\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"history aware answer\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":3,\"total_tokens\":9}}");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            ModelExperienceDialogRecordInfo previousAssistant =
+                    modelExperienceRecord("exp-001", "model-001", "session-001", "raw previous answer", "", "assistant");
+            previousAssistant.setHandledContent("clean previous answer");
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+            when(modelService.listModelExperienceDialogRecords(any()))
+                    .thenReturn(new ModelExperienceDialogRecordListResult(Arrays.asList(
+                            modelExperienceRecord("exp-001", "model-001", "session-001", "previous user", "", "user"),
+                            previousAssistant), 2));
+
+            mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\","
+                                    + "\"modelExperienceId\":\"exp-001\",\"content\":\"latest question\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("\"content\":\"history aware answer\"")));
+
+            String body = upstreamBody.get();
+            assertTrue(body.contains("\"role\":\"user\",\"content\":\"previous user\""));
+            assertTrue(body.contains("\"role\":\"assistant\",\"content\":\"clean previous answer\""));
+            assertTrue(body.contains("\"role\":\"user\",\"content\":\"latest question\""));
+            assertTrue(body.indexOf("\"content\":\"previous user\"")
+                    < body.indexOf("\"content\":\"clean previous answer\""));
+            assertTrue(body.indexOf("\"content\":\"clean previous answer\"")
+                    < body.indexOf("\"content\":\"latest question\""));
+            assertTrue(!body.contains("raw previous answer"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void modelExperienceLlmBlocksGlobalSensitiveInput() throws Exception {
         when(modelService.getModel(anyString(), anyString(), anyString()))
                 .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
