@@ -24,6 +24,7 @@ The Go knowledge service selects `db.name: mysql`, connects to the `knowledge_se
 - `wanwu-service-knowledge` depends on `wanwu-common-data`.
 - `wanwu-service-knowledge/src/main/resources/db/migration/V1__create_knowledge_records.sql` creates `knowledge_records`.
 - `KnowledgeServiceImpl` loads and saves one JSON snapshot containing the current frontend-compatible knowledge, tag, keyword, splitter, document, segment, metadata, permission, QA-pair, report, external knowledge, and export-record state.
+- BFF knowledge import routes enrich Doc, QA, and Report import requests from the local upload store when the unchanged frontend submits `fileUploadId`, `fileId`, or `docId`. This reproduces the Go BFF uploaded-object handoff for UTF-8 CSV/text development files while the final MinIO/parser pipeline is still pending.
 
 ## Persistence Shape
 
@@ -44,5 +45,5 @@ This keeps the zero-frontend-change routes durable across Docker restarts withou
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent tables such as `knowledge_base`, `knowledge_doc`, `knowledge_qa_pair`, `knowledge_keywords`, `knowledge_tag`, `knowledge_tag_relation`, `knowledge_splitter`, and `knowledge_permission`.
-- Implement real uploaded object byte ingestion across BFF/MinIO, MinIO object lifecycle, parser-backed document conversion, vector indexing, reimport, asynchronous MinIO export tasks, and async status callbacks.
-- Implement real uploaded QA/report file byte ingestion, asynchronous QA/report import task execution, asynchronous MinIO export task execution, vector/keyword/rerank retrieval, keyword extraction/sync, graph generation, report generation, and RAG query integration.
+- Implement Go-equivalent MinIO object lifecycle, parser-backed document conversion for binary/Office/PDF files, vector indexing, reimport, asynchronous MinIO export tasks, and async status callbacks.
+- Implement asynchronous QA/report import task execution, asynchronous MinIO export task execution, vector/keyword/rerank retrieval, keyword extraction/sync, graph generation, report generation, and RAG query integration.

@@ -88,6 +88,7 @@ import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
@@ -98,6 +99,7 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -2112,6 +2114,40 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void knowledgeImportRoutesReadUploadedFileContent() throws Exception {
+        String qaFileId = "qa-upload-bff-test.csv";
+        String reportFileId = "report-upload-bff-test.csv";
+        UploadedFileStore.defaultStore().writeText(qaFileId, "question,answer\nWhat is Wanwu?,An AI platform");
+        UploadedFileStore.defaultStore().writeText(reportFileId, "title,content\nReport A,Uploaded report content");
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/pair/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\","
+                                + "\"docInfoList\":[{\"docId\":\"" + qaFileId + "\",\"docName\":\"qa.csv\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Map> qaCaptor = forClass(Map.class);
+        verify(knowledgeService).importQaPairs(anyString(), anyString(), qaCaptor.capture());
+        Map<String, Object> qaRequest = qaCaptor.getValue();
+        Map<String, Object> qaDoc = listMap(qaRequest.get("docInfoList")).get(0);
+        assertEquals("question,answer\nWhat is Wanwu?,An AI platform", qaDoc.get("content"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/report/batch/add")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-report-001\","
+                                + "\"fileUploadId\":\"" + reportFileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Map> reportCaptor = forClass(Map.class);
+        verify(knowledgeService).batchAddReports(anyString(), anyString(), reportCaptor.capture());
+        assertEquals("title,content\nReport A,Uploaded report content", reportCaptor.getValue().get("content"));
+    }
+
+    @Test
     public void createAssistantReturnsFrontendAssistantId() throws Exception {
         when(appService.createAssistant(any(AssistantCreateCommand.class)))
                 .thenReturn(new AssistantCreateResult("assistant-001"));
@@ -3857,6 +3893,11 @@ public class WanwuFrontendApiControllerTest {
             result.put(String.valueOf(pairs[i]), pairs[i + 1]);
         }
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listMap(Object value) {
+        return (List<Map<String, Object>>) value;
     }
 
     private Map<String, Object> skill(String skillId, String name, String type) {

@@ -2179,7 +2179,7 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> importKnowledgeDocs(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request,
+        return knowledgeVoidResponse(authorization, enrichKnowledgeImportContent(request),
                 (ctx, body) -> knowledgeService.importDocs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
@@ -2195,7 +2195,7 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> reimportKnowledgeDocs(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request,
+        return knowledgeVoidResponse(authorization, enrichKnowledgeImportContent(request),
                 (ctx, body) -> knowledgeService.reimportDocs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
@@ -2419,7 +2419,7 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> batchAddKnowledgeReport(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request,
+        return knowledgeVoidResponse(authorization, enrichKnowledgeImportContent(request),
                 (ctx, body) -> knowledgeService.batchAddReports(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
@@ -2530,7 +2530,7 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> importQaPairs(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request,
+        return knowledgeVoidResponse(authorization, enrichKnowledgeImportContent(request),
                 (ctx, body) -> knowledgeService.importQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
@@ -2644,6 +2644,51 @@ public class WanwuFrontendApiController {
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
+    }
+
+    private Map<String, Object> enrichKnowledgeImportContent(Map<?, ?> request) {
+        Map<String, Object> body = objectMap(request);
+        enrichUploadedContent(body);
+        enrichUploadedContentList(body, "docInfoList");
+        enrichUploadedContentList(body, "docList");
+        enrichUploadedContentList(body, "fileList");
+        return body;
+    }
+
+    private void enrichUploadedContentList(Map<String, Object> body, String key) {
+        Object value = body.get(key);
+        if (!(value instanceof List)) {
+            return;
+        }
+        List<Map<String, Object>> enriched = new ArrayList<>();
+        for (Map<String, Object> item : mapList(value)) {
+            enrichUploadedContent(item);
+            enriched.add(item);
+        }
+        if (!enriched.isEmpty()) {
+            body.put(key, enriched);
+        }
+    }
+
+    private void enrichUploadedContent(Map<String, Object> body) {
+        if (hasImportContent(body)) {
+            return;
+        }
+        String fileId = firstText(body, "fileUploadId", "fileId", "docId");
+        String content = UploadedFileStore.defaultStore().readText(fileId);
+        if (isBlank(content)) {
+            return;
+        }
+        body.put("content", content);
+        if (isBlank(firstText(body, "docName", "name"))) {
+            body.put("docName", fileId);
+            body.put("name", fileId);
+        }
+    }
+
+    private boolean hasImportContent(Map<String, Object> body) {
+        return !isBlank(firstText(body, "content", "text", "docContent", "csv", "tsv",
+                "contentBase64", "base64", "docContentBase64", "textBase64"));
     }
 
     private Map<String, Object> objectMap(Map<?, ?> request) {
