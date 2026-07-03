@@ -3316,12 +3316,38 @@ public class WanwuFrontendApiController {
             payload.put("model", defaultIfBlank(model.getModel(), request.getModelId()));
             payload.put("messages", modelExperienceMessages(userContext, request));
             payload.put("stream", false);
+            putModelExperienceParams(payload, request);
             String response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
                     apiKey, JSON.writeValueAsString(payload));
             return extractChatContent(response);
         } catch (RuntimeException | IOException ignored) {
             return "";
         }
+    }
+
+    private void putModelExperienceParams(Map<String, Object> payload, ModelExperienceLlmRequest request) {
+        if (Boolean.TRUE.equals(request.getTemperatureEnable())) {
+            payload.put("temperature", defaultNumber(request.getTemperature()));
+        }
+        if (Boolean.TRUE.equals(request.getTopPEnable())) {
+            payload.put("top_p", defaultNumber(request.getTopP()));
+        }
+        if (Boolean.TRUE.equals(request.getFrequencyPenaltyEnable())) {
+            payload.put("frequency_penalty", defaultNumber(request.getFrequencyPenalty()));
+        }
+        if (Boolean.TRUE.equals(request.getPresencePenaltyEnable())) {
+            payload.put("presence_penalty", defaultNumber(request.getPresencePenalty()));
+        }
+        if (Boolean.TRUE.equals(request.getMaxTokensEnable())) {
+            payload.put("max_tokens", request.getMaxTokens() == null ? 0 : request.getMaxTokens());
+        }
+        if (request.getThinkingEnable() != null) {
+            payload.put("enable_thinking", request.getThinkingEnable());
+        }
+    }
+
+    private Double defaultNumber(Double value) {
+        return value == null ? 0D : value;
     }
 
     private List<Map<String, Object>> modelExperienceMessages(UserContext userContext, ModelExperienceLlmRequest request) {
@@ -3913,6 +3939,17 @@ public class WanwuFrontendApiController {
         private String modelExperienceId;
         private String content;
         private List<String> fileIdList = new ArrayList<String>();
+        private Double temperature;
+        private Boolean temperatureEnable;
+        private Double topP;
+        private Boolean topPEnable;
+        private Double frequencyPenalty;
+        private Boolean frequencyPenaltyEnable;
+        private Double presencePenalty;
+        private Boolean presencePenaltyEnable;
+        private Integer maxTokens;
+        private Boolean maxTokensEnable;
+        private Boolean thinkingEnable;
 
         public String getModelId() {
             return modelId;
@@ -3952,6 +3989,94 @@ public class WanwuFrontendApiController {
 
         public void setFileIdList(List<String> fileIdList) {
             this.fileIdList = fileIdList == null ? new ArrayList<String>() : fileIdList;
+        }
+
+        public Double getTemperature() {
+            return temperature;
+        }
+
+        public void setTemperature(Double temperature) {
+            this.temperature = temperature;
+        }
+
+        public Boolean getTemperatureEnable() {
+            return temperatureEnable;
+        }
+
+        public void setTemperatureEnable(Boolean temperatureEnable) {
+            this.temperatureEnable = temperatureEnable;
+        }
+
+        public Double getTopP() {
+            return topP;
+        }
+
+        public void setTopP(Double topP) {
+            this.topP = topP;
+        }
+
+        public Boolean getTopPEnable() {
+            return topPEnable;
+        }
+
+        public void setTopPEnable(Boolean topPEnable) {
+            this.topPEnable = topPEnable;
+        }
+
+        public Double getFrequencyPenalty() {
+            return frequencyPenalty;
+        }
+
+        public void setFrequencyPenalty(Double frequencyPenalty) {
+            this.frequencyPenalty = frequencyPenalty;
+        }
+
+        public Boolean getFrequencyPenaltyEnable() {
+            return frequencyPenaltyEnable;
+        }
+
+        public void setFrequencyPenaltyEnable(Boolean frequencyPenaltyEnable) {
+            this.frequencyPenaltyEnable = frequencyPenaltyEnable;
+        }
+
+        public Double getPresencePenalty() {
+            return presencePenalty;
+        }
+
+        public void setPresencePenalty(Double presencePenalty) {
+            this.presencePenalty = presencePenalty;
+        }
+
+        public Boolean getPresencePenaltyEnable() {
+            return presencePenaltyEnable;
+        }
+
+        public void setPresencePenaltyEnable(Boolean presencePenaltyEnable) {
+            this.presencePenaltyEnable = presencePenaltyEnable;
+        }
+
+        public Integer getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Integer maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
+        public Boolean getMaxTokensEnable() {
+            return maxTokensEnable;
+        }
+
+        public void setMaxTokensEnable(Boolean maxTokensEnable) {
+            this.maxTokensEnable = maxTokensEnable;
+        }
+
+        public Boolean getThinkingEnable() {
+            return thinkingEnable;
+        }
+
+        public void setThinkingEnable(Boolean thinkingEnable) {
+            this.thinkingEnable = thinkingEnable;
         }
     }
 

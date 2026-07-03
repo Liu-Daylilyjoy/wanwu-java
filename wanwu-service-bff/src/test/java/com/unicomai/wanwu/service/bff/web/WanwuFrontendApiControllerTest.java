@@ -1679,6 +1679,50 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void modelExperienceLlmPassesEnabledInferenceParamsToConfiguredUpstream() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"chatcmpl-params\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"param aware answer\"},\"finish_reason\":\"stop\"}]}");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+
+            mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\","
+                                    + "\"modelExperienceId\":\"exp-001\",\"content\":\"hello\","
+                                    + "\"temperature\":0.2,\"temperatureEnable\":true,"
+                                    + "\"topP\":0.9,\"topPEnable\":true,"
+                                    + "\"frequencyPenalty\":0.3,\"frequencyPenaltyEnable\":true,"
+                                    + "\"presencePenalty\":0.4,\"presencePenaltyEnable\":true,"
+                                    + "\"maxTokens\":128,\"maxTokensEnable\":true,"
+                                    + "\"thinkingEnable\":false}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("\"content\":\"param aware answer\"")));
+
+            String body = upstreamBody.get();
+            assertTrue(body.contains("\"temperature\":0.2"));
+            assertTrue(body.contains("\"top_p\":0.9"));
+            assertTrue(body.contains("\"frequency_penalty\":0.3"));
+            assertTrue(body.contains("\"presence_penalty\":0.4"));
+            assertTrue(body.contains("\"max_tokens\":128"));
+            assertTrue(body.contains("\"enable_thinking\":false"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void modelExperienceLlmBlocksGlobalSensitiveInput() throws Exception {
         when(modelService.getModel(anyString(), anyString(), anyString()))
                 .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
