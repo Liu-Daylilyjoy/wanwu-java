@@ -689,27 +689,28 @@ public class ModelServiceImpl implements ModelService {
         String safeModelType = defaultIfBlank(modelType, MODEL_TYPE_LLM);
         if ("DeepSeek".equals(safeProvider) && MODEL_TYPE_LLM.equals(safeModelType)) {
             return Arrays.asList(
-                    recommend("deepseek-chat", "DeepSeek Chat", "toolCall", "support"),
-                    recommend("deepseek-reasoner", "DeepSeek Reasoner", "noSupport", "support")
+                    recommend("deepseek-chat", "DeepSeek Chat", MODEL_TYPE_LLM, "toolCall", "support"),
+                    recommend("deepseek-reasoner", "DeepSeek Reasoner", MODEL_TYPE_LLM, "noSupport", "support")
             );
         }
         if (MODEL_TYPE_EMBEDDING.equals(safeModelType)) {
-            return Collections.singletonList(recommend("text-embedding-3-small", "Text Embedding 3 Small", "noSupport", "noSupport"));
+            return Collections.singletonList(recommend("text-embedding-3-small", "Text Embedding 3 Small", MODEL_TYPE_EMBEDDING, "noSupport", "noSupport"));
         }
         if (MODEL_TYPE_RERANK.equals(safeModelType)) {
-            return Collections.singletonList(recommend("jina-reranker-v2-base-multilingual", "Jina Reranker", "noSupport", "noSupport"));
+            return Collections.singletonList(recommend("jina-reranker-v2-base-multilingual", "Jina Reranker", MODEL_TYPE_RERANK, "noSupport", "noSupport"));
         }
         if (MODEL_TYPE_ASR.equals(safeModelType)) {
-            return Collections.singletonList(recommend("qwen3-asr-flash", "qwen3-asr-flash", "noSupport", "noSupport"));
+            return Collections.singletonList(recommend("qwen3-asr-flash", "qwen3-asr-flash", MODEL_TYPE_ASR, "noSupport", "noSupport"));
         }
-        return Collections.singletonList(recommend(safeProvider.toLowerCase(Locale.ENGLISH) + "-" + safeModelType, safeProvider + " " + modelTypeName(safeModelType), "noSupport", "noSupport"));
+        return Collections.singletonList(recommend(safeProvider.toLowerCase(Locale.ENGLISH) + "-" + safeModelType, safeProvider + " " + modelTypeName(safeModelType), safeModelType, "noSupport", "noSupport"));
     }
 
-    private RecommendModelInfo recommend(String model, String displayName, String functionCalling, String thinkingSupport) {
+    private RecommendModelInfo recommend(String model, String displayName, String tagModelType,
+                                         String functionCalling, String thinkingSupport) {
         RecommendModelInfo info = new RecommendModelInfo();
         info.setModel(model);
         info.setDisplayName(displayName);
-        info.setTags(Collections.singletonList(singletonMap("text", modelTypeName(MODEL_TYPE_LLM))));
+        info.setTags(Collections.singletonList(singletonMap("text", modelTypeName(tagModelType))));
         info.setVisionSupport("noSupport");
         info.setFunctionCalling(functionCalling);
         info.setThinkingSupport(thinkingSupport);

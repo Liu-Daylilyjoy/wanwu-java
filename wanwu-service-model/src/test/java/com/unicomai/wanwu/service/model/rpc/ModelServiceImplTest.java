@@ -110,6 +110,13 @@ public class ModelServiceImplTest {
         RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("DeepSeek", "llm"));
         assertTrue(recommended.getTotal() >= 1);
         assertEquals("deepseek-chat", recommended.getList().get(0).getModel());
+        assertEquals("Text Generation", recommended.getList().get(0).getTags().get(0).get("text"));
+
+        RecommendModelResult embedding = service.recommendModels(new RecommendModelQuery("OpenAI-API-compatible", "embedding"));
+        assertEquals("Text Embedding", embedding.getList().get(0).getTags().get(0).get("text"));
+
+        RecommendModelResult rerank = service.recommendModels(new RecommendModelQuery("Jina", "rerank"));
+        assertEquals("Rerank", rerank.getList().get(0).getTags().get(0).get("text"));
     }
 
     @Test
@@ -122,6 +129,7 @@ public class ModelServiceImplTest {
         RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("Qwen", "sync-asr"));
         assertEquals(1, recommended.getTotal());
         assertEquals("qwen3-asr-flash", recommended.getList().get(0).getModel());
+        assertEquals("ASR", recommended.getList().get(0).getTags().get(0).get("text"));
     }
 
     @Test

@@ -20,7 +20,7 @@ Date: 2026-06-30
   - `PUT /model/status` equivalent through `changeModelStatus`.
   - `GET /model`, `/model/list`, `/model/select/{type}`.
   - `/appspace/workflow/model/select/{type}` with the same user/org scoped model-type query mapping used by the Go workflow selectors, including `/select/asr` -> `sync-asr`.
-  - `/model/import/providers` and `/model/recommend`.
+  - `/model/import/providers` and `/model/recommend`, including model-type-correct recommendation tags for LLM, embedding, rerank, and sync-ASR.
   - `/model/experience/dialog`, `/model/experience/dialogs`, `/model/experience/dialog/records`.
   - `/model/experience/llm` as a local OpenAI-compatible SSE echo path that saves user and assistant records.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1`.
