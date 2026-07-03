@@ -117,6 +117,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -398,17 +399,17 @@ public class WanwuFrontendApiControllerTest {
 
         mockMvc.perform(get("/user/api/v1/statistic/app/export"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("appName")));
+                .andExpect(header().string("Content-Disposition", containsString(".xlsx")));
         mockMvc.perform(get("/user/api/v1/statistic/model/export"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("model")));
+                .andExpect(header().string("Content-Disposition", containsString(".xlsx")));
         mockMvc.perform(post("/user/api/v1/statistic/api/list/export"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("apiKey")));
+                .andExpect(header().string("Content-Disposition", containsString(".xlsx")));
 
         verify(appService, times(2)).listApplications(any(ApplicationListQuery.class));
         verify(modelService, times(1)).listModels(any(ModelListQuery.class));
-        verify(appService, times(3)).listApiKeys(any(ApiKeyListQuery.class));
+        verify(appService, times(4)).listApiKeys(any(ApiKeyListQuery.class));
     }
 
     @Test

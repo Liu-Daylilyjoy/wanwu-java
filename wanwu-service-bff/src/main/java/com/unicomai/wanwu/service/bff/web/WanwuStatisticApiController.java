@@ -50,7 +50,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -204,18 +203,19 @@ public class WanwuStatisticApiController {
         DateRange range = dateRange(startDate, endDate);
         AppStatisticListResult persistent = persistentAppStatisticList(
                 ctx, range, split(apps), appType, 1, EXPORT_PAGE_SIZE);
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(row("appName", "appType", "orgName", "callCount", "callFailure", "failureRate",
+                "streamCount", "nonStreamCount", "avgStreamCosts", "avgNonStreamCosts"));
         if (persistent == null) {
-            return csv("app-statistic.csv", "appName,appType,orgName,callCount,callFailure,failureRate,streamCount,nonStreamCount,avgStreamCosts,avgNonStreamCosts\n");
+            return xlsx("app-statistic-" + range.startDate + "-" + range.endDate + ".xlsx", "App Statistics", rows);
         }
         Map<String, Map<String, Object>> appMap = safeAppMap(authorization, appType);
-        StringBuilder content = new StringBuilder();
-        content.append("appName,appType,orgName,callCount,callFailure,failureRate,streamCount,nonStreamCount,avgStreamCosts,avgNonStreamCosts\n");
         for (AppStatisticItem item : safeAppStatisticItems(persistent.getList())) {
             Map<String, Object> source = appMap.get(item.getAppId());
             String appName = source == null
                     ? item.getAppId()
                     : defaultIfBlank(value(source, "appName"), value(source, "name"));
-            appendCsvRow(content,
+            rows.add(row(
                     appName,
                     defaultIfBlank(item.getAppType(), appType),
                     ORG_NAME,
@@ -225,9 +225,9 @@ public class WanwuStatisticApiController {
                     item.getStreamCount(),
                     item.getNonStreamCount(),
                     item.getAvgStreamCosts(),
-                    item.getAvgNonStreamCosts());
+                    item.getAvgNonStreamCosts()));
         }
-        return csv("app-statistic-" + range.startDate + "-" + range.endDate + ".csv", content.toString());
+        return xlsx("app-statistic-" + range.startDate + "-" + range.endDate + ".xlsx", "App Statistics", rows);
     }
 
     @GetMapping("/statistic/model")
@@ -334,15 +334,16 @@ public class WanwuStatisticApiController {
         DateRange range = dateRange(startDate, endDate);
         ModelStatisticListResult persistent = persistentModelStatisticList(
                 ctx, range, split(models), modelType, 1, EXPORT_PAGE_SIZE);
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(row("uuid", "modelId", "model", "provider", "orgName", "callCount", "callFailure",
+                "failureRate", "promptTokens", "completionTokens", "totalTokens", "avgCosts", "avgFirstTokenLatency"));
         if (persistent == null) {
-            return csv("model-statistic.csv", "uuid,modelId,model,provider,orgName,callCount,callFailure,failureRate,promptTokens,completionTokens,totalTokens,avgCosts,avgFirstTokenLatency\n");
+            return xlsx("model-statistic-" + range.startDate + "-" + range.endDate + ".xlsx", "Model Statistics", rows);
         }
         Map<String, ModelInfo> modelMap = safeModelMap(authorization, modelType);
-        StringBuilder content = new StringBuilder();
-        content.append("uuid,modelId,model,provider,orgName,callCount,callFailure,failureRate,promptTokens,completionTokens,totalTokens,avgCosts,avgFirstTokenLatency\n");
         for (ModelStatisticItem item : safeModelStatisticItems(persistent.getList())) {
             ModelInfo info = modelMap.get(item.getModelId());
-            appendCsvRow(content,
+            rows.add(row(
                     info == null ? item.getModelId() : defaultIfBlank(info.getUuid(), item.getModelId()),
                     item.getModelId(),
                     info == null
@@ -357,9 +358,9 @@ public class WanwuStatisticApiController {
                     item.getCompletionTokens(),
                     item.getTotalTokens(),
                     item.getAvgCosts(),
-                    item.getAvgFirstTokenLatency());
+                    item.getAvgFirstTokenLatency()));
         }
-        return csv("model-statistic-" + range.startDate + "-" + range.endDate + ".csv", content.toString());
+        return xlsx("model-statistic-" + range.startDate + "-" + range.endDate + ".xlsx", "Model Statistics", rows);
     }
 
     @GetMapping("/statistic/api/select")
@@ -521,8 +522,20 @@ public class WanwuStatisticApiController {
     }
 
     @PostMapping("/statistic/api/{type}/export")
-    public ResponseEntity<byte[]> exportApiStatistic(@PathVariable("type") String type) {
-        return csv("api-" + type + "-statistic.csv", "name,apiKey,methodPath,callCount,callFailure\n");
+    public ResponseEntity<byte[]> exportApiStatistic(
+            @PathVariable("type") String type,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(request);
+        if ("record".equals(type)) {
+            return xlsx("api-record-statistic-" + range.startDate + "-" + range.endDate + ".xlsx",
+                    "API Key Records",
+                    apiRecordExportRows(authorization, ctx, range, request));
+        }
+        return xlsx("api-list-statistic-" + range.startDate + "-" + range.endDate + ".xlsx",
+                "API Key Statistics",
+                apiListExportRows(authorization, ctx, range, request));
     }
 
     private ApplicationListResult listApplications(String authorization, String appType) {
@@ -783,6 +796,14 @@ public class WanwuStatisticApiController {
         return result;
     }
 
+    private Map<String, ApiKeyInfo> safeApiKeyMap(String authorization) {
+        try {
+            return apiKeyMap(authorization);
+        } catch (RuntimeException ex) {
+            return Collections.emptyMap();
+        }
+    }
+
     private Map<String, Map<String, Object>> appMap(String authorization, String appType) {
         Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
         for (Map<String, Object> item : safeList(listApplications(authorization, appType).getList())) {
@@ -824,6 +845,92 @@ public class WanwuStatisticApiController {
 
     private String apiKeyValue(ApiKeyInfo info) {
         return info == null ? "Deleted API Key" : defaultIfBlank(info.getKey(), "");
+    }
+
+    private List<List<Object>> apiListExportRows(String authorization,
+                                                 UserContext ctx,
+                                                 DateRange range,
+                                                 Map<String, Object> request) {
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(row("name", "apiKey", "methodPath", "callCount", "callFailure", "avgStreamCosts",
+                "avgNonStreamCosts", "streamCount", "nonStreamCount"));
+        Map<String, ApiKeyInfo> apiKeyMap = safeApiKeyMap(authorization);
+        ApiKeyStatisticListResult persistent = persistentApiStatisticList(
+                ctx, range, apiKeyIds(request), methodPaths(request), 1, EXPORT_PAGE_SIZE);
+        if (persistent != null) {
+            for (ApiKeyStatisticItem item : safeStatisticItems(persistent.getList())) {
+                ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+                rows.add(row(
+                        apiKeyName(info, item.getApiKeyId()),
+                        apiKeyValue(info),
+                        item.getMethodPath(),
+                        item.getCallCount(),
+                        item.getCallFailure(),
+                        item.getAvgStreamCosts(),
+                        item.getAvgNonStreamCosts(),
+                        item.getStreamCount(),
+                        item.getNonStreamCount()));
+            }
+            return rows;
+        }
+        for (OpenApiUsageMeter.Aggregate item : usageMeter.aggregates(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
+            ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+            rows.add(row(
+                    apiKeyName(info, item.getApiKeyId()),
+                    apiKeyValue(info),
+                    item.getMethodPath(),
+                    item.getCallCount(),
+                    item.getCallFailure(),
+                    item.avgStreamCosts(),
+                    item.avgNonStreamCosts(),
+                    item.getStreamCount(),
+                    item.getNonStreamCount()));
+        }
+        return rows;
+    }
+
+    private List<List<Object>> apiRecordExportRows(String authorization,
+                                                   UserContext ctx,
+                                                   DateRange range,
+                                                   Map<String, Object> request) {
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(row("name", "apiKey", "methodPath", "callTime", "responseStatus", "streamCosts",
+                "nonStreamCosts", "requestBody", "responseBody"));
+        Map<String, ApiKeyInfo> apiKeyMap = safeApiKeyMap(authorization);
+        ApiKeyStatisticRecordResult persistent = persistentApiStatisticRecords(
+                ctx, range, apiKeyIds(request), methodPaths(request), 1, EXPORT_PAGE_SIZE);
+        if (persistent != null) {
+            for (ApiKeyStatisticRecordItem item : safeStatisticRecords(persistent.getList())) {
+                ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+                rows.add(row(
+                        apiKeyName(info, item.getApiKeyId()),
+                        apiKeyValue(info),
+                        item.getMethodPath(),
+                        formatTime(item.getCallTime()),
+                        item.getResponseStatus(),
+                        item.getStreamCosts(),
+                        item.getNonStreamCosts(),
+                        item.getRequestBody(),
+                        item.getResponseBody()));
+            }
+            return rows;
+        }
+        for (OpenApiUsageMeter.Record item : usageMeter.records(
+                ctx.userId, ctx.orgId, range.startDate, range.endDate, apiKeyIds(request), methodPaths(request))) {
+            ApiKeyInfo info = apiKeyMap.get(item.getApiKeyId());
+            rows.add(row(
+                    apiKeyName(info, item.getApiKeyId()),
+                    apiKeyValue(info),
+                    item.getMethodPath(),
+                    formatTime(item.getCallTime()),
+                    item.getResponseStatus(),
+                    item.getStreamCosts(),
+                    item.getNonStreamCosts(),
+                    item.getRequestBody(),
+                    item.getResponseBody()));
+        }
+        return rows;
     }
 
     private AppStatisticResult persistentAppStatistic(UserContext ctx,
@@ -1175,30 +1282,20 @@ public class WanwuStatisticApiController {
         return new UserContext(DEV_USER_ID, DEV_ORG_ID);
     }
 
-    private ResponseEntity<byte[]> csv(String fileName, String content) {
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+    private ResponseEntity<byte[]> xlsx(String fileName, String sheetName, List<List<Object>> rows) {
+        byte[] bytes = SimpleXlsxWriter.write(sheetName, rows);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+                .contentType(MediaType.parseMediaType("application/octet-stream"))
                 .body(bytes);
     }
 
-    private void appendCsvRow(StringBuilder content, Object... values) {
-        for (int i = 0; i < values.length; i++) {
-            if (i > 0) {
-                content.append(',');
-            }
-            content.append(csvValue(values[i]));
+    private List<Object> row(Object... values) {
+        List<Object> row = new ArrayList<Object>();
+        if (values != null) {
+            Collections.addAll(row, values);
         }
-        content.append('\n');
-    }
-
-    private String csvValue(Object value) {
-        String text = value == null ? "" : value.toString();
-        if (text.indexOf('"') >= 0 || text.indexOf(',') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0) {
-            return "\"" + text.replace("\"", "\"\"") + "\"";
-        }
-        return text;
+        return row;
     }
 
     private static class UserContext {

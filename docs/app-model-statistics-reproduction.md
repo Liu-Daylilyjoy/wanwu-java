@@ -62,13 +62,13 @@ Draft app calls are intentionally not recorded, matching Go's `AppStatisticSourc
 
 Frontend field names remain unchanged. For example, model overview still returns `totalTokensTotal`, `promptTokensTotal`, `completionTokensTotal`, `callCountTotal`, and `callFailureTotal`.
 
-The export endpoints now emit CSV files from the same persisted aggregate rows used by the dashboard list endpoints. Go emits xlsx workbooks through excelize; Java keeps CSV for now because the project does not yet carry an Excel writer dependency.
+The export endpoints now emit xlsx workbooks from the same persisted aggregate rows used by the dashboard list endpoints. The Java reproduction uses a small BFF-local OOXML writer so the frontend receives Go-equivalent downloadable workbooks without introducing a new Excel dependency.
 
 ## Remaining Gaps
 
 - Go's Redis daily hash plus hourly cron has not been reproduced; Java currently writes MySQL directly.
 - Runtime costs and token counts are development estimates for local deterministic responses, not provider-reported metrics.
-- Export content is real aggregate data, but the file format is CSV rather than Go-equivalent xlsx.
+- The xlsx writer intentionally covers the simple single-sheet statistics export surface only; richer Excel styling can be added later if the frontend starts depending on it.
 
 ## Verification
 

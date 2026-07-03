@@ -36,17 +36,24 @@ import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.ModelService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -161,6 +168,22 @@ public class WanwuStatisticApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].requestBody").value("{\"ok\":true}"));
+
+        MvcResult listExport = mockMvc.perform(post("/user/api/v1/statistic/api/list/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(query))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertXlsxContains(listExport, "name", "Development Admin Key", methodPath, "7");
+
+        MvcResult recordExport = mockMvc.perform(post("/user/api/v1/statistic/api/record/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(query))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertXlsxContains(recordExport, "requestBody", "ok", "true");
     }
 
     @Test
@@ -222,25 +245,25 @@ public class WanwuStatisticApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].model").value("Stats Model"))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(42));
 
-        mockMvc.perform(get("/user/api/v1/statistic/app/export")
+        MvcResult appExport = mockMvc.perform(get("/user/api/v1/statistic/app/export")
                         .header("Authorization", "Bearer dev-token")
                         .param("startDate", "2026-06-29")
                         .param("endDate", "2026-06-29")
                         .param("appType", "agent")
                         .param("apps", "agent-001"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("appName,appType,orgName,callCount")))
-                .andExpect(content().string(containsString("Stats Agent,agent,Default Organization,3,1")));
+                .andReturn();
+        assertXlsxContains(appExport, "appName", "Stats Agent", "Default Organization", "3");
 
-        mockMvc.perform(get("/user/api/v1/statistic/model/export")
+        MvcResult modelExport = mockMvc.perform(get("/user/api/v1/statistic/model/export")
                         .header("Authorization", "Bearer dev-token")
                         .param("startDate", "2026-06-29")
                         .param("endDate", "2026-06-29")
                         .param("modelType", "llm")
                         .param("models", "model-001"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("uuid,modelId,model,provider")))
-                .andExpect(content().string(containsString("model-001,model-001,Stats Model,local")));
+                .andReturn();
+        assertXlsxContains(modelExport, "uuid", "model-001", "Stats Model", "local");
     }
 
     private ApiKeyInfo devAdminApiKey() {
@@ -368,6 +391,37 @@ public class WanwuStatisticApiControllerTest {
         }
         chart.setLines(lines);
         return chart;
+    }
+
+    private void assertXlsxContains(MvcResult result, String... values) throws Exception {
+        byte[] bytes = result.getResponse().getContentAsByteArray();
+        assertTrue(bytes.length > 4);
+        assertTrue(bytes[0] == 'P' && bytes[1] == 'K');
+        String xml = worksheetXml(bytes);
+        for (String value : values) {
+            assertTrue(xml.contains(value), "missing xlsx value: " + value);
+        }
+    }
+
+    private String worksheetXml(byte[] bytes) throws Exception {
+        ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes));
+        try {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if ("xl/worksheets/sheet1.xml".equals(entry.getName())) {
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[1024];
+                    int read;
+                    while ((read = zip.read(buffer)) != -1) {
+                        output.write(buffer, 0, read);
+                    }
+                    return new String(output.toByteArray(), StandardCharsets.UTF_8);
+                }
+            }
+        } finally {
+            zip.close();
+        }
+        return "";
     }
 
     private ApiKeyStatisticResult persistentOverview(String methodPath) {
