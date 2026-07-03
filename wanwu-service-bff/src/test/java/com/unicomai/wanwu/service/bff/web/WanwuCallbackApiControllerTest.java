@@ -172,18 +172,20 @@ public class WanwuCallbackApiControllerTest {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             upstreamBody.set(readBody(exchange));
             respondSse(exchange, "data: {\"id\":\"chunk-1\",\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"
-                    + "data: {\"id\":\"chunk-2\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    + "data: {\"id\":\"chunk-2\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n"
                     + "data: [DONE]\n\n");
         });
         server.start();
         try {
             ModelService modelService = mock(ModelService.class);
+            AppService appService = mock(AppService.class);
             when(modelService.getModel("", "", "model-123"))
                     .thenReturn(configuredModel("model-123", "deepseek-chat",
                             "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "local-key"));
 
             MockMvc callbackMvc = MockMvcBuilders
-                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .standaloneSetup(new WanwuCallbackApiController(modelService, appService))
                     .build();
 
             callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
@@ -197,6 +199,10 @@ public class WanwuCallbackApiControllerTest {
             assertEquals("Bearer local-key", authorization.get());
             assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
             assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            ArgumentCaptor<RecordModelStatisticCommand> captor = forClass(RecordModelStatisticCommand.class);
+            verify(appService).recordModelStatistic(captor.capture());
+            assertEquals(6L, captor.getValue().getTotalTokens());
+            assertTrue(captor.getValue().isStream());
         } finally {
             server.stop(0);
         }

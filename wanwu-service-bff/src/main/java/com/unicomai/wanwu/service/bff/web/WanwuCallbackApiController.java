@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
@@ -415,6 +416,7 @@ public class WanwuCallbackApiController {
             if (isBlank(upstream)) {
                 return null;
             }
+            recordCallbackStreamStatistic(modelId, upstream);
             return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(upstream);
         } catch (RuntimeException | IOException ignored) {
             return null;
@@ -638,6 +640,48 @@ public class WanwuCallbackApiController {
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private void recordCallbackStreamStatistic(String modelId, String upstream) {
+        Map<String, Object> response = callbackStreamUsage(upstream);
+        if (!response.isEmpty()) {
+            recordCallbackModelStatistic(modelId, response, true);
+        }
+    }
+
+    private Map<String, Object> callbackStreamUsage(String upstream) {
+        if (isBlank(upstream)) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> latestUsage = Collections.emptyMap();
+        String[] lines = upstream.split("\\r?\\n");
+        for (String line : lines) {
+            String data = line == null ? "" : line.trim();
+            if (!data.startsWith("data:")) {
+                continue;
+            }
+            data = data.substring("data:".length()).trim();
+            if (isBlank(data) || "[DONE]".equals(data)) {
+                continue;
+            }
+            try {
+                JsonNode usage = JSON.readTree(data).get("usage");
+                if (usage != null && usage.isObject()) {
+                    Map<String, Object> parsed = new LinkedHashMap<>();
+                    parsed.put("prompt_tokens", usage.path("prompt_tokens").asLong(0L));
+                    parsed.put("completion_tokens", usage.path("completion_tokens").asLong(0L));
+                    parsed.put("total_tokens", usage.path("total_tokens").asLong(0L));
+                    latestUsage = parsed;
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        if (latestUsage.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("usage", latestUsage);
+        return response;
     }
 
     private Map<String, Object> redactedCallbackConfig(ModelInfo model) {
