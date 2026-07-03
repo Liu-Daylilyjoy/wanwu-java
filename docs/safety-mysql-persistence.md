@@ -26,6 +26,7 @@ The Java app service now adds `app_service.safety_records` as a Docker MySQL com
 - sensitive word single upload, BFF-local XLSX/CSV file import, and delete
 - personal table selector used by Agent/RAG safety configuration
 - Agent/RAG local chat input blocking through AppService consuming global tables and enabled configured personal tables
+- Model Experience local input blocking through BFF consuming global tables
 
 The snapshot stores table metadata, table words, and the next word sequence so Docker restarts do not reset word IDs. Java also now keeps the Go-compatible table `version`, duplicate single-word guard, 100-word table cap, and Go-style matrix sensitive word file parsing from unchanged frontend uploads.
 
@@ -37,4 +38,4 @@ The snapshot stores table metadata, table words, and the next word sequence so D
 
 - Normalize the snapshot into Go-equivalent `sensitive_word_tables` and `sensitive_word_vocabularies` tables.
 - Replace the BFF-local upload handoff with Go-equivalent MinIO object lifecycle and richer `excelize` workbook parity.
-- Apply Aho-Corasick output-stream sensitive-word interception to Agent/RAG/Model streaming runtimes and add Model Experience input blocking.
+- Apply Aho-Corasick output-stream sensitive-word interception to Agent/RAG/Model streaming runtimes.

@@ -97,6 +97,7 @@ import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import com.unicomai.wanwu.api.operate.OperateService;
+import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.HttpHeaders;
@@ -158,6 +159,9 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private OperateService operateService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private SafetyService safetyService;
+
     public WanwuFrontendApiController() {
     }
 
@@ -182,12 +186,19 @@ public class WanwuFrontendApiController {
     public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
                                       KnowledgeService knowledgeService, McpService mcpService,
                                       OperateService operateService) {
+        this(iamService, appService, modelService, knowledgeService, mcpService, operateService, null);
+    }
+
+    public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
+                                      KnowledgeService knowledgeService, McpService mcpService,
+                                      OperateService operateService, SafetyService safetyService) {
         this.iamService = iamService;
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
         this.mcpService = mcpService;
         this.operateService = operateService;
+        this.safetyService = safetyService;
     }
 
     @GetMapping("/base/captcha")
@@ -596,6 +607,12 @@ public class WanwuFrontendApiController {
                 return ResponseEntity.status(400)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(errorJson("model is inactive"));
+            }
+            String sensitiveReply = matchGlobalSensitiveReply(userContext, safe.getContent());
+            if (!isBlank(sensitiveReply)) {
+                return ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
             String answer = "Echo: " + defaultIfBlank(safe.getContent(), "");
             modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
@@ -3333,6 +3350,61 @@ public class WanwuFrontendApiController {
         json.append("\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}");
         json.append("}");
         return json.toString();
+    }
+
+    private String matchGlobalSensitiveReply(UserContext userContext, String content) {
+        if (safetyService == null || isBlank(content)) {
+            return "";
+        }
+        try {
+            Map<String, Object> tables = safetyService.listSensitiveWordTables(
+                    userContext.getUserId(), userContext.getOrgId(), "global");
+            for (Map<String, Object> table : mapList(tables == null ? null : tables.get("list"))) {
+                String tableId = firstText(table, "tableId", "id", "value");
+                if (isBlank(tableId)) {
+                    continue;
+                }
+                String reply = matchSensitiveTable(userContext, tableId, firstText(table, "reply"), content);
+                if (!isBlank(reply)) {
+                    return reply;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+        return "";
+    }
+
+    private String matchSensitiveTable(UserContext userContext, String tableId, String fallbackReply, String content) {
+        String reply = firstNonBlank(fallbackReply, "Content blocked by sensitive word filter");
+        try {
+            Map<String, Object> table = safetyService.getSensitiveWordTable(
+                    userContext.getUserId(), userContext.getOrgId(), tableId);
+            reply = firstNonBlank(firstText(table, "reply"), reply);
+            Map<String, Object> words = safetyService.listSensitiveWords(
+                    userContext.getUserId(), userContext.getOrgId(), tableId, 1, 1000);
+            for (Map<String, Object> item : mapList(words == null ? null : words.get("list"))) {
+                String word = firstText(item, "word", "content", "sensitiveWord", "name");
+                if (!isBlank(word) && content.contains(word)) {
+                    return reply;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+        return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static String jsonString(Object value) {

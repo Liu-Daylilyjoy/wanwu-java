@@ -108,6 +108,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,7 +145,7 @@ public class WanwuFrontendApiControllerTest {
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(
                     new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService,
-                            operateService),
+                            operateService, safetyService),
                     new WanwuResourceApiController(mcpService),
                     new WanwuSkillApiController(mcpService),
                     new WanwuSafetyApiController(safetyService),
@@ -1540,6 +1541,32 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listModelExperienceDialogRecords(any());
         verify(modelService).deleteModelExperienceDialog(any());
         verify(modelService, times(2)).saveModelExperienceDialogRecord(any());
+    }
+
+    @Test
+    public void modelExperienceLlmBlocksGlobalSensitiveInput() throws Exception {
+        when(modelService.getModel(anyString(), anyString(), anyString()))
+                .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
+        Map<String, Object> table = map("tableId", "global-001", "tableName", "Global Guard",
+                "reply", "Safety reply", "type", "global", "version", "v1");
+        Map<String, Object> word = map("wordId", "word-001", "word", "banned-token", "sensitiveType", "Other");
+        when(safetyService.listSensitiveWordTables(anyString(), anyString(), eq("global")))
+                .thenReturn(listResult(table));
+        when(safetyService.getSensitiveWordTable(anyString(), anyString(), eq("global-001")))
+                .thenReturn(table);
+        when(safetyService.listSensitiveWords(anyString(), anyString(), eq("global-001"), anyInt(), anyInt()))
+                .thenReturn(map("list", Collections.singletonList(word), "total", 1));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\",\"modelExperienceId\":\"exp-001\",\"content\":\"hello banned-token\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"content\":\"Safety reply\"")))
+                .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
+
+        verify(modelService, times(0)).saveModelExperienceDialogRecord(any());
     }
 
     @Test
