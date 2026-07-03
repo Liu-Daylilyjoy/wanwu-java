@@ -1159,7 +1159,7 @@ public class WanwuFrontendApiController {
             @org.springframework.web.bind.annotation.PathVariable("modelType") String modelType) {
         UserContext userContext = userContext(authorization);
         return FrontendResponse.ok(modelService.listTypeModels(
-                new ModelTypeQuery(modelType, userContext.getUserId(), userContext.getOrgId())));
+                new ModelTypeQuery(userContext.getUserId(), userContext.getOrgId(), modelType)));
     }
 
     @GetMapping("/workflow/tool/select")

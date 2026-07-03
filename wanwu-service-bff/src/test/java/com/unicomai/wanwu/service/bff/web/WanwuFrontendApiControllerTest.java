@@ -80,6 +80,7 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
+import com.unicomai.wanwu.api.model.dto.ModelTypeQuery;
 import com.unicomai.wanwu.api.model.dto.ModelTypeInfo;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeInfo;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
@@ -1478,6 +1479,24 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listImportProviders(any());
         verify(modelService).recommendModels(any());
         verify(modelService).changeModelStatus(any());
+    }
+
+    @Test
+    public void workflowAsrModelSelectMapsPathTypeAndUserContext() throws Exception {
+        when(modelService.listTypeModels(any()))
+                .thenReturn(new ModelListResult(Collections.singletonList(modelInfo("asr-001", "XunFei ASR", "sync-asr")), 1));
+
+        mockMvc.perform(get("/user/api/v1/appspace/workflow/model/select/asr")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.list[0].modelId").value("asr-001"));
+
+        ArgumentCaptor<ModelTypeQuery> captor = forClass(ModelTypeQuery.class);
+        verify(modelService).listTypeModels(captor.capture());
+        assertEquals("dev-admin", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+        assertEquals("asr", captor.getValue().getModelType());
     }
 
     @Test

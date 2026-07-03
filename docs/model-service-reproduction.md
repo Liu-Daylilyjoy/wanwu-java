@@ -19,6 +19,7 @@ Date: 2026-06-30
   - `DELETE /model` equivalent through `deleteModel`.
   - `PUT /model/status` equivalent through `changeModelStatus`.
   - `GET /model`, `/model/list`, `/model/select/{type}`.
+  - `/appspace/workflow/model/select/{type}` with the same user/org scoped model-type query mapping used by the Go workflow ASR/model selectors.
   - `/model/import/providers` and `/model/recommend`.
   - `/model/experience/dialog`, `/model/experience/dialogs`, `/model/experience/dialog/records`.
   - `/model/experience/llm` as a local OpenAI-compatible SSE echo path that saves user and assistant records.
