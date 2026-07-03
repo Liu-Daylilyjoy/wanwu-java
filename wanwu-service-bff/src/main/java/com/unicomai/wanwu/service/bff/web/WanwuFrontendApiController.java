@@ -1159,7 +1159,11 @@ public class WanwuFrontendApiController {
             @org.springframework.web.bind.annotation.PathVariable("modelType") String modelType) {
         UserContext userContext = userContext(authorization);
         return FrontendResponse.ok(modelService.listTypeModels(
-                new ModelTypeQuery(userContext.getUserId(), userContext.getOrgId(), modelType)));
+                new ModelTypeQuery(userContext.getUserId(), userContext.getOrgId(), workflowModelType(modelType))));
+    }
+
+    private String workflowModelType(String modelType) {
+        return "asr".equals(modelType) ? "sync-asr" : modelType;
     }
 
     @GetMapping("/workflow/tool/select")

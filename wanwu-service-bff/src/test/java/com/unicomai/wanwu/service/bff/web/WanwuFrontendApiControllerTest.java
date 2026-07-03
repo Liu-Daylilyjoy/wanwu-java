@@ -1496,7 +1496,7 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listTypeModels(captor.capture());
         assertEquals("dev-admin", captor.getValue().getUserId());
         assertEquals("default-org", captor.getValue().getOrgId());
-        assertEquals("asr", captor.getValue().getModelType());
+        assertEquals("sync-asr", captor.getValue().getModelType());
     }
 
     @Test
