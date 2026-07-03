@@ -158,6 +158,50 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void chatCompletionsConvertsUserImageUrlToBase64BeforeProxying() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer imageServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        imageServer.createContext("/image.png", exchange ->
+                respondBytes(exchange, "image/png", new byte[]{
+                        (byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}));
+        imageServer.start();
+        HttpServer upstreamServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstreamServer.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"upstream-chat-vision\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-vl\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"vision answer\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}");
+        });
+        upstreamServer.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-vl"))
+                    .thenReturn(configuredModel("model-vl", "deepseek-vl",
+                            "http://127.0.0.1:" + upstreamServer.getAddress().getPort() + "/v1", "vision-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+            String imageUrl = "http://127.0.0.1:" + imageServer.getAddress().getPort() + "/image.png";
+
+            callbackMvc.perform(post("/callback/v1/model/model-vl/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"messages\":[{\"role\":\"user\",\"content\":["
+                                    + "{\"type\":\"text\",\"text\":\"describe\"},"
+                                    + "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + imageUrl + "\"}}]}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.choices[0].message.content").value("vision answer"));
+
+            assertTrue(upstreamBody.get().contains("\"url\":\"data:image/png;base64,iVBORw0KGgo=\""));
+            assertTrue(!upstreamBody.get().contains(imageUrl));
+        } finally {
+            upstreamServer.stop(0);
+            imageServer.stop(0);
+        }
+    }
+
+    @Test
     public void embeddingsAndRerankProxyToConfiguredModelEndpoints() throws Exception {
         AtomicReference<String> embeddingAuthorization = new AtomicReference<>();
         AtomicReference<String> embeddingBody = new AtomicReference<>();
@@ -382,6 +426,14 @@ public class WanwuCallbackApiControllerTest {
     private static void respondSse(HttpExchange exchange, String body) throws IOException {
         byte[] response = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, response.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(response);
+        }
+    }
+
+    private static void respondBytes(HttpExchange exchange, String contentType, byte[] response) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.sendResponseHeaders(200, response.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(response);

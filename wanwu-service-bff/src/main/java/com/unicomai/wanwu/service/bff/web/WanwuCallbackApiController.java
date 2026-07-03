@@ -360,6 +360,9 @@ public class WanwuCallbackApiController {
             if (request != null) {
                 payload.putAll(request);
             }
+            if ("/chat/completions".equals(endpointSuffix)) {
+                convertUserImageUrls(payload);
+            }
             if (isBlank(firstText(payload, "model"))) {
                 payload.put("model", defaultIfBlank(model.getModel(), modelId));
             }
@@ -387,6 +390,9 @@ public class WanwuCallbackApiController {
             Map<String, Object> payload = new LinkedHashMap<>();
             if (request != null) {
                 payload.putAll(request);
+            }
+            if ("/chat/completions".equals(endpointSuffix)) {
+                convertUserImageUrls(payload);
             }
             if (isBlank(firstText(payload, "model"))) {
                 payload.put("model", defaultIfBlank(model.getModel(), modelId));
@@ -454,13 +460,17 @@ public class WanwuCallbackApiController {
         if (stream == null) {
             return "";
         }
+        return new String(readBytes(stream), StandardCharsets.UTF_8);
+    }
+
+    private byte[] readBytes(InputStream stream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         byte[] buffer = new byte[1024];
         int read;
         while ((read = stream.read(buffer)) != -1) {
             output.write(buffer, 0, read);
         }
-        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        return output.toByteArray();
     }
 
     private String modelEndpointUrl(String endpoint, String suffix) {
@@ -477,6 +487,81 @@ public class WanwuCallbackApiController {
             return "/" + multimodalSuffix;
         }
         return "/" + textSuffix;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void convertUserImageUrls(Map<String, Object> payload) {
+        Object messagesValue = payload.get("messages");
+        if (!(messagesValue instanceof List)) {
+            return;
+        }
+        for (Object messageValue : (List<?>) messagesValue) {
+            if (!(messageValue instanceof Map)) {
+                continue;
+            }
+            Map<Object, Object> message = (Map<Object, Object>) messageValue;
+            if (!"user".equals(String.valueOf(message.get("role")))) {
+                continue;
+            }
+            Object contentValue = message.get("content");
+            if (contentValue instanceof String || !(contentValue instanceof List)) {
+                continue;
+            }
+            if (convertFirstImageUrl((List<?>) contentValue)) {
+                return;
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean convertFirstImageUrl(List<?> content) {
+        for (Object itemValue : content) {
+            if (!(itemValue instanceof Map)) {
+                continue;
+            }
+            Map<?, ?> item = (Map<?, ?>) itemValue;
+            Object imageUrlValue = item.get("image_url");
+            if (!(imageUrlValue instanceof Map)) {
+                continue;
+            }
+            Map<Object, Object> imageUrl = (Map<Object, Object>) imageUrlValue;
+            String url = imageUrl.get("url") == null ? "" : String.valueOf(imageUrl.get("url"));
+            String dataUrl = fetchUrlAsDataUrl(url);
+            if (!isBlank(dataUrl)) {
+                imageUrl.put("url", dataUrl);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String fetchUrlAsDataUrl(String url) {
+        if (isBlank(url)) {
+            return "";
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
+            connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
+            connection.setRequestMethod("GET");
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                return "";
+            }
+            byte[] body = readBytes(connection.getInputStream());
+            if (body.length == 0) {
+                return "";
+            }
+            String contentType = defaultIfBlank(connection.getContentType(), "application/octet-stream");
+            return "data:" + contentType + ";base64," + Base64.getEncoder().encodeToString(body);
+        } catch (RuntimeException | IOException ignored) {
+            return "";
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
     private Map<String, Object> callbackModelInfo(ModelInfo model) {
