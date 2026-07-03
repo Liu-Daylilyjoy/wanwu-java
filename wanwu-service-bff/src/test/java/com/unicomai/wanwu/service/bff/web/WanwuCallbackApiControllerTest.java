@@ -119,6 +119,68 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void embeddingsAndRerankProxyToConfiguredModelEndpoints() throws Exception {
+        AtomicReference<String> embeddingAuthorization = new AtomicReference<>();
+        AtomicReference<String> embeddingBody = new AtomicReference<>();
+        AtomicReference<String> rerankAuthorization = new AtomicReference<>();
+        AtomicReference<String> rerankBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/embeddings", exchange -> {
+            embeddingAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            embeddingBody.set(readBody(exchange));
+            respondJson(exchange, "{\"object\":\"list\",\"model\":\"text-embedding-3-small\","
+                    + "\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.1,0.2]}],"
+                    + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0,\"total_tokens\":1}}");
+        });
+        server.createContext("/v1/rerank", exchange -> {
+            rerankAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            rerankBody.set(readBody(exchange));
+            respondJson(exchange, "{\"model\":\"jina-reranker-v2-base-multilingual\","
+                    + "\"results\":[{\"index\":0,\"relevance_score\":0.87}],"
+                    + "\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":0,\"total_tokens\":4}}");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-emb"))
+                    .thenReturn(configuredModel("model-emb", "text-embedding-3-small",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "emb-key"));
+            when(modelService.getModel("", "", "model-rerank"))
+                    .thenReturn(configuredModel("model-rerank", "jina-reranker-v2-base-multilingual",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "rerank-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-emb/embeddings")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"input\":\"hello\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.model").value("text-embedding-3-small"))
+                    .andExpect(jsonPath("$.data[0].embedding[0]").value(0.1))
+                    .andExpect(jsonPath("$.usage.total_tokens").value(1));
+
+            callbackMvc.perform(post("/callback/v1/model/model-rerank/rerank")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"query\":\"hello\",\"documents\":[\"hello world\"]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.model").value("jina-reranker-v2-base-multilingual"))
+                    .andExpect(jsonPath("$.results[0].relevance_score").value(0.87))
+                    .andExpect(jsonPath("$.usage.total_tokens").value(4));
+
+            assertEquals("Bearer emb-key", embeddingAuthorization.get());
+            assertTrue(embeddingBody.get().contains("\"model\":\"text-embedding-3-small\""));
+            assertTrue(embeddingBody.get().contains("\"input\":\"hello\""));
+            assertEquals("Bearer rerank-key", rerankAuthorization.get());
+            assertTrue(rerankBody.get().contains("\"model\":\"jina-reranker-v2-base-multilingual\""));
+            assertTrue(rerankBody.get().contains("\"documents\":[\"hello world\"]"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void fileAndModelCallbackRoutesKeepGoRouteShapesAvailable() throws Exception {
         mockMvc.perform(post("/callback/v1/file/url/base64")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -244,6 +306,19 @@ public class WanwuCallbackApiControllerTest {
         mockMvc.perform(get("/api/deploy/info"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.platform").value("wanwu-java"));
+    }
+
+    private static ModelInfo configuredModel(String modelId, String modelName, String endpointUrl, String apiKey) {
+        ModelInfo model = new ModelInfo();
+        model.setModelId(modelId);
+        model.setModel(modelName);
+        model.setProvider("openai-compatible");
+        model.setModelType("llm");
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("endpointUrl", endpointUrl);
+        config.put("apiKey", apiKey);
+        model.setConfig(config);
+        return model;
     }
 
     private static String readBody(HttpExchange exchange) throws IOException {

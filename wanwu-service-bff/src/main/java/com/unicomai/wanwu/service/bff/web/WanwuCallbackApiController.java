@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import javax.servlet.http.HttpServletRequest;
+
 @RestController
 public class WanwuCallbackApiController {
 
@@ -103,7 +105,7 @@ public class WanwuCallbackApiController {
     public Map<String, Object> chatCompletions(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> proxied = proxyChatCompletions(modelId, request);
+        Map<String, Object> proxied = proxyModelJson(modelId, request, "/chat/completions");
         if (proxied != null) {
             return proxied;
         }
@@ -123,7 +125,15 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/callback/v1/model/{modelId}/embeddings",
             "/callback/v1/model/{modelId}/multimodal-embeddings"})
-    public Map<String, Object> embeddings(@PathVariable("modelId") String modelId) {
+    public Map<String, Object> embeddings(
+            @PathVariable("modelId") String modelId,
+            @RequestBody(required = false) Map<String, Object> request,
+            HttpServletRequest httpRequest) {
+        Map<String, Object> proxied = proxyModelJson(modelId, request,
+                routeSuffix(httpRequest, "embeddings", "multimodal-embeddings"));
+        if (proxied != null) {
+            return proxied;
+        }
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("object", "embedding");
         item.put("index", 0);
@@ -136,7 +146,15 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/callback/v1/model/{modelId}/rerank",
             "/callback/v1/model/{modelId}/multimodal-rerank"})
-    public Map<String, Object> rerank(@PathVariable("modelId") String modelId) {
+    public Map<String, Object> rerank(
+            @PathVariable("modelId") String modelId,
+            @RequestBody(required = false) Map<String, Object> request,
+            HttpServletRequest httpRequest) {
+        Map<String, Object> proxied = proxyModelJson(modelId, request,
+                routeSuffix(httpRequest, "rerank", "multimodal-rerank"));
+        if (proxied != null) {
+            return proxied;
+        }
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("index", 0);
         item.put("relevance_score", 1.0);
@@ -317,7 +335,7 @@ public class WanwuCallbackApiController {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> proxyChatCompletions(String modelId, Map<String, Object> request) {
+    private Map<String, Object> proxyModelJson(String modelId, Map<String, Object> request, String endpointSuffix) {
         if (modelService == null) {
             return null;
         }
@@ -338,7 +356,7 @@ public class WanwuCallbackApiController {
             if (isBlank(firstText(payload, "model"))) {
                 payload.put("model", defaultIfBlank(model.getModel(), modelId));
             }
-            String upstream = postJson(chatCompletionsUrl(endpoint), apiKey, JSON.writeValueAsString(payload));
+            String upstream = postJson(modelEndpointUrl(endpoint, endpointSuffix), apiKey, JSON.writeValueAsString(payload));
             return isBlank(upstream) ? null : JSON.readValue(upstream, Map.class);
         } catch (RuntimeException | IOException ignored) {
             return null;
@@ -384,12 +402,20 @@ public class WanwuCallbackApiController {
         return builder.toString();
     }
 
-    private String chatCompletionsUrl(String endpoint) {
+    private String modelEndpointUrl(String endpoint, String suffix) {
         String base = trimTrailingSlash(endpoint);
-        if (base.endsWith("/chat/completions")) {
+        if (base.endsWith(suffix)) {
             return base;
         }
-        return base + "/chat/completions";
+        return base + suffix;
+    }
+
+    private String routeSuffix(HttpServletRequest request, String textSuffix, String multimodalSuffix) {
+        String uri = request == null ? "" : request.getRequestURI();
+        if (uri.endsWith("/" + multimodalSuffix)) {
+            return "/" + multimodalSuffix;
+        }
+        return "/" + textSuffix;
     }
 
     private Map<String, Object> callbackModelInfo(ModelInfo model) {
