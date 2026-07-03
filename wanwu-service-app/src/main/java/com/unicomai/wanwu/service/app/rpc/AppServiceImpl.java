@@ -1358,10 +1358,11 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("rag snapshot not found");
         }
         RagDraftConfigRecord config = ragConfigForChat(command.isDraft(), userId, orgId, command.getRagId(), snapshot);
+        String safetyConfigJson = config == null ? null : config.getSafetyConfigJson();
         SensitiveBlock sensitiveBlock = matchSensitiveResponse(
                 userId,
                 orgId,
-                config == null ? null : config.getSafetyConfigJson(),
+                safetyConfigJson,
                 command.getQuestion());
         if (sensitiveBlock != null) {
             RagChatResult result = new RagChatResult();
@@ -1391,7 +1392,14 @@ public class AppServiceImpl implements AppService {
         result.setRagId(command.getRagId());
         result.setQuestion(command.getQuestion());
         String response = deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo());
-        result.setResponse(enrichRagResponse(response, knowledgeHit, searchList, qaHit, qaSearchList));
+        response = enrichRagResponse(response, knowledgeHit, searchList, qaHit, qaSearchList);
+        SensitiveBlock outputBlock = matchSensitiveResponse(userId, orgId, safetyConfigJson, response);
+        if (outputBlock != null) {
+            response = outputBlock.reply;
+            searchList = Collections.emptyList();
+            qaSearchList = Collections.emptyList();
+        }
+        result.setResponse(response);
         result.setSearchList(searchList);
         result.setQaSearchList(qaSearchList);
         result.setCreatedAt(clock.millis());
@@ -2041,12 +2049,19 @@ public class AppServiceImpl implements AppService {
                 command.getAssistantId(),
                 snapshot);
         AssistantConversationRecord conversation = resolveConversation(command, userId, orgId);
+        String safetyConfigJson = config == null ? null : config.getSafetyConfigJson();
         SensitiveBlock sensitiveBlock = matchSensitiveResponse(
                 userId,
                 orgId,
-                config == null ? null : config.getSafetyConfigJson(),
+                safetyConfigJson,
                 command.getPrompt());
         String response = sensitiveBlock == null ? deterministicResponse(assistant, command.getPrompt()) : sensitiveBlock.reply;
+        if (sensitiveBlock == null) {
+            SensitiveBlock outputBlock = matchSensitiveResponse(userId, orgId, safetyConfigJson, response);
+            if (outputBlock != null) {
+                response = outputBlock.reply;
+            }
+        }
         long now = clock.millis();
         String detailId = newDetailId();
         AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();

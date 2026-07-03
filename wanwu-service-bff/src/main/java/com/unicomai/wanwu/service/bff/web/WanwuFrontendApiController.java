@@ -615,6 +615,10 @@ public class WanwuFrontendApiController {
                         .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
             String answer = "Echo: " + defaultIfBlank(safe.getContent(), "");
+            String outputSensitiveReply = matchGlobalSensitiveReply(userContext, answer);
+            if (!isBlank(outputSensitiveReply)) {
+                answer = outputSensitiveReply;
+            }
             modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
                     userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
                     safe.getSessionId(), defaultIfBlank(safe.getContent(), ""), "", "", "user"));

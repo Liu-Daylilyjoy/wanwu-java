@@ -76,6 +76,7 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListResult;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordListResult;
+import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
@@ -1567,6 +1568,38 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
 
         verify(modelService, times(0)).saveModelExperienceDialogRecord(any());
+    }
+
+    @Test
+    public void modelExperienceLlmReplacesSensitiveGeneratedOutput() throws Exception {
+        when(modelService.getModel(anyString(), anyString(), anyString()))
+                .thenReturn(modelInfo("model-001", "DeepSeek Chat", "llm"));
+        Map<String, Object> table = map("tableId", "global-001", "tableName", "Global Guard",
+                "reply", "Safety reply", "type", "global", "version", "v1");
+        Map<String, Object> word = map("wordId", "word-001", "word", "Echo:", "sensitiveType", "Other");
+        when(safetyService.listSensitiveWordTables(anyString(), anyString(), eq("global")))
+                .thenReturn(listResult(table));
+        when(safetyService.getSensitiveWordTable(anyString(), anyString(), eq("global-001")))
+                .thenReturn(table);
+        when(safetyService.listSensitiveWords(anyString(), anyString(), eq("global-001"), anyInt(), anyInt()))
+                .thenReturn(map("list", Collections.singletonList(word), "total", 1));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\",\"modelExperienceId\":\"exp-001\",\"content\":\"plain question\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"content\":\"Safety reply\"")))
+                .andExpect(content().string(containsString("\"finish_reason\":\"stop\"")));
+
+        ArgumentCaptor<ModelExperienceDialogRecordSaveCommand> captor =
+                forClass(ModelExperienceDialogRecordSaveCommand.class);
+        verify(modelService, times(2)).saveModelExperienceDialogRecord(captor.capture());
+        assertEquals("user", captor.getAllValues().get(0).getRole());
+        assertEquals("plain question", captor.getAllValues().get(0).getOriginalContent());
+        assertEquals("assistant", captor.getAllValues().get(1).getRole());
+        assertEquals("Safety reply", captor.getAllValues().get(1).getOriginalContent());
     }
 
     @Test

@@ -330,6 +330,33 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void ragChatReplacesSensitiveGeneratedOutputWithTableReply() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,
+                new FakeSafetyService("table-001", "GuardedRag", "Safety reply"));
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("GuardedRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setSafetyConfig(safetyConfig("table-001"));
+        service.updateRagConfig(config);
+
+        RagChatResult result = service.streamRagChat(
+                ragChatCommand(created.getRagId(), "plain question", true));
+
+        assertEquals("Safety reply", result.getResponse());
+        assertTrue(result.getSearchList().isEmpty());
+        assertTrue(result.getQaSearchList().isEmpty());
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void ragChatReturnsConfiguredKnowledgeHits() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
@@ -1283,6 +1310,29 @@ public class AppServiceImplTest {
 
         AssistantConversationStreamResult result = service.streamAssistantConversation(
                 streamCommand(created.getAssistantId(), "", "please say banned-token", true));
+
+        assertEquals("Safety reply", result.getResponse());
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(result.getConversationId()));
+        assertEquals("Safety reply", details.getList().get(0).get("response"));
+    }
+
+    @Test
+    public void assistantDraftStreamReplacesSensitiveGeneratedOutputWithTableReply() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,
+                new FakeSafetyService("table-001", "GuardedAgent", "Safety reply"));
+        AssistantCreateResult created = service.createAssistant(command("GuardedAgent", "guarded desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setSafetyConfig(safetyConfig("table-001"));
+        service.updateAssistantConfig(config);
+
+        AssistantConversationStreamResult result = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), "", "plain question", true));
 
         assertEquals("Safety reply", result.getResponse());
         AssistantConversationPageResult details = service.listAssistantConversationDetails(
