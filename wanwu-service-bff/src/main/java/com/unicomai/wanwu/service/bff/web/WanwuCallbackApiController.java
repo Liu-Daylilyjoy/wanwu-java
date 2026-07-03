@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -102,9 +103,15 @@ public class WanwuCallbackApiController {
     }
 
     @PostMapping("/callback/v1/model/{modelId}/chat/completions")
-    public Map<String, Object> chatCompletions(
+    public Object chatCompletions(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request) {
+        if (isTruthy(request, "stream")) {
+            ResponseEntity<String> proxied = proxyModelStream(modelId, request, "/chat/completions");
+            if (proxied != null) {
+                return proxied;
+            }
+        }
         Map<String, Object> proxied = proxyModelJson(modelId, request, "/chat/completions");
         if (proxied != null) {
             return proxied;
@@ -363,14 +370,55 @@ public class WanwuCallbackApiController {
         }
     }
 
+    private ResponseEntity<String> proxyModelStream(String modelId, Map<String, Object> request, String endpointSuffix) {
+        if (modelService == null) {
+            return null;
+        }
+        try {
+            ModelInfo model = modelService.getModel("", "", modelId);
+            if (model == null || model.getConfig() == null) {
+                return null;
+            }
+            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
+            String apiKey = firstText(model.getConfig(), "apiKey");
+            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
+                return null;
+            }
+            Map<String, Object> payload = new LinkedHashMap<>();
+            if (request != null) {
+                payload.putAll(request);
+            }
+            if (isBlank(firstText(payload, "model"))) {
+                payload.put("model", defaultIfBlank(model.getModel(), modelId));
+            }
+            String upstream = postJsonStream(modelEndpointUrl(endpoint, endpointSuffix),
+                    apiKey, JSON.writeValueAsString(payload));
+            if (isBlank(upstream)) {
+                return null;
+            }
+            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(upstream);
+        } catch (RuntimeException | IOException ignored) {
+            return null;
+        }
+    }
+
     private String postJson(String endpoint, String apiKey, String json) throws IOException {
+        return postJson(endpoint, apiKey, json, "application/json", false);
+    }
+
+    private String postJsonStream(String endpoint, String apiKey, String json) throws IOException {
+        return postJson(endpoint, apiKey, json, "text/event-stream", true);
+    }
+
+    private String postJson(String endpoint, String apiKey, String json, String accept, boolean rawResponse)
+            throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
         connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
         connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Authorization", "Bearer " + apiKey);
         connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("Accept", accept);
         connection.setDoOutput(true);
         try (OutputStream body = connection.getOutputStream()) {
             body.write(json.getBytes(StandardCharsets.UTF_8));
@@ -378,7 +426,7 @@ public class WanwuCallbackApiController {
         try {
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            String response = readStream(stream);
+            String response = rawResponse ? readRawStream(stream) : readStream(stream);
             if (status >= 400) {
                 throw new IOException("model callback upstream returned " + status);
             }
@@ -400,6 +448,19 @@ public class WanwuCallbackApiController {
             }
         }
         return builder.toString();
+    }
+
+    private String readRawStream(InputStream stream) throws IOException {
+        if (stream == null) {
+            return "";
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = stream.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return new String(output.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private String modelEndpointUrl(String endpoint, String suffix) {
@@ -520,6 +581,14 @@ public class WanwuCallbackApiController {
             }
         }
         return "";
+    }
+
+    private boolean isTruthy(Map<?, ?> map, String key) {
+        if (map == null || key == null) {
+            return false;
+        }
+        Object value = map.get(key);
+        return Boolean.TRUE.equals(value) || "true".equalsIgnoreCase(String.valueOf(value));
     }
 
     private String compactId() {

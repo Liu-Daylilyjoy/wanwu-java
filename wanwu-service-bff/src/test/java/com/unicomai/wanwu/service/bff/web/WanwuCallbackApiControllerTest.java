@@ -119,6 +119,45 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void chatCompletionsStreamsConfiguredUpstreamWhenRequested() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            upstreamBody.set(readBody(exchange));
+            respondSse(exchange, "data: {\"id\":\"chunk-1\",\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"
+                    + "data: {\"id\":\"chunk-2\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-123"))
+                    .thenReturn(configuredModel("model-123", "deepseek-chat",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "local-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("data: {\"id\":\"chunk-1\"")))
+                    .andExpect(content().string(containsString("data: [DONE]")));
+
+            assertEquals("Bearer local-key", authorization.get());
+            assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void embeddingsAndRerankProxyToConfiguredModelEndpoints() throws Exception {
         AtomicReference<String> embeddingAuthorization = new AtomicReference<>();
         AtomicReference<String> embeddingBody = new AtomicReference<>();
@@ -334,6 +373,15 @@ public class WanwuCallbackApiControllerTest {
     private static void respondJson(HttpExchange exchange, String json) throws IOException {
         byte[] response = json.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(response);
+        }
+    }
+
+    private static void respondSse(HttpExchange exchange, String body) throws IOException {
+        byte[] response = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.sendResponseHeaders(200, response.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(response);
