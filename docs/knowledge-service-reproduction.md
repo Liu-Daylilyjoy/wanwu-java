@@ -24,6 +24,7 @@ Date: 2026-07-01
   - Community report list/add/update/delete, deterministic local generate, request-content CSV/TSV batch-add import, and frontend status fields.
   - External API create/list/update/delete, external dataset selection, external knowledge create/update/delete, and external knowledge list integration.
   - Local dynamic knowledge graph generation plus QA/document export record list, delete, and local download compatibility.
+  - Callback-driven document status, graph status, and knowledge report status updates through the original Go callback aliases.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1/knowledge`.
 - Docker Compose `full` profile includes `knowledge` on ports `8083` and `20883`, and BFF now depends on it.
 
@@ -50,12 +51,14 @@ The export-record path now follows the Go `knowledge_export_task` frontend contr
 
 The community report path now has the frontend-visible loop from Go's `KnowledgeBaseReportService`: list returns `list`, `total`, pagination, `createdAt`, `status`, `canGenerate`, `canAddReport`, `generateLabel`, and `lastImportStatus`; single add, update, delete, generate, and batch-add calls mutate the same snapshot. `generate` creates or refreshes a deterministic development report, `batch-add` can parse request-provided CSV/TSV `title,content` rows or BFF-local uploaded UTF-8 CSV files into imported reports, and frontend uploads with unreadable `fileUploadId` still create a visible imported placeholder. The Go implementation delegates to graph/RAG report generation and asynchronous uploaded-file CSV import tasks; those runtime integrations remain later work.
 
+The callback status path now follows Go's `callback.go` handlers for `/api/docstatus`, `/api/doc_status_init`, and `/api/knowledge/status`. BFF proxies those aliases into `KnowledgeService`, document status values update the persisted local document state, graph-status values update `graphStatus`, `doc_status_init` converts interrupted in-flight document/graph/report statuses to the Go failure statuses, and knowledge report status is visible in the community report list. The Java service still does not run the Go parser/indexer/report workers that would produce those callbacks.
+
 The external knowledge path now follows the Go BFF contract from `knowledge_external.go`: `/knowledge/external/api/select`, `/knowledge/external/api`, `/knowledge/external/select`, and `/knowledge/external` all dispatch to `KnowledgeService`. The Go service validates and lists Dify datasets over the external API; the Java Docker reproduction uses a persisted local candidate dataset list per external API so frontend flows do not depend on an external Dify server. Creating an external knowledge base mounts one candidate, creates a normal Wanwu `knowledgeId` with `external = 1`, and returns `externalKnowledgeInfo` in `/knowledge/select`. Updating or deleting external knowledge mutates the same snapshot and releases the candidate for reuse.
 
 ## Still Missing
 
 - Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
-- Go-equivalent MinIO object lifecycle, parser-backed binary/Office/PDF conversion, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and asynchronous callback status updates.
+- Go-equivalent MinIO object lifecycle, parser-backed binary/Office/PDF conversion, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and real parser/indexer/report workers that emit callbacks.
 - Go-equivalent asynchronous QA import tasks, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
 - Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, asynchronous uploaded CSV report task execution, Dify external API validation/listing, and RAG query integration.
-- Callback status updates from asynchronous document processing.
+- Normalized callback task tables and callback auth/signature validation.

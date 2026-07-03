@@ -44,6 +44,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int QA_STATUS_FINISHED = 2;
     private static final int REPORT_STATUS_PENDING = 0;
     private static final int REPORT_STATUS_GENERATED = 2;
+    private static final int REPORT_STATUS_PROCESSING = 130;
+    private static final int REPORT_STATUS_INTERRUPT_FAIL = 139;
     private static final int REPORT_IMPORT_NONE = -1;
     private static final int REPORT_IMPORT_SUCCESS = 2;
     private static final int EXTERNAL_ALL = -1;
@@ -51,6 +53,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int EXTERNAL_KNOWLEDGE = 1;
     private static final String EXTERNAL_PROVIDER_DIFY = "dify";
     private static final int DOC_STATUS_FINISHED = 1;
+    private static final int DOC_STATUS_FAIL = 5;
+    private static final int GRAPH_STATUS_PROCESSING = 110;
+    private static final int GRAPH_STATUS_INTERRUPT_FAIL = 119;
     private static final int EXPORT_STATUS_SUCCESS = 2;
     private static final String EXPORT_TYPE_QA = "qa";
     private static final String EXPORT_TYPE_DOC = "doc";
@@ -720,6 +725,51 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
+    public synchronized void updateCallbackDocStatus(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String docId = defaultIfBlank(string(safe.get("id")), string(safe.get("docId")));
+        DocState doc = findDoc(docId);
+        if (doc == null) {
+            throw new IllegalArgumentException("doc not found: " + docId);
+        }
+        int status = intValue(safe.get("status"), doc.status);
+        if (isGraphStatus(status)) {
+            doc.graphStatus = status;
+        } else {
+            doc.status = status;
+        }
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized void initCallbackDocStatus(String userId, String orgId) {
+        for (List<DocState> docs : docsByKnowledgeId.values()) {
+            for (DocState doc : docs) {
+                if (isAnalyzingDocStatus(doc.status)) {
+                    doc.status = DOC_STATUS_FAIL;
+                }
+                if (doc.graphStatus == GRAPH_STATUS_PROCESSING) {
+                    doc.graphStatus = GRAPH_STATUS_INTERRUPT_FAIL;
+                }
+            }
+        }
+        for (KnowledgeState knowledge : knowledgeBases.values()) {
+            if (knowledge.reportStatus == REPORT_STATUS_PROCESSING) {
+                knowledge.reportStatus = REPORT_STATUS_INTERRUPT_FAIL;
+            }
+        }
+        saveSnapshot();
+    }
+
+    @Override
+    public synchronized void updateCallbackKnowledgeStatus(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        KnowledgeState knowledge = existingKnowledge(string(safe.get("knowledgeId")));
+        knowledge.reportStatus = intValue(safe.get("reportStatus"), knowledge.reportStatus);
+        saveSnapshot();
+    }
+
+    @Override
     public synchronized void updateDocSegmentStatus(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> safe = safe(request);
         String docId = string(safe.get("docId"));
@@ -1065,7 +1115,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     public synchronized Map<String, Object> listReports(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> safe = safe(request);
         String knowledgeId = string(safe.get("knowledgeId"));
-        existingKnowledge(knowledgeId);
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
         List<ReportState> reports = reports(knowledgeId);
         List<Map<String, Object>> all = new ArrayList<Map<String, Object>>();
         int lastImportStatus = REPORT_IMPORT_NONE;
@@ -1079,7 +1129,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 intValue(safe.get("pageNo"), 1),
                 intValue(safe.get("pageSize"), 10));
         result.put("createdAt", latestReportCreatedAt(reports));
-        result.put("status", reports.isEmpty() ? REPORT_STATUS_PENDING : REPORT_STATUS_GENERATED);
+        result.put("status", knowledge.reportStatus == REPORT_STATUS_PENDING
+                ? (reports.isEmpty() ? REPORT_STATUS_PENDING : REPORT_STATUS_GENERATED)
+                : knowledge.reportStatus);
         result.put("canGenerate", Boolean.TRUE);
         result.put("canAddReport", Boolean.TRUE);
         result.put("generateLabel", reports.isEmpty() ? "" : "Regenerate");
@@ -3094,6 +3146,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private boolean isAnalyzingDocStatus(int status) {
+        return status == 3 || (status >= 31 && status <= 35);
+    }
+
+    private boolean isGraphStatus(int status) {
+        return status >= 100 && status <= GRAPH_STATUS_INTERRUPT_FAIL;
+    }
+
     private boolean booleanValue(Object value, boolean fallback) {
         if (value instanceof Boolean) {
             return (Boolean) value;
@@ -3423,6 +3483,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String llmModelId;
         private int external;
         private int docCount;
+        private int reportStatus;
         private Map<String, Object> externalKnowledgeInfo;
         private Map<String, Object> avatar;
         private String createdAt;

@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -621,6 +623,42 @@ public class WanwuCallbackApiControllerTest {
         mockMvc.perform(get("/api/deploy/info"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.platform").value("wanwu-java"));
+    }
+
+    @Test
+    public void callbackStatusAliasesProxyToKnowledgeServiceWhenAvailable() throws Exception {
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, null, knowledgeService))
+                .build();
+
+        callbackMvc.perform(post("/api/docstatus")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"doc-001\",\"status\":31,"
+                                + "\"metaDataList\":[{\"metaId\":\"meta-1\",\"value\":\"parsed\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("doc_status_updated"));
+
+        callbackMvc.perform(post("/api/knowledge/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"kb-001\",\"reportStatus\":130}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("knowledge_status_updated"));
+
+        callbackMvc.perform(get("/api/doc_status_init"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("doc_status_initialized"));
+
+        ArgumentCaptor<Map> docStatusCaptor = forClass(Map.class);
+        verify(knowledgeService).updateCallbackDocStatus(eq(""), eq(""), docStatusCaptor.capture());
+        assertEquals("doc-001", docStatusCaptor.getValue().get("id"));
+        assertEquals(31, docStatusCaptor.getValue().get("status"));
+
+        ArgumentCaptor<Map> knowledgeStatusCaptor = forClass(Map.class);
+        verify(knowledgeService).updateCallbackKnowledgeStatus(eq(""), eq(""), knowledgeStatusCaptor.capture());
+        assertEquals("kb-001", knowledgeStatusCaptor.getValue().get("knowledgeId"));
+        assertEquals(130, knowledgeStatusCaptor.getValue().get("reportStatus"));
+        verify(knowledgeService).initCallbackDocStatus("", "");
     }
 
     private static ModelInfo configuredModel(String modelId, String modelName, String endpointUrl, String apiKey) {

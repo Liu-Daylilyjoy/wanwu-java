@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
+import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -50,6 +51,9 @@ public class WanwuCallbackApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private KnowledgeService knowledgeService;
+
     public WanwuCallbackApiController() {
     }
 
@@ -58,8 +62,14 @@ public class WanwuCallbackApiController {
     }
 
     public WanwuCallbackApiController(ModelService modelService, AppService appService) {
+        this(modelService, appService, null);
+    }
+
+    public WanwuCallbackApiController(ModelService modelService, AppService appService,
+                                      KnowledgeService knowledgeService) {
         this.modelService = modelService;
         this.appService = appService;
+        this.knowledgeService = knowledgeService;
     }
 
     @PostMapping("/callback/v1/file/url/base64")
@@ -331,7 +341,15 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/user/api/v1/api/docstatus", "/api/docstatus"})
     public FrontendResponse<Map<String, Object>> updateDocStatus(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(echo("doc_status_updated", request));
+        try {
+            if (knowledgeService != null) {
+                knowledgeService.updateCallbackDocStatus("", "",
+                        request == null ? Collections.<String, Object>emptyMap() : request);
+            }
+            return FrontendResponse.ok(echo("doc_status_updated", request));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping({"/user/api/v1/api/deploy/info", "/api/deploy/info"})
@@ -353,12 +371,27 @@ public class WanwuCallbackApiController {
 
     @GetMapping({"/user/api/v1/api/doc_status_init", "/api/doc_status_init"})
     public FrontendResponse<Map<String, Object>> docStatusInit() {
-        return FrontendResponse.ok(echo("doc_status_initialized", Collections.<String, Object>emptyMap()));
+        try {
+            if (knowledgeService != null) {
+                knowledgeService.initCallbackDocStatus("", "");
+            }
+            return FrontendResponse.ok(echo("doc_status_initialized", Collections.<String, Object>emptyMap()));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping({"/user/api/v1/api/knowledge/status", "/api/knowledge/status"})
     public FrontendResponse<Map<String, Object>> knowledgeStatus(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(echo("knowledge_status_updated", request));
+        try {
+            if (knowledgeService != null) {
+                knowledgeService.updateCallbackKnowledgeStatus("", "",
+                        request == null ? Collections.<String, Object>emptyMap() : request);
+            }
+            return FrontendResponse.ok(echo("knowledge_status_updated", request));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     private Map<String, Object> openAiBase(String object, String modelId) {

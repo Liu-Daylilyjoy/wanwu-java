@@ -25,4 +25,4 @@ Date: 2026-07-01
 
 ## Remaining Gap
 
-This slice connects the Java RAG chat path to the local Java knowledge hit API. It does not reproduce the full Go RAG runtime yet. The remaining work includes real file parsing/indexing, vector/keyword/rerank retrieval parity, model generation, conversation memory, graph RAG behavior, callback status mutation, object storage lifecycle, and streaming token generation from a provider model.
+This slice connects the Java RAG chat path to the local Java knowledge hit API. It does not reproduce the full Go RAG runtime yet. The remaining work includes real file parsing/indexing, vector/keyword/rerank retrieval parity, model generation, conversation memory, graph RAG behavior, callback-producing parser/indexer workers, object storage lifecycle, and streaming token generation from a provider model.

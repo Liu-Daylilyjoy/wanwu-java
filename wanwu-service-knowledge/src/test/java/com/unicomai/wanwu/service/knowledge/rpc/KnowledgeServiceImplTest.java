@@ -272,6 +272,39 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void callbackStatusUpdatesPersistDocAndKnowledgeState() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Callback KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-callback", "Callback.txt"));
+
+        assertEquals(1, docStatus(knowledgeId, "doc-callback"));
+
+        Map<String, Object> docStatus = new LinkedHashMap<String, Object>();
+        docStatus.put("id", "doc-callback");
+        docStatus.put("status", 31);
+        service.updateCallbackDocStatus("", "", docStatus);
+        assertEquals(31, docStatus(knowledgeId, "doc-callback"));
+
+        service.initCallbackDocStatus("", "");
+        assertEquals(5, docStatus(knowledgeId, "doc-callback"));
+
+        Map<String, Object> finished = new LinkedHashMap<String, Object>();
+        finished.put("id", "doc-callback");
+        finished.put("status", 1);
+        service.updateCallbackDocStatus("", "", finished);
+        service.initCallbackDocStatus("", "");
+        assertEquals(1, docStatus(knowledgeId, "doc-callback"));
+
+        Map<String, Object> knowledgeStatus = new LinkedHashMap<String, Object>();
+        knowledgeStatus.put("knowledgeId", knowledgeId);
+        knowledgeStatus.put("reportStatus", 130);
+        service.updateCallbackKnowledgeStatus("", "", knowledgeStatus);
+
+        Map<String, Object> reports = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(130, reports.get("status"));
+    }
+
+    @Test
     public void reportBatchAddParsesInlineCsvAndKeepsFileUploadFallback() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Report Import KB", 0)).get("knowledgeId");
@@ -1020,6 +1053,16 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put(key, value);
         return result;
+    }
+
+    private int docStatus(String knowledgeId, String docId) {
+        Map<String, Object> page = service.listDocs("dev-admin", "default-org", docList(knowledgeId));
+        for (Map<String, Object> doc : listOfMaps(page.get("list"))) {
+            if (docId.equals(doc.get("docId"))) {
+                return (Integer) doc.get("status");
+            }
+        }
+        throw new AssertionError("doc not found: " + docId);
     }
 
     @SuppressWarnings("unchecked")

@@ -74,6 +74,12 @@ public interface KnowledgeService {
 
     void batchUpdateDocMeta(String userId, String orgId, Map<String, Object> request);
 
+    void updateCallbackDocStatus(String userId, String orgId, Map<String, Object> request);
+
+    void initCallbackDocStatus(String userId, String orgId);
+
+    void updateCallbackKnowledgeStatus(String userId, String orgId, Map<String, Object> request);
+
     void updateDocSegmentStatus(String userId, String orgId, Map<String, Object> request);
 
     void updateDocSegmentLabels(String userId, String orgId, Map<String, Object> request);
