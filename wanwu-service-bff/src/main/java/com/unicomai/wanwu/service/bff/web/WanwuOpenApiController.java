@@ -73,6 +73,7 @@ public class WanwuOpenApiController {
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final OAuthJwtSupport OAUTH_JWT = new OAuthJwtSupport("wanwu-java", "wanwu-java-oauth-secret");
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -88,7 +89,6 @@ public class WanwuOpenApiController {
 
     private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
     private final Map<String, OAuthCode> oauthCodes = new ConcurrentHashMap<>();
-    private final Map<String, OAuthToken> oauthAccessTokens = new ConcurrentHashMap<>();
     private final Map<String, OAuthToken> oauthRefreshTokens = new ConcurrentHashMap<>();
 
     public WanwuOpenApiController() {
@@ -697,7 +697,7 @@ public class WanwuOpenApiController {
 
     @GetMapping("/oauth/jwks")
     public Map<String, Object> oauthJwks() {
-        return Collections.singletonMap("keys", Collections.emptyList());
+        return Collections.singletonMap("keys", Collections.singletonList(OAUTH_JWT.jwk()));
     }
 
     @GetMapping("/oauth/login")
@@ -801,16 +801,15 @@ public class WanwuOpenApiController {
     }
 
     private Map<String, Object> oauthTokenResponse(String userId, String clientId, List<String> scopes) {
-        String accessToken = "wanwu-oauth-access-" + compactId();
+        long now = Instant.now().getEpochSecond();
+        String accessToken = OAUTH_JWT.accessToken(userId, clientId, scopes, now + 86400);
         String refreshToken = "wanwu-oauth-refresh-" + compactId();
-        OAuthToken access = new OAuthToken(userId, clientId, scopes, Instant.now().plusSeconds(3600).toEpochMilli());
         OAuthToken refresh = new OAuthToken(userId, clientId, scopes, Instant.now().plusSeconds(86400).toEpochMilli());
-        oauthAccessTokens.put(accessToken, access);
         oauthRefreshTokens.put(refreshToken, refresh);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("access_token", accessToken);
-        data.put("expires_in", 3600);
-        data.put("id_token", "wanwu-oauth-id-" + compactId());
+        data.put("expires_in", 86400);
+        data.put("id_token", OAUTH_JWT.idToken(userId, oauthUserName(userId), clientId, now + 43200));
         data.put("token_type", "Bearer");
         data.put("refresh_token", refreshToken);
         data.put("scope", scopes);
@@ -826,7 +825,7 @@ public class WanwuOpenApiController {
         data.put("token_endpoint", "/service/api/openapi/v1/oauth/code/token");
         data.put("userinfo_endpoint", "/service/api/openapi/v1/oauth/userinfo");
         data.put("response_types_supported", Collections.singletonList("code"));
-        data.put("id_token_signing_alg_values_supported", Collections.singletonList("none"));
+        data.put("id_token_signing_alg_values_supported", Collections.singletonList("RS256"));
         data.put("subject_types_supported", Collections.singletonList("public"));
         return data;
     }
@@ -834,16 +833,18 @@ public class WanwuOpenApiController {
     @GetMapping("/oauth/userinfo")
     public ResponseEntity<Map<String, Object>> oauthUserInfo(@RequestHeader HttpHeaders headers) {
         String token = apiToken(headers);
-        OAuthToken payload = oauthAccessTokens.get(defaultIfBlank(token, ""));
-        if (payload == null || payload.expiresAt < Instant.now().toEpochMilli()) {
+        OAuthJwtSupport.AccessTokenClaims payload;
+        try {
+            payload = OAUTH_JWT.parseAccessToken(defaultIfBlank(token, ""));
+        } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("invalid access token"));
         }
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("userId", payload.userId);
-        data.put("username", DEV_APP_ID.equals(payload.userId) ? "app" : "admin");
-        data.put("nickname", DEV_APP_ID.equals(payload.userId) ? "App User" : "Administrator");
+        data.put("userId", payload.userId());
+        data.put("username", oauthUserName(payload.userId()));
+        data.put("nickname", DEV_APP_ID.equals(payload.userId()) ? "App User" : "Administrator");
         data.put("phone", "");
-        data.put("email", DEV_APP_ID.equals(payload.userId) ? "app@example.com" : "admin@example.com");
+        data.put("email", DEV_APP_ID.equals(payload.userId()) ? "app@example.com" : "admin@example.com");
         data.put("gender", "");
         data.put("remark", "");
         data.put("company", "Wanwu Java");
@@ -1273,6 +1274,10 @@ public class WanwuOpenApiController {
             return DEV_ADMIN_ID;
         }
         throw new IllegalArgumentException("invalid jwt_token");
+    }
+
+    private String oauthUserName(String userId) {
+        return DEV_APP_ID.equals(userId) ? "app" : "admin";
     }
 
     private String appendQuery(String base, String... pairs) {

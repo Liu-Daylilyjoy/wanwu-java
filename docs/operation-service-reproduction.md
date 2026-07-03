@@ -35,9 +35,10 @@ Date: 2026-06-30
 - `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
   - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
   - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.
-  - `/oauth/code/token` validates `clientSecret` and exchanges the code for access/id/refresh tokens.
+  - `/oauth/code/token` validates `clientSecret` and exchanges the code for HS256 access tokens, RS256 ID tokens, and refresh tokens.
   - `/oauth/code/token/refresh` rotates refresh/access tokens.
   - `/oauth/userinfo` resolves a Bearer access token to the development user profile.
+  - `/oauth/jwks` exposes the generated RSA public key used by the development ID token signer.
 - `wanwu-api` extends `IamService` with OAuth app management operations.
 - `wanwu-service-iam` stores OAuth apps in Docker development in-memory state with generated `clientId` and `clientSecret`.
 - The admin development account now exposes `operation`, `operation.oauth`, and `operation.statistic_client` so the zero-change frontend can display Operation Management.
@@ -75,7 +76,8 @@ This slice is a frontend-compatible Operation Management loop. It prevents the z
 It does not yet implement:
 
 - MySQL persistence for OAuth apps.
-- RSA/JWT signing and a real JWKS key set for OAuth tokens.
+- Redis-backed code/refresh-token storage.
+- PEM-backed OAuth key configuration instead of the generated development RSA key.
 - Real client installation statistics in OperateService.
 - Redis-backed global browse statistics.
 - Full App Observability dashboard routes under `v1/statistic.go`.

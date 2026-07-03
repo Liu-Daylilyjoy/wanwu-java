@@ -34,6 +34,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -341,7 +342,9 @@ public class WanwuOpenApiControllerTest {
 
         mockMvc.perform(get("/service/api/openapi/v1/oauth/jwks"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.keys").isArray());
+                .andExpect(jsonPath("$.keys").isArray())
+                .andExpect(jsonPath("$.keys[0].kty").value("RSA"))
+                .andExpect(jsonPath("$.keys[0].alg").value("RS256"));
 
         mockMvc.perform(get("/service/api/openapi/v1/mcp/server/sse").param("apiKey", "app-key"))
                 .andExpect(status().isOk())
@@ -382,15 +385,18 @@ public class WanwuOpenApiControllerTest {
                         .param("client_id", "oauth-client-1")
                         .param("client_secret", "oauth-secret-1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.access_token").value(containsString("wanwu-oauth-access-")))
+                .andExpect(jsonPath("$.access_token").exists())
                 .andExpect(jsonPath("$.refresh_token").value(containsString("wanwu-oauth-refresh-")))
-                .andExpect(jsonPath("$.id_token").value(containsString("wanwu-oauth-id-")))
+                .andExpect(jsonPath("$.id_token").exists())
                 .andExpect(jsonPath("$.token_type").value("Bearer"))
                 .andExpect(jsonPath("$.scope[0]").value("openid"))
                 .andReturn();
 
         String accessToken = JsonPath.read(token.getResponse().getContentAsString(), "$.access_token");
+        String idToken = JsonPath.read(token.getResponse().getContentAsString(), "$.id_token");
         String refreshToken = JsonPath.read(token.getResponse().getContentAsString(), "$.refresh_token");
+        assertTrue(accessToken.split("\\.").length == 3);
+        assertTrue(idToken.split("\\.").length == 3);
         mockMvc.perform(get("/service/api/openapi/v1/oauth/userinfo")
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
@@ -402,7 +408,7 @@ public class WanwuOpenApiControllerTest {
                         .content("{\"grant_type\":\"refresh_token\",\"client_id\":\"oauth-client-1\","
                                 + "\"client_secret\":\"oauth-secret-1\",\"refresh_token\":\"" + refreshToken + "\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.access_token").value(containsString("wanwu-oauth-access-")))
+                .andExpect(jsonPath("$.access_token").exists())
                 .andExpect(jsonPath("$.expires_at").exists());
 
         mockMvc.perform(post("/service/api/openapi/v1/oauth/code/token")
