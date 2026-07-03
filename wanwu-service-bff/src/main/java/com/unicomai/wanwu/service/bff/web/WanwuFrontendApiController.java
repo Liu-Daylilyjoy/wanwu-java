@@ -623,7 +623,8 @@ public class WanwuFrontendApiController {
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
-            String answer = firstNonBlank(modelExperienceUpstreamAnswer(userContext, model, safe),
+            ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, safe);
+            String answer = firstNonBlank(upstreamAnswer.getContent(),
                     "Echo: " + defaultIfBlank(safe.getContent(), ""));
             String outputSensitiveReply = matchGlobalSensitiveReply(userContext, answer);
             if (!isBlank(outputSensitiveReply)) {
@@ -635,7 +636,7 @@ public class WanwuFrontendApiController {
             modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
                     userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
                     safe.getSessionId(), answer, "", "", "assistant"));
-            recordModelStatistic(userContext, model, safe, answer, startedAt);
+            recordModelStatistic(userContext, model, safe, answer, startedAt, upstreamAnswer.getUsage());
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), answer));
@@ -3278,11 +3279,16 @@ public class WanwuFrontendApiController {
                                       ModelInfo model,
                                       ModelExperienceLlmRequest request,
                                       String answer,
-                                      long startedAt) {
+                                      long startedAt,
+                                      ModelExperienceUsage usage) {
         if (appService == null || model == null || request == null || isBlank(request.getModelId())) {
             return;
         }
         try {
+            long promptTokens = usage == null ? estimateTokens(request.getContent()) : usage.getPromptTokens();
+            long completionTokens = usage == null ? estimateTokens(answer) : usage.getCompletionTokens();
+            long totalTokens = usage == null || usage.getTotalTokens() <= 0L
+                    ? promptTokens + completionTokens : usage.getTotalTokens();
             RecordModelStatisticCommand command = new RecordModelStatisticCommand();
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
@@ -3290,9 +3296,9 @@ public class WanwuFrontendApiController {
             command.setModel(defaultIfBlank(model.getModel(), request.getModelId()));
             command.setProvider(defaultIfBlank(model.getProvider(), ""));
             command.setModelType(defaultIfBlank(model.getModelType(), "llm"));
-            command.setPromptTokens(estimateTokens(request.getContent()));
-            command.setCompletionTokens(estimateTokens(answer));
-            command.setTotalTokens(command.getPromptTokens() + command.getCompletionTokens());
+            command.setPromptTokens(promptTokens);
+            command.setCompletionTokens(completionTokens);
+            command.setTotalTokens(totalTokens);
             command.setSuccess(true);
             command.setStream(true);
             command.setFirstTokenLatency(elapsedMillis(startedAt));
@@ -3302,15 +3308,15 @@ public class WanwuFrontendApiController {
         }
     }
 
-    private String modelExperienceUpstreamAnswer(UserContext userContext, ModelInfo model, ModelExperienceLlmRequest request) {
+    private ModelExperienceAnswer modelExperienceUpstreamAnswer(UserContext userContext, ModelInfo model, ModelExperienceLlmRequest request) {
         if (model == null || request == null || model.getConfig() == null) {
-            return "";
+            return ModelExperienceAnswer.empty();
         }
         try {
             String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
             String apiKey = firstText(model.getConfig(), "apiKey");
             if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
-                return "";
+                return ModelExperienceAnswer.empty();
             }
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("model", defaultIfBlank(model.getModel(), request.getModelId()));
@@ -3319,9 +3325,9 @@ public class WanwuFrontendApiController {
             putModelExperienceParams(payload, request);
             String response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
                     apiKey, JSON.writeValueAsString(payload));
-            return extractChatContent(response);
+            return extractChatAnswer(response);
         } catch (RuntimeException | IOException ignored) {
-            return "";
+            return ModelExperienceAnswer.empty();
         }
     }
 
@@ -3377,12 +3383,32 @@ public class WanwuFrontendApiController {
         return message;
     }
 
-    private String extractChatContent(String response) throws IOException {
+    private ModelExperienceAnswer extractChatAnswer(String response) throws IOException {
         if (isBlank(response)) {
-            return "";
+            return ModelExperienceAnswer.empty();
         }
         JsonNode root = JSON.readTree(response);
-        return root.path("choices").path(0).path("message").path("content").asText("");
+        ModelExperienceUsage usage = extractChatUsage(root.path("usage"));
+        String content = root.path("choices").path(0).path("message").path("content").asText("");
+        if (isBlank(content)) {
+            content = root.path("choices").path(0).path("delta").path("content").asText("");
+        }
+        return new ModelExperienceAnswer(defaultIfBlank(content, ""), usage);
+    }
+
+    private ModelExperienceUsage extractChatUsage(JsonNode usage) {
+        if (usage == null || usage.isMissingNode() || usage.isNull()) {
+            return null;
+        }
+        return new ModelExperienceUsage(
+                longField(usage, "prompt_tokens"),
+                longField(usage, "completion_tokens"),
+                longField(usage, "total_tokens"));
+    }
+
+    private long longField(JsonNode parent, String fieldName) {
+        JsonNode value = parent.path(fieldName);
+        return value.isNumber() ? Math.max(0L, value.asLong()) : 0L;
     }
 
     private String postJson(String endpoint, String apiKey, String json) throws IOException {
@@ -5706,6 +5732,52 @@ public class WanwuFrontendApiController {
 
         public void setPath(String path) {
             this.path = path;
+        }
+    }
+
+    private static class ModelExperienceAnswer {
+        private final String content;
+        private final ModelExperienceUsage usage;
+
+        private ModelExperienceAnswer(String content, ModelExperienceUsage usage) {
+            this.content = content;
+            this.usage = usage;
+        }
+
+        private static ModelExperienceAnswer empty() {
+            return new ModelExperienceAnswer("", null);
+        }
+
+        private String getContent() {
+            return content;
+        }
+
+        private ModelExperienceUsage getUsage() {
+            return usage;
+        }
+    }
+
+    private static class ModelExperienceUsage {
+        private final long promptTokens;
+        private final long completionTokens;
+        private final long totalTokens;
+
+        private ModelExperienceUsage(long promptTokens, long completionTokens, long totalTokens) {
+            this.promptTokens = promptTokens;
+            this.completionTokens = completionTokens;
+            this.totalTokens = totalTokens;
+        }
+
+        private long getPromptTokens() {
+            return promptTokens;
+        }
+
+        private long getCompletionTokens() {
+            return completionTokens;
+        }
+
+        private long getTotalTokens() {
+            return totalTokens;
         }
     }
 

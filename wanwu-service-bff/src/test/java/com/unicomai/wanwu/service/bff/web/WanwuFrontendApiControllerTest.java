@@ -57,6 +57,7 @@ import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -1717,6 +1718,41 @@ public class WanwuFrontendApiControllerTest {
             assertTrue(body.contains("\"presence_penalty\":0.4"));
             assertTrue(body.contains("\"max_tokens\":128"));
             assertTrue(body.contains("\"enable_thinking\":false"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void modelExperienceLlmRecordsProviderUsageWhenAvailable() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> respondJson(exchange,
+                "{\"id\":\"chatcmpl-usage\",\"object\":\"chat.completion\","
+                        + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"usage answer\"},\"finish_reason\":\"stop\"}],"
+                        + "\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}"));
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+
+            mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\","
+                                    + "\"modelExperienceId\":\"exp-001\",\"content\":\"hello\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("\"content\":\"usage answer\"")));
+
+            ArgumentCaptor<RecordModelStatisticCommand> captor = forClass(RecordModelStatisticCommand.class);
+            verify(appService).recordModelStatistic(captor.capture());
+            assertEquals(11L, captor.getValue().getPromptTokens());
+            assertEquals(7L, captor.getValue().getCompletionTokens());
+            assertEquals(18L, captor.getValue().getTotalTokens());
+            assertTrue(captor.getValue().isStream());
         } finally {
             server.stop(0);
         }
