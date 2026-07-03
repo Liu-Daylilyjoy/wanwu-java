@@ -422,6 +422,80 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void multimodalEmbeddingsAndRerankConvertFileUrlsBeforeProxying() throws Exception {
+        HttpServer fileServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        fileServer.createContext("/image.png", exchange ->
+                respondBytes(exchange, "image/png", new byte[]{
+                        (byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}));
+        fileServer.createContext("/audio.wav", exchange ->
+                respondBytes(exchange, "audio/wav", "RIFF".getBytes(StandardCharsets.UTF_8)));
+        fileServer.createContext("/video.mp4", exchange ->
+                respondBytes(exchange, "video/mp4", new byte[]{0, 0, 0, 1}));
+        fileServer.start();
+
+        AtomicReference<String> embeddingBody = new AtomicReference<>();
+        AtomicReference<String> rerankBody = new AtomicReference<>();
+        HttpServer upstreamServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstreamServer.createContext("/v1/multimodal-embeddings", exchange -> {
+            embeddingBody.set(readBody(exchange));
+            respondJson(exchange, "{\"object\":\"list\",\"model\":\"multi-emb\","
+                    + "\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.3]}],"
+                    + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0,\"total_tokens\":1}}");
+        });
+        upstreamServer.createContext("/v1/multimodal-rerank", exchange -> {
+            rerankBody.set(readBody(exchange));
+            respondJson(exchange, "{\"model\":\"multi-rerank\","
+                    + "\"results\":[{\"index\":0,\"relevance_score\":0.91}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":0,\"total_tokens\":2}}");
+        });
+        upstreamServer.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + fileServer.getAddress().getPort();
+            String imageUrl = baseUrl + "/image.png";
+            String audioUrl = baseUrl + "/audio.wav";
+            String videoUrl = baseUrl + "/video.mp4";
+
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-multi-emb"))
+                    .thenReturn(configuredModel("model-multi-emb", "multi-emb",
+                            "http://127.0.0.1:" + upstreamServer.getAddress().getPort() + "/v1", "emb-key"));
+            when(modelService.getModel("", "", "model-multi-rerank"))
+                    .thenReturn(configuredModel("model-multi-rerank", "multi-rerank",
+                            "http://127.0.0.1:" + upstreamServer.getAddress().getPort() + "/v1", "rerank-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-multi-emb/multimodal-embeddings")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"input\":[{\"text\":\"hello\",\"image\":\"" + imageUrl
+                                    + "\",\"audio\":\"" + audioUrl + "\",\"video\":\"" + videoUrl + "\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.model").value("multi-emb"));
+
+            callbackMvc.perform(post("/callback/v1/model/model-multi-rerank/multimodal-rerank")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"query\":{\"text\":\"hello\",\"image\":\"" + imageUrl + "\"},"
+                                    + "\"documents\":[{\"text\":\"doc\",\"image\":\"" + imageUrl + "\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.model").value("multi-rerank"));
+
+            assertTrue(embeddingBody.get().contains("\"image\":\"data:image/png;base64,iVBORw0KGgo=\""));
+            assertTrue(embeddingBody.get().contains("\"audio\":\"data:audio/wav;base64,UklGRg==\""));
+            assertTrue(embeddingBody.get().contains("\"video\":\"data:video/mp4;base64,AAAAAQ==\""));
+            assertTrue(rerankBody.get().contains("\"image\":\"data:image/png;base64,iVBORw0KGgo=\""));
+            assertTrue(!embeddingBody.get().contains(imageUrl));
+            assertTrue(!embeddingBody.get().contains(audioUrl));
+            assertTrue(!embeddingBody.get().contains(videoUrl));
+            assertTrue(!rerankBody.get().contains(imageUrl));
+        } finally {
+            upstreamServer.stop(0);
+            fileServer.stop(0);
+        }
+    }
+
+    @Test
     public void fileAndModelCallbackRoutesKeepGoRouteShapesAvailable() throws Exception {
         mockMvc.perform(post("/callback/v1/file/url/base64")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -391,6 +391,10 @@ public class WanwuCallbackApiController {
             }
             if ("/chat/completions".equals(endpointSuffix)) {
                 convertUserImageUrls(payload);
+            } else if ("/multimodal-embeddings".equals(endpointSuffix)) {
+                convertMultimodalEmbeddingUrls(payload);
+            } else if ("/multimodal-rerank".equals(endpointSuffix)) {
+                convertMultimodalRerankUrls(payload);
             }
             if (isBlank(firstText(payload, "model"))) {
                 payload.put("model", defaultIfBlank(model.getModel(), modelId));
@@ -586,6 +590,54 @@ public class WanwuCallbackApiController {
             if (convertFirstImageUrl((List<?>) contentValue)) {
                 return;
             }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void convertMultimodalEmbeddingUrls(Map<String, Object> payload) {
+        Object inputValue = payload.get("input");
+        if (!(inputValue instanceof List)) {
+            return;
+        }
+        for (Object itemValue : (List<?>) inputValue) {
+            if (!(itemValue instanceof Map)) {
+                continue;
+            }
+            Map<Object, Object> item = (Map<Object, Object>) itemValue;
+            convertMediaUrlField(item, "image");
+            convertMediaUrlField(item, "audio");
+            convertMediaUrlField(item, "video");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void convertMultimodalRerankUrls(Map<String, Object> payload) {
+        Object documentsValue = payload.get("documents");
+        if (documentsValue instanceof List) {
+            for (Object documentValue : (List<?>) documentsValue) {
+                if (documentValue instanceof Map) {
+                    convertMediaUrlField((Map<Object, Object>) documentValue, "image");
+                }
+            }
+        }
+        Object queryValue = payload.get("query");
+        if (queryValue instanceof Map) {
+            convertMediaUrlField((Map<Object, Object>) queryValue, "image");
+        }
+    }
+
+    private void convertMediaUrlField(Map<Object, Object> item, String field) {
+        Object value = item.get(field);
+        if (!(value instanceof String)) {
+            return;
+        }
+        String url = (String) value;
+        if (isBlank(url) || url.startsWith("data:")) {
+            return;
+        }
+        String dataUrl = fetchUrlAsDataUrl(url);
+        if (!isBlank(dataUrl)) {
+            item.put(field, dataUrl);
         }
     }
 
