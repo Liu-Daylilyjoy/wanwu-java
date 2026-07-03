@@ -1609,6 +1609,19 @@ public class WanwuFrontendApiController {
         return streamAssistantConversation(authorization, request, true);
     }
 
+    @GetMapping(value = "/asr/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<String> asrStream(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam("modelId") String modelId) {
+        UserContext userContext = userContext(authorization);
+        String connected = "{\"type\":\"asr.connected\",\"modelId\":\"" + jsonEscape(modelId)
+                + "\",\"userId\":\"" + jsonEscape(userContext.getUserId()) + "\"}";
+        String closed = "{\"type\":\"asr.closed\",\"modelId\":\"" + jsonEscape(modelId) + "\"}";
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body("data: " + connected + "\n\n" + "data: " + closed + "\n\n");
+    }
+
     @PostMapping(value = "/assistant/question/recommend", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<String> assistantQuestionRecommend(
             @RequestHeader(value = "Authorization", required = false) String authorization,

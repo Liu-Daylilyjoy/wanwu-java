@@ -26,6 +26,7 @@ Date: 2026-06-30
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1`.
 - `wanwu-service-bff` also maps `/callback/v1/model/{modelId}` to `ModelService#getModel`, returning Go-style callback model metadata with API keys redacted to `useless-api-key` and `config.endpointUrl` rewritten to `/callback/v1/model/{modelId}`.
 - Callback OCR, PDF Parser, GUI, and sync-ASR routes now return local Go-compatible success body shapes (`OcrResp`, `PdfParserResp`, `GuiResp`, `SyncAsrResp`) so downstream services can parse the expected top-level fields while real provider calls are still deferred.
+- `/asr/stream` under `/user/api/v1` now has a Docker development `text/event-stream` route that emits `asr.connected` and `asr.closed` events for frontend route compatibility.
 - Docker Compose `full` profile includes `model` on ports `8082` and `20882`.
 
 ## Current Storage Boundary
@@ -45,5 +46,6 @@ The same boundary now stores model experience dialogs by `sessionId` and records
 ## Still Missing
 
 - Real external LLM provider streaming and token statistics for model experience; current SSE path is deterministic local echo for frontend compatibility.
+- Real XunFei ASR WebSocket proxying behind `/asr/stream`; the current route is a deterministic development event stream only.
 - LLM inference validation parity beyond the current `validate-thinking` success stub.
 - Real callback/OpenAPI model inference proxying beyond the current development callback model-info redaction contract and local OCR/PDF/GUI/ASR response bodies.

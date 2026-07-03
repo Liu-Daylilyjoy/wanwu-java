@@ -1500,6 +1500,18 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void asrStreamRouteReturnsDevelopmentEventStream() throws Exception {
+        mockMvc.perform(get("/user/api/v1/asr/stream")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelId", "asr-001"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("asr.connected")))
+                .andExpect(content().string(containsString("asr.closed")))
+                .andExpect(content().string(containsString("asr-001")));
+    }
+
+    @Test
     public void modelExperienceRoutesReturnFrontendContracts() throws Exception {
         when(modelService.saveModelExperienceDialog(any()))
                 .thenReturn(modelExperienceDialog("exp-001", "model-001", "session-001", "hello"));
