@@ -104,6 +104,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
@@ -186,32 +187,50 @@ public class AppServiceImpl implements AppService {
     private final ObjectMapper objectMapper;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private KnowledgeService knowledgeService;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private SafetyService safetyService;
 
     @Autowired
     public AppServiceImpl(ApplicationRepository applicationRepository) {
-        this(applicationRepository, Clock.systemUTC(), new ObjectMapper(), null);
+        this(applicationRepository, Clock.systemUTC(), new ObjectMapper(), null, null);
     }
 
     public AppServiceImpl(ApplicationRepository applicationRepository, Clock clock) {
-        this(applicationRepository, clock, new ObjectMapper(), null);
+        this(applicationRepository, clock, new ObjectMapper(), null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, KnowledgeService knowledgeService) {
-        this(applicationRepository, clock, new ObjectMapper(), knowledgeService);
+        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository,
+                   Clock clock,
+                   KnowledgeService knowledgeService,
+                   SafetyService safetyService) {
+        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, safetyService);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, ObjectMapper objectMapper) {
-        this(applicationRepository, clock, objectMapper, null);
+        this(applicationRepository, clock, objectMapper, null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository,
                    Clock clock,
                    ObjectMapper objectMapper,
                    KnowledgeService knowledgeService) {
+        this(applicationRepository, clock, objectMapper, knowledgeService, null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository,
+                   Clock clock,
+                   ObjectMapper objectMapper,
+                   KnowledgeService knowledgeService,
+                   SafetyService safetyService) {
         this.applicationRepository = applicationRepository;
         this.clock = clock;
         this.objectMapper = objectMapper;
         this.knowledgeService = knowledgeService;
+        this.safetyService = safetyService;
     }
 
     @Override
@@ -1339,6 +1358,21 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("rag snapshot not found");
         }
         RagDraftConfigRecord config = ragConfigForChat(command.isDraft(), userId, orgId, command.getRagId(), snapshot);
+        SensitiveBlock sensitiveBlock = matchSensitiveResponse(
+                userId,
+                orgId,
+                config == null ? null : config.getSafetyConfigJson(),
+                command.getQuestion());
+        if (sensitiveBlock != null) {
+            RagChatResult result = new RagChatResult();
+            result.setRagId(command.getRagId());
+            result.setQuestion(command.getQuestion());
+            result.setResponse(sensitiveBlock.reply);
+            result.setSearchList(Collections.<Map<String, Object>>emptyList());
+            result.setQaSearchList(Collections.<Map<String, Object>>emptyList());
+            result.setCreatedAt(clock.millis());
+            return result;
+        }
         Map<String, Object> knowledgeHit = hitConfiguredKnowledge(
                 userId,
                 orgId,
@@ -1992,13 +2026,27 @@ public class AppServiceImpl implements AppService {
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
         AppRecord assistant = ensureConversationAssistantExists(userId, orgId, command.getAssistantId());
-        if (!command.isDraft()
-                && applicationRepository.findLatestAssistantSnapshot(
-                assistant.getUserId(), assistant.getOrgId(), command.getAssistantId()) == null) {
-            throw new IllegalArgumentException("assistant snapshot not found");
+        AssistantSnapshotRecord snapshot = null;
+        if (!command.isDraft()) {
+            snapshot = applicationRepository.findLatestAssistantSnapshot(
+                    assistant.getUserId(), assistant.getOrgId(), command.getAssistantId());
+            if (snapshot == null) {
+                throw new IllegalArgumentException("assistant snapshot not found");
+            }
         }
+        AssistantDraftConfigRecord config = assistantConfigForChat(
+                command.isDraft(),
+                assistant.getUserId(),
+                assistant.getOrgId(),
+                command.getAssistantId(),
+                snapshot);
         AssistantConversationRecord conversation = resolveConversation(command, userId, orgId);
-        String response = deterministicResponse(assistant, command.getPrompt());
+        SensitiveBlock sensitiveBlock = matchSensitiveResponse(
+                userId,
+                orgId,
+                config == null ? null : config.getSafetyConfigJson(),
+                command.getPrompt());
+        String response = sensitiveBlock == null ? deterministicResponse(assistant, command.getPrompt()) : sensitiveBlock.reply;
         long now = clock.millis();
         String detailId = newDetailId();
         AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
@@ -2861,6 +2909,14 @@ public class AppServiceImpl implements AppService {
         return "Demo RAG response from " + defaultIfBlank(rag.getName(), "RAG") + ": " + question + suffix;
     }
 
+    private static class SensitiveBlock {
+        private final String reply;
+
+        SensitiveBlock(String reply) {
+            this.reply = reply;
+        }
+    }
+
     private RagDraftConfigRecord ragConfigForChat(boolean draft,
                                                   String userId,
                                                   String orgId,
@@ -2881,6 +2937,120 @@ public class AppServiceImpl implements AppService {
         } catch (Exception ex) {
             throw new IllegalStateException("rag snapshot config is invalid", ex);
         }
+    }
+
+    private AssistantDraftConfigRecord assistantConfigForChat(boolean draft,
+                                                              String userId,
+                                                              String orgId,
+                                                              String assistantId,
+                                                              AssistantSnapshotRecord snapshot) {
+        if (draft) {
+            return applicationRepository.findAssistantConfig(userId, orgId, assistantId);
+        }
+        return assistantConfigFromSnapshot(snapshot);
+    }
+
+    private AssistantDraftConfigRecord assistantConfigFromSnapshot(AssistantSnapshotRecord snapshot) {
+        if (snapshot == null || isBlank(snapshot.getAssistantConfigJson())) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(snapshot.getAssistantConfigJson(), AssistantDraftConfigRecord.class);
+        } catch (Exception ex) {
+            throw new IllegalStateException("assistant snapshot config is invalid", ex);
+        }
+    }
+
+    private SensitiveBlock matchSensitiveResponse(String userId, String orgId, String safetyConfigJson, String input) {
+        if (safetyService == null || isBlank(input)) {
+            return null;
+        }
+        for (String tableId : sensitiveTableIds(userId, orgId, safetyConfigJson)) {
+            SensitiveBlock block = matchSensitiveTable(userId, orgId, tableId, input);
+            if (block != null) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    private List<String> sensitiveTableIds(String userId, String orgId, String safetyConfigJson) {
+        List<String> tableIds = new ArrayList<>();
+        addTableIds(tableIds, globalSensitiveTables(userId, orgId));
+        if (isBlank(safetyConfigJson)) {
+            return tableIds;
+        }
+        Map<String, Object> config = mapOrDefault(safetyConfigJson, new LinkedHashMap<String, Object>());
+        if (!enabled(config.get("enable")) && !enabled(config.get("enabled"))) {
+            return tableIds;
+        }
+        addTableIds(tableIds, listValue(config.get("tables")));
+        addTableIds(tableIds, listValue(config.get("sensitiveTable")));
+        addTableIds(tableIds, listValue(config.get("sensitiveTables")));
+        addTableIds(tableIds, listValue(config.get("tableIds")));
+        return tableIds;
+    }
+
+    private List<Object> globalSensitiveTables(String userId, String orgId) {
+        try {
+            Map<String, Object> result = safetyService.listSensitiveWordTables(userId, orgId, "global");
+            return listValue(result == null ? null : result.get("list"));
+        } catch (RuntimeException ex) {
+            return Collections.emptyList();
+        }
+    }
+
+    private void addTableIds(List<String> tableIds, List<Object> rawTables) {
+        for (Object raw : rawTables) {
+            String tableId;
+            if (raw instanceof Map) {
+                Map<String, Object> table = mapValue(raw);
+                tableId = firstNonBlank(
+                        stringValue(table.get("tableId")),
+                        stringValue(table.get("id")),
+                        stringValue(table.get("value")));
+            } else {
+                tableId = stringValue(raw);
+            }
+            if (!isBlank(tableId) && !tableIds.contains(tableId)) {
+                tableIds.add(tableId);
+            }
+        }
+    }
+
+    private SensitiveBlock matchSensitiveTable(String userId, String orgId, String tableId, String input) {
+        try {
+            Map<String, Object> table = safetyService.getSensitiveWordTable(userId, orgId, tableId);
+            String reply = firstNonBlank(
+                    stringValue(table == null ? null : table.get("reply")),
+                    "Content blocked by sensitive word filter");
+            Map<String, Object> words = safetyService.listSensitiveWords(userId, orgId, tableId, 1, 1000);
+            for (Object item : listValue(words == null ? null : words.get("list"))) {
+                Map<String, Object> row = mapValue(item);
+                String word = firstNonBlank(
+                        stringValue(row.get("word")),
+                        stringValue(row.get("content")),
+                        stringValue(row.get("sensitiveWord")),
+                        stringValue(row.get("name")));
+                if (!isBlank(word) && input.contains(word)) {
+                    return new SensitiveBlock(reply);
+                }
+            }
+            return null;
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private boolean enabled(Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        String text = stringValue(value).trim();
+        return "true".equalsIgnoreCase(text) || "1".equals(text) || "yes".equalsIgnoreCase(text);
     }
 
     private Map<String, Object> hitConfiguredKnowledge(String userId,

@@ -65,7 +65,9 @@ import com.unicomai.wanwu.api.app.dto.RagCreateResult;
 import com.unicomai.wanwu.api.app.dto.RagDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateResult;
@@ -298,6 +300,33 @@ public class AppServiceImplTest {
                 ragChatCommand(created.getRagId(), "published", false));
         assertEquals("published", published.getQuestion());
         assertEquals(true, published.getResponse().contains("Demo RAG response"));
+    }
+
+    @Test
+    public void ragChatUsesConfiguredSafetyTableToBlockSensitiveQuestion() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,
+                new FakeSafetyService("table-001", "banned-token", "Safety reply"));
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("PolicyRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setSafetyConfig(safetyConfig("table-001"));
+        service.updateRagConfig(config);
+
+        RagChatResult result = service.streamRagChat(
+                ragChatCommand(created.getRagId(), "question with banned-token", true));
+
+        assertEquals("Safety reply", result.getResponse());
+        assertTrue(result.getSearchList().isEmpty());
+        assertTrue(result.getQaSearchList().isEmpty());
     }
 
     @Test
@@ -1239,6 +1268,29 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void assistantDraftStreamUsesConfiguredSafetyTableToBlockSensitivePrompt() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,
+                new FakeSafetyService("table-001", "banned-token", "Safety reply"));
+        AssistantCreateResult created = service.createAssistant(command("GuardedAgent", "guarded desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setSafetyConfig(safetyConfig("table-001"));
+        service.updateAssistantConfig(config);
+
+        AssistantConversationStreamResult result = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), "", "please say banned-token", true));
+
+        assertEquals("Safety reply", result.getResponse());
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(result.getConversationId()));
+        assertEquals("Safety reply", details.getList().get(0).get("response"));
+    }
+
+    @Test
     public void draftConversationHistoryReusesOneConversationPerAssistant() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftReuseAgent", "draft reuse desc"));
@@ -1706,6 +1758,79 @@ public class AppServiceImplTest {
         config.put("enable", true);
         config.put("tables", Collections.singletonList(table));
         return config;
+    }
+
+    private static class FakeSafetyService implements SafetyService {
+
+        private final String tableId;
+        private final String word;
+        private final String reply;
+
+        FakeSafetyService(String tableId, String word, String reply) {
+            this.tableId = tableId;
+            this.word = word;
+            this.reply = reply;
+        }
+
+        @Override
+        public ServiceDescriptor describe() {
+            return ServiceDescriptor.of("safety", "Safety Service", "app");
+        }
+
+        @Override
+        public Map<String, Object> createSensitiveWordTable(String userId, String orgId, Map<String, Object> request) {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public void updateSensitiveWordTable(String userId, String orgId, Map<String, Object> request) {
+        }
+
+        @Override
+        public Map<String, Object> getSensitiveWordTable(String userId, String orgId, String tableId) {
+            Map<String, Object> table = new LinkedHashMap<>();
+            table.put("tableId", tableId);
+            table.put("reply", this.tableId.equals(tableId) ? reply : "");
+            table.put("version", "v1");
+            return table;
+        }
+
+        @Override
+        public void updateSensitiveWordTableReply(String userId, String orgId, Map<String, Object> request) {
+        }
+
+        @Override
+        public void deleteSensitiveWordTable(String userId, String orgId, Map<String, Object> request) {
+        }
+
+        @Override
+        public Map<String, Object> listSensitiveWordTables(String userId, String orgId, String type) {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public Map<String, Object> selectSensitiveWordTables(String userId, String orgId) {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public Map<String, Object> listSensitiveWords(String userId, String orgId, String tableId, int pageNo, int pageSize) {
+            Map<String, Object> word = new LinkedHashMap<>();
+            word.put("word", this.tableId.equals(tableId) ? this.word : "");
+            word.put("sensitiveType", "Other");
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("list", Collections.singletonList(word));
+            result.put("total", 1);
+            return result;
+        }
+
+        @Override
+        public void uploadSensitiveWord(String userId, String orgId, Map<String, Object> request) {
+        }
+
+        @Override
+        public void deleteSensitiveWord(String userId, String orgId, Map<String, Object> request) {
+        }
     }
 
     private Map<String, Object> visionConfig(int picNum) {

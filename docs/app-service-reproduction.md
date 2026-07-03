@@ -12,7 +12,7 @@ Date: 2026-07-01
 - RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell, and multipart upload response compatibility.
 - Workflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, local run shell, assistant workflow select from real created workflows, workflow tool select/action/tool-box compatibility backed by resource-center tools, `/workflow/api/workflow/parameter`, `/workflow/api/api/workflow/use`, `/workflow/api/workflow/openapi_schema`, and `/api/bot/upload_file` avatar upload compatibility.
 - Chatflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, and local chatflow application list/detail plus conversation-delete compatibility for `/appspace/chatflow/*` and `/chatflow/*` frontend calls.
-- Safety guard lifecycle: sensitive word table create/list/detail/update/reply/delete/select, single word upload, uploaded XLSX/CSV file import, list, and delete through `wanwu-service-app` SafetyService.
+- Safety guard lifecycle: sensitive word table create/list/detail/update/reply/delete/select, single word upload, uploaded XLSX/CSV file import, list, delete, and Agent/RAG local chat input blocking through `wanwu-service-app` SafetyService-backed configuration.
 - Assistant extension bindings:
   - `POST/DELETE/PUT /assistant/tool/workflow`
   - `POST/DELETE/PUT /assistant/tool/mcp`
@@ -60,6 +60,6 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflo
 - No real MCP server execution or external tool invocation yet. Local OpenAPI schema parsing and MCP Server resource binding are covered by `wanwu-service-mcp`, but runtime protocol handling is still a later slice.
 - Workflow and Chatflow now have persisted local app lifecycles and frontend-compatible import/export shells. The actual visual editor engine, graph execution, Coze-compatible runtime, node validation, and advanced Workflow/Chatflow marketplace/template flows are still missing.
 - Skill marketplace/custom/acquired skill flows are implemented in the resource service slice, not this app-service slice.
-- Safety guard management and local uploaded-file word import are implemented, but Agent/RAG/Model chat streams do not yet perform real sensitive word interception.
+- Safety guard management, local uploaded-file word import, and Agent/RAG local chat input blocking are implemented; Model Experience and streaming output replacement still need Go-equivalent sensitive word interception.
 - Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant templates remain a future slice.
 - RAG chat currently returns a deterministic local answer after validating draft/published RAG existence. Real retrieval, QA hit handling, knowledge search lists, reasoning frames, and model generation remain future slices.
