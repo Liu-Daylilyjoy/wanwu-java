@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.unicomai.wanwu.api.iam.IamService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.MediaType;
@@ -12,8 +13,14 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -40,6 +47,7 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(jsonPath("$.data.userId").value("dev-admin"))
                 .andExpect(jsonPath("$.data.username").value("admin"))
                 .andExpect(jsonPath("$.data.company").value("Wanwu Java"))
+                .andExpect(jsonPath("$.data.language.code").value("zh"))
                 .andExpect(jsonPath("$.data.avatar.path").value(""));
 
         mockMvc.perform(get("/user/api/v1/user/info")
@@ -79,6 +87,59 @@ public class WanwuCommonApiControllerTest {
                         .content("{\"avatar\":{\"key\":\"" + avatarData.get("key").asText() + "\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    public void commonProfileRoutesUseIamServiceWhenAvailable() throws Exception {
+        IamService iamService = mock(IamService.class);
+        when(iamService.getUserInfo("dev-admin", "default-org"))
+                .thenReturn(user("dev-admin", "admin", "Persisted Admin", "en",
+                        "avatars/admin.png", "/user/api/v1/avatar/download/admin.png"));
+        MockMvc mockMvc = mockMvc(iamService);
+
+        mockMvc.perform(get("/user/api/v1/user/info")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").value("dev-admin"))
+                .andExpect(jsonPath("$.data.nickname").value("Persisted Admin"))
+                .andExpect(jsonPath("$.data.language.code").value("en"))
+                .andExpect(jsonPath("$.data.avatar.key").value("avatars/admin.png"));
+        verify(iamService).getUserInfo("dev-admin", "default-org");
+
+        mockMvc.perform(put("/user/api/v1/user/language")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"language\":\"en\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.language").value("en"));
+        verify(iamService).updateUserLanguage("dev-admin", "en");
+
+        mockMvc.perform(put("/user/api/v1/user/avatar")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"avatar\":{\"key\":\"avatars/admin.png\","
+                                + "\"path\":\"/user/api/v1/avatar/download/admin.png\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        verify(iamService).updateUserAvatar("dev-admin",
+                "avatars/admin.png", "/user/api/v1/avatar/download/admin.png");
+
+        mockMvc.perform(put("/user/api/v1/user/password")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"dev-admin\",\"oldPassword\":\"old\","
+                                + "\"newPassword\":\"New-password1!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        verify(iamService).changeUserPassword("dev-admin", "old", "New-password1!");
+
+        mockMvc.perform(put("/user/api/v1/user/admin/password")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"dev-app\",\"password\":\"Admin-password1!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        verify(iamService).adminChangeUserPassword(eq("dev-admin"), eq("dev-app"), eq("Admin-password1!"));
     }
 
     @Test
@@ -166,5 +227,35 @@ public class WanwuCommonApiControllerTest {
         return MockMvcBuilders
                 .standaloneSetup(new WanwuCommonApiController(tempDir))
                 .build();
+    }
+
+    private MockMvc mockMvc(IamService iamService) {
+        return MockMvcBuilders
+                .standaloneSetup(new WanwuCommonApiController(tempDir, iamService))
+                .build();
+    }
+
+    private Map<String, Object> user(String userId, String username, String nickname,
+                                     String languageCode, String avatarKey, String avatarPath) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("userId", userId);
+        body.put("uid", userId);
+        body.put("username", username);
+        body.put("nickname", nickname);
+        body.put("company", "Wanwu Java");
+        body.put("phone", "");
+        body.put("email", username + "@example.local");
+        body.put("remark", "development account");
+        Map<String, Object> language = new LinkedHashMap<String, Object>();
+        language.put("code", languageCode);
+        language.put("name", languageCode);
+        body.put("language", language);
+        Map<String, Object> avatar = new LinkedHashMap<String, Object>();
+        avatar.put("key", avatarKey);
+        avatar.put("path", avatarPath);
+        body.put("avatar", avatar);
+        body.put("orgId", "default-org");
+        body.put("orgName", "Default Organization");
+        return body;
     }
 }

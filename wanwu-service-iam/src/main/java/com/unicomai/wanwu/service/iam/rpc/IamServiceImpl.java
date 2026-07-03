@@ -162,13 +162,14 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
-    public PermissionResult permission(String token) {
+    public synchronized PermissionResult permission(String token) {
         DevAccount account = accountByToken(token);
+        Map<String, Object> user = existingUser(account.uid);
         PermissionResult result = new PermissionResult();
         result.setOrgPermission(orgPermission(account));
         result.setIsUpdatePassword(true);
-        result.setAvatar(singletonMap("path", ""));
-        result.setLanguage(language());
+        result.setAvatar(mapValue(user.get("avatar")));
+        result.setLanguage(mapValue(user.get("language")));
         return result;
     }
 
@@ -179,6 +180,49 @@ public class IamServiceImpl implements IamService {
             options.add(new OrganizationOption(String.valueOf(org.get("orgId")), String.valueOf(org.get("name"))));
         }
         return new OrganizationSelectResult(options);
+    }
+
+    @Override
+    public synchronized Map<String, Object> getUserInfo(String userId, String orgId) {
+        Map<String, Object> user = existingUser(userId);
+        Map<String, Object> result = copy(user);
+        result.put("uid", user.get("userId"));
+        result.put("orgId", Strings.hasText(orgId) ? orgId : DEFAULT_ORG.getId());
+        result.put("orgName", organizationName(String.valueOf(result.get("orgId"))));
+        return result;
+    }
+
+    @Override
+    public synchronized void updateUserLanguage(String userId, String language) {
+        Map<String, Object> user = existingUser(userId);
+        user.put("language", language(Strings.hasText(language) ? language : "zh"));
+        user.put("languageCode", Strings.hasText(language) ? language : "zh");
+        user.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
+    }
+
+    @Override
+    public synchronized void updateUserAvatar(String userId, String avatarKey, String avatarPath) {
+        Map<String, Object> user = existingUser(userId);
+        user.put("avatar", avatar(avatarKey, avatarPath));
+        user.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
+    }
+
+    @Override
+    public synchronized void changeUserPassword(String userId, String oldPassword, String newPassword) {
+        if (!Strings.hasText(newPassword)) {
+            throw new IllegalArgumentException("newPassword is required");
+        }
+        touchPassword(existingUser(userId));
+    }
+
+    @Override
+    public synchronized void adminChangeUserPassword(String operatorUserId, String userId, String password) {
+        if (!Strings.hasText(password)) {
+            throw new IllegalArgumentException("password is required");
+        }
+        touchPassword(existingUser(userId));
     }
 
     @Override
@@ -706,6 +750,7 @@ public class IamServiceImpl implements IamService {
     private Map<String, Object> userInfo(DevAccount account) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", account.uid);
+        result.put("uid", account.uid);
         result.put("username", account.username);
         result.put("nickname", account.username);
         result.put("phone", "");
@@ -717,7 +762,8 @@ public class IamServiceImpl implements IamService {
         result.put("creator", idName("system", "System"));
         result.put("status", true);
         result.put("language", language());
-        result.put("avatar", singletonMap("path", ""));
+        result.put("avatar", avatar("", ""));
+        result.put("passwordVersion", 0);
 
         Map<String, Object> orgRole = new LinkedHashMap<>();
         orgRole.put("org", org(DEFAULT_ORG));
@@ -746,7 +792,8 @@ public class IamServiceImpl implements IamService {
         result.put("creator", idName(Strings.hasText(operatorUserId) ? operatorUserId : "system", "System"));
         result.put("status", booleanValue(request, "status", true));
         result.put("language", language());
-        result.put("avatar", singletonMap("path", ""));
+        result.put("avatar", avatar("", ""));
+        result.put("passwordVersion", 0);
         result.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
         return result;
     }
@@ -1029,6 +1076,28 @@ public class IamServiceImpl implements IamService {
         return result;
     }
 
+    private Map<String, Object> existingUser(String userId) {
+        String safeUserId = Strings.hasText(userId) ? userId : ADMIN_ACCOUNT.uid;
+        Map<String, Object> user = users.get(safeUserId);
+        if (user == null) {
+            throw new IllegalArgumentException("user not found: " + safeUserId);
+        }
+        return user;
+    }
+
+    private String organizationName(String orgId) {
+        Map<String, Object> organization = organizations.get(orgId);
+        return organization == null ? DEFAULT_ORG.getName() : String.valueOf(organization.get("name"));
+    }
+
+    private void touchPassword(Map<String, Object> user) {
+        int version = intValue(user.get("passwordVersion"), 0) + 1;
+        user.put("passwordVersion", version);
+        user.put("passwordChangedAt", CREATED_AT);
+        user.put("updatedAt", CREATED_AT);
+        saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
+    }
+
     private String idFrom(Map<String, Object> request, String... keys) {
         for (String key : keys) {
             String value = defaultText(request, key, "");
@@ -1119,10 +1188,33 @@ public class IamServiceImpl implements IamService {
         return result;
     }
 
+    private Map<String, Object> language(String code) {
+        String safeCode = Strings.hasText(code) ? code : "zh";
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", safeCode);
+        result.put("name", "en".equals(safeCode) ? "English" : "Simplified Chinese");
+        return result;
+    }
+
+    private Map<String, Object> avatar(String key, String path) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", Strings.hasText(key) ? key : "");
+        result.put("path", Strings.hasText(path) ? path : "");
+        return result;
+    }
+
     private Map<String, Object> singletonMap(String key, Object value) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(key, value);
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            return new LinkedHashMap<>((Map<String, Object>) value);
+        }
+        return Collections.emptyMap();
     }
 
     @SuppressWarnings("unchecked")
@@ -1142,6 +1234,20 @@ public class IamServiceImpl implements IamService {
             return fallback;
         }
         return String.valueOf(value);
+    }
+
+    private int intValue(Object value, int fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private boolean booleanValue(Map<String, Object> request, String key, boolean fallback) {

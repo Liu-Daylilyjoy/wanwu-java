@@ -21,6 +21,16 @@ public interface IamService {
 
     OrganizationSelectResult selectOrganizations();
 
+    Map<String, Object> getUserInfo(String userId, String orgId);
+
+    void updateUserLanguage(String userId, String language);
+
+    void updateUserAvatar(String userId, String avatarKey, String avatarPath);
+
+    void changeUserPassword(String userId, String oldPassword, String newPassword);
+
+    void adminChangeUserPassword(String operatorUserId, String userId, String password);
+
     Map<String, Object> createUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
 
     Map<String, Object> importUsers(String operatorUserId, String operatorOrgId, String fileName, long fileSize);

@@ -1,5 +1,8 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.unicomai.wanwu.api.iam.IamService;
+import com.unicomai.wanwu.common.rpc.RpcConstants;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -43,13 +46,20 @@ public class WanwuCommonApiController {
     private static final Map<String, String> DOCS = docs();
 
     private final Path avatarRoot;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private IamService iamService;
 
     public WanwuCommonApiController() {
-        this(Paths.get(System.getProperty("java.io.tmpdir"), "wanwu-java-avatars"));
+        this(Paths.get(System.getProperty("java.io.tmpdir"), "wanwu-java-avatars"), null);
     }
 
     public WanwuCommonApiController(Path avatarRoot) {
+        this(avatarRoot, null);
+    }
+
+    public WanwuCommonApiController(Path avatarRoot, IamService iamService) {
         this.avatarRoot = avatarRoot.toAbsolutePath().normalize();
+        this.iamService = iamService;
     }
 
     @GetMapping("/user/info")
@@ -57,6 +67,58 @@ public class WanwuCommonApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "userId", required = false) String userId) {
         UserContext ctx = userContext(authorization, userId);
+        if (iamService != null) {
+            try {
+                return FrontendResponse.ok(userInfo(iamService.getUserInfo(ctx.userId, DEV_ORG_ID), ctx));
+            } catch (RuntimeException ex) {
+                return FrontendResponse.failure(1001, ex.getMessage());
+            }
+        }
+        return FrontendResponse.ok(userInfo(staticUserInfo(ctx), ctx));
+    }
+
+    @PutMapping("/user/password")
+    public FrontendResponse<Map<String, Object>> changeOwnPassword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization, null);
+        String targetUserId = defaultIfBlank(text(request, "userId"), ctx.userId);
+        if (!ctx.userId.equals(targetUserId)) {
+            return FrontendResponse.failure(1001, "cannot change another user's password");
+        }
+        if (iamService != null) {
+            try {
+                iamService.changeUserPassword(ctx.userId, text(request, "oldPassword"), text(request, "newPassword"));
+            } catch (RuntimeException ex) {
+                return FrontendResponse.failure(1001, ex.getMessage());
+            }
+        }
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    @PutMapping("/user/admin/password")
+    public FrontendResponse<Map<String, Object>> changeUserPassword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization, null);
+        if (!ctx.admin) {
+            return FrontendResponse.failure(1001, "admin permission is required");
+        }
+        String targetUserId = defaultIfBlank(text(request, "userId"), text(request, "uid"));
+        if (isBlank(targetUserId)) {
+            return FrontendResponse.failure(1001, "userId is required");
+        }
+        if (iamService != null) {
+            try {
+                iamService.adminChangeUserPassword(ctx.userId, targetUserId, text(request, "password"));
+            } catch (RuntimeException ex) {
+                return FrontendResponse.failure(1001, ex.getMessage());
+            }
+        }
+        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    }
+
+    private Map<String, Object> staticUserInfo(UserContext ctx) {
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("userId", ctx.userId);
         body.put("uid", ctx.userId);
@@ -66,24 +128,45 @@ public class WanwuCommonApiController {
         body.put("phone", "");
         body.put("email", ctx.username + "@example.local");
         body.put("remark", "development account");
-        body.put("language", "zh");
+        body.put("language", language("zh", "\u4e2d\u6587"));
         body.put("avatar", avatar("", ""));
         body.put("orgId", DEV_ORG_ID);
         body.put("orgName", "Default Organization");
         body.put("roles", ctx.admin
                 ? Collections.singletonList(idName("admin", "System Admin"))
                 : Collections.singletonList(idName("app", "App User")));
-        return FrontendResponse.ok(body);
+        return body;
     }
 
-    @PutMapping("/user/password")
-    public FrontendResponse<Map<String, Object>> changeOwnPassword() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
-    }
-
-    @PutMapping("/user/admin/password")
-    public FrontendResponse<Map<String, Object>> changeUserPassword() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    private Map<String, Object> userInfo(Map<String, Object> raw, UserContext ctx) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        if (raw != null) {
+            body.putAll(raw);
+        }
+        String userId = defaultIfBlank(text(body, "userId"), ctx.userId);
+        String username = defaultIfBlank(text(body, "username"), ctx.username);
+        body.put("userId", userId);
+        body.put("uid", defaultIfBlank(text(body, "uid"), userId));
+        body.put("username", username);
+        body.put("nickname", defaultIfBlank(text(body, "nickname"), username));
+        body.put("company", defaultIfBlank(text(body, "company"), "Wanwu Java"));
+        body.put("phone", defaultIfBlank(text(body, "phone"), ""));
+        body.put("email", defaultIfBlank(text(body, "email"), username + "@example.local"));
+        body.put("remark", defaultIfBlank(text(body, "remark"), "development account"));
+        body.put("orgId", defaultIfBlank(text(body, "orgId"), DEV_ORG_ID));
+        body.put("orgName", defaultIfBlank(text(body, "orgName"), "Default Organization"));
+        if (!(body.get("language") instanceof Map)) {
+            String code = defaultIfBlank(text(body, "language"), "zh");
+            body.put("language", language(code, "en".equals(code) ? "English" : "\u4e2d\u6587"));
+        }
+        Map<String, Object> avatar = mapValue(body.get("avatar"));
+        body.put("avatar", avatar(text(avatar, "key"), text(avatar, "path")));
+        if (!body.containsKey("roles")) {
+            body.put("roles", ctx.admin
+                    ? Collections.singletonList(idName("admin", "System Admin"))
+                    : Collections.singletonList(idName("app", "App User")));
+        }
+        return body;
     }
 
     @PostMapping("/base/register/email/code")
@@ -161,7 +244,20 @@ public class WanwuCommonApiController {
     }
 
     @PutMapping("/user/avatar")
-    public FrontendResponse<Map<String, Object>> updateUserAvatar(@RequestBody(required = false) Map<String, Object> request) {
+    public FrontendResponse<Map<String, Object>> updateUserAvatar(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization, null);
+        Map<String, Object> avatar = mapValue(request == null ? null : request.get("avatar"));
+        String key = defaultIfBlank(text(avatar, "key"), text(request, "key"));
+        String path = defaultIfBlank(text(avatar, "path"), text(request, "path"));
+        if (iamService != null) {
+            try {
+                iamService.updateUserAvatar(ctx.userId, key, path);
+            } catch (RuntimeException ex) {
+                return FrontendResponse.failure(1001, ex.getMessage());
+            }
+        }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -190,9 +286,21 @@ public class WanwuCommonApiController {
     }
 
     @PutMapping("/user/language")
-    public FrontendResponse<Map<String, Object>> changeLanguage(@RequestBody(required = false) Map<String, Object> request) {
+    public FrontendResponse<Map<String, Object>> changeLanguage(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization, null);
+        String language = defaultIfBlank(text(request, "language"), "zh");
+        if (iamService != null) {
+            try {
+                iamService.updateUserLanguage(ctx.userId, language);
+            } catch (RuntimeException ex) {
+                return FrontendResponse.failure(1001, ex.getMessage());
+            }
+        }
         Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("language", request == null ? "zh" : defaultIfBlank(text(request, "language"), "zh"));
+        body.put("language", language);
+        body.put("languageInfo", language(language, "en".equals(language) ? "English" : "\u4e2d\u6587"));
         return FrontendResponse.ok(body);
     }
 
@@ -471,6 +579,14 @@ public class WanwuCommonApiController {
         }
         Object value = map.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            return new LinkedHashMap<String, Object>((Map<String, Object>) value);
+        }
+        return Collections.emptyMap();
     }
 
     private boolean isBlank(String value) {

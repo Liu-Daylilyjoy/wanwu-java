@@ -249,6 +249,30 @@ public class IamServiceImplTest {
     }
 
     @Test
+    public void commonProfileUpdatesArePersistedInUserInfo() {
+        Map<String, Object> initial = service.getUserInfo("dev-admin", "default-org");
+        assertEquals("admin", initial.get("username"));
+        assertEquals("zh", ((Map) initial.get("language")).get("code"));
+
+        service.updateUserLanguage("dev-admin", "en");
+        service.updateUserAvatar("dev-admin", "avatars/admin.png", "/user/api/v1/avatar/download/admin.png");
+        service.changeUserPassword("dev-admin", "old-password", "New-password1!");
+        service.adminChangeUserPassword("dev-admin", "dev-app", "Admin-password1!");
+
+        Map<String, Object> updated = service.getUserInfo("dev-admin", "default-org");
+        assertEquals("en", ((Map) updated.get("language")).get("code"));
+        assertEquals("avatars/admin.png", ((Map) updated.get("avatar")).get("key"));
+        assertEquals("/user/api/v1/avatar/download/admin.png", ((Map) updated.get("avatar")).get("path"));
+        assertEquals(1, updated.get("passwordVersion"));
+        PermissionResult permission = service.permission("dev-token");
+        assertEquals("en", ((Map) permission.getLanguage()).get("code"));
+        assertEquals("avatars/admin.png", ((Map) permission.getAvatar()).get("key"));
+
+        Map<String, Object> app = service.getUserInfo("dev-app", "default-org");
+        assertEquals(1, app.get("passwordVersion"));
+    }
+
+    @Test
     public void platformCustomConfigCanBeUpdatedAndReadBack() {
         service.updateCustomTab(map("tabTitle", "Smoke Tab", "tabLogo", map("path", "/tab.png", "key", "tab.png")));
         service.updateCustomLogin(map("loginBg", map("path", "/bg.png", "key", "bg.png"),
