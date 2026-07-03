@@ -33,6 +33,7 @@ The Java model service uses an in-memory repository seeded with Docker developme
 - DeepSeek LLM: `deepseek-chat`
 - OpenAI-compatible embedding: `text-embedding-3-small`
 - Jina rerank: `jina-reranker-v2-base-multilingual`
+- Qwen ASR: `qwen3-asr-flash`
 
 The same boundary now stores model experience dialogs by `sessionId` and records by `modelExperienceId`, mirroring the Go service's create-or-update and cascade-delete behavior. The BFF local model-experience SSE path checks global Safety Guard tables before echoing prompts and checks the generated local answer before saving and returning it, matching the frontend-visible Go input/output blocking rules while provider streaming is still local. The mutable model state is now durable through `model_service.model_records`, so Docker restarts preserve imported models, status changes, delete tombstones, model-experience dialogs, and records. It is still not the final Go-equivalent database model; later slices should normalize this compatibility table into imported-model and model-experience relational tables matching the original model service behavior.
 

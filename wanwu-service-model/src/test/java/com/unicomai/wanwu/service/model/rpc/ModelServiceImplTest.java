@@ -113,6 +113,18 @@ public class ModelServiceImplTest {
     }
 
     @Test
+    public void syncAsrSelectAndRecommendReturnDevelopmentModel() {
+        ModelListResult asr = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", "sync-asr"));
+        assertEquals(1, asr.getTotal());
+        assertEquals("sync-asr", asr.getList().get(0).getModelType());
+        assertEquals("qwen3-asr-flash", asr.getList().get(0).getModel());
+
+        RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("Qwen", "sync-asr"));
+        assertEquals(1, recommended.getTotal());
+        assertEquals("qwen3-asr-flash", recommended.getList().get(0).getModel());
+    }
+
+    @Test
     public void modelExperienceDialogLifecycleFollowsGoContract() {
         ModelExperienceDialogSaveCommand create = new ModelExperienceDialogSaveCommand();
         create.setUserId("dev-admin");

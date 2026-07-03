@@ -453,6 +453,10 @@ public class ModelServiceImpl implements ModelService {
                 "Jina Reranker",
                 config("apiKey", "dev-model-key", "inferUrl", "https://api.jina.ai/v1"),
                 SCOPE_PRIVATE);
+        putBuiltIn("4", "Qwen", MODEL_TYPE_ASR, "qwen3-asr-flash",
+                "Qwen3 ASR Flash",
+                config("apiKey", "dev-model-key", "inferUrl", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                SCOPE_PRIVATE);
     }
 
     private void putBuiltIn(String id, String provider, String modelType, String model, String displayName,
@@ -694,6 +698,9 @@ public class ModelServiceImpl implements ModelService {
         }
         if (MODEL_TYPE_RERANK.equals(safeModelType)) {
             return Collections.singletonList(recommend("jina-reranker-v2-base-multilingual", "Jina Reranker", "noSupport", "noSupport"));
+        }
+        if (MODEL_TYPE_ASR.equals(safeModelType)) {
+            return Collections.singletonList(recommend("qwen3-asr-flash", "qwen3-asr-flash", "noSupport", "noSupport"));
         }
         return Collections.singletonList(recommend(safeProvider.toLowerCase(Locale.ENGLISH) + "-" + safeModelType, safeProvider + " " + modelTypeName(safeModelType), "noSupport", "noSupport"));
     }
