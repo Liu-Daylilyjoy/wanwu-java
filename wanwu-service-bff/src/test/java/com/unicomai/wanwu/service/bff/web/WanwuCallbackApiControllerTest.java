@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import org.junit.jupiter.api.Test;
@@ -7,10 +9,18 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +69,53 @@ public class WanwuCallbackApiControllerTest {
                 .andExpect(jsonPath("$.data.config.accessKey").value("useless-api-key"))
                 .andExpect(jsonPath("$.data.config.endpointUrl").value("http://bff:8080/callback/v1/model/model-123"))
                 .andExpect(jsonPath("$.data.config.region").value("cn"));
+    }
+
+    @Test
+    public void chatCompletionsProxyToOpenAiCompatibleEndpointWhenModelConfigExists() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"upstream-chat-001\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"upstream answer\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            ModelInfo model = new ModelInfo();
+            model.setModelId("model-123");
+            model.setModel("deepseek-chat");
+            model.setProvider("openai-compatible");
+            model.setModelType("llm");
+            Map<String, Object> config = new LinkedHashMap<>();
+            config.put("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+            config.put("apiKey", "local-key");
+            model.setConfig(config);
+            when(modelService.getModel("", "", "model-123")).thenReturn(model);
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value("upstream-chat-001"))
+                    .andExpect(jsonPath("$.choices[0].message.content").value("upstream answer"))
+                    .andExpect(jsonPath("$.usage.total_tokens").value(5));
+
+            assertEquals("Bearer local-key", authorization.get());
+            assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(upstreamBody.get().contains("\"content\":\"hi\""));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -187,5 +244,24 @@ public class WanwuCallbackApiControllerTest {
         mockMvc.perform(get("/api/deploy/info"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.platform").value("wanwu-java"));
+    }
+
+    private static String readBody(HttpExchange exchange) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[512];
+        int read;
+        while ((read = exchange.getRequestBody().read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private static void respondJson(HttpExchange exchange, String json) throws IOException {
+        byte[] response = json.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(response);
+        }
     }
 }

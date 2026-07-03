@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -13,6 +14,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
@@ -26,6 +34,9 @@ import java.util.UUID;
 public class WanwuCallbackApiController {
 
     private static final String DEFAULT_CALLBACK_MODEL_BASE_URL = "http://bff:8080/callback/v1/model";
+    private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
+    private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
@@ -92,6 +103,10 @@ public class WanwuCallbackApiController {
     public Map<String, Object> chatCompletions(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> proxied = proxyChatCompletions(modelId, request);
+        if (proxied != null) {
+            return proxied;
+        }
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("role", "assistant");
         message.put("content", "Callback model " + modelId + " development response.");
@@ -301,6 +316,82 @@ public class WanwuCallbackApiController {
         return data;
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> proxyChatCompletions(String modelId, Map<String, Object> request) {
+        if (modelService == null) {
+            return null;
+        }
+        try {
+            ModelInfo model = modelService.getModel("", "", modelId);
+            if (model == null || model.getConfig() == null) {
+                return null;
+            }
+            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
+            String apiKey = firstText(model.getConfig(), "apiKey");
+            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
+                return null;
+            }
+            Map<String, Object> payload = new LinkedHashMap<>();
+            if (request != null) {
+                payload.putAll(request);
+            }
+            if (isBlank(firstText(payload, "model"))) {
+                payload.put("model", defaultIfBlank(model.getModel(), modelId));
+            }
+            String upstream = postJson(chatCompletionsUrl(endpoint), apiKey, JSON.writeValueAsString(payload));
+            return isBlank(upstream) ? null : JSON.readValue(upstream, Map.class);
+        } catch (RuntimeException | IOException ignored) {
+            return null;
+        }
+    }
+
+    private String postJson(String endpoint, String apiKey, String json) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+        connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setDoOutput(true);
+        try (OutputStream body = connection.getOutputStream()) {
+            body.write(json.getBytes(StandardCharsets.UTF_8));
+        }
+        try {
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String response = readStream(stream);
+            if (status >= 400) {
+                throw new IOException("model callback upstream returned " + status);
+            }
+            return response;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String readStream(InputStream stream) throws IOException {
+        if (stream == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+        }
+        return builder.toString();
+    }
+
+    private String chatCompletionsUrl(String endpoint) {
+        String base = trimTrailingSlash(endpoint);
+        if (base.endsWith("/chat/completions")) {
+            return base;
+        }
+        return base + "/chat/completions";
+    }
+
     private Map<String, Object> callbackModelInfo(ModelInfo model) {
         Map<String, Object> data = new LinkedHashMap<>();
         if (model == null) {
@@ -418,6 +509,12 @@ public class WanwuCallbackApiController {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private boolean isDevelopmentApiKey(String value) {
+        return "dev-model-key".equals(value)
+                || "useless-api-key".equals(value)
+                || "it-is-not-your-api-key".equals(value);
     }
 
     private String defaultIfBlank(String value, String fallback) {
