@@ -85,6 +85,7 @@ import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelInfo;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 import com.unicomai.wanwu.api.safety.SafetyService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -92,6 +93,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -122,6 +124,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 public class WanwuFrontendApiControllerTest {
+
+    @AfterEach
+    public void clearOperationClientStatisticStore() {
+        OperationClientStatisticStore.INSTANCE.clear();
+    }
 
     private final IamService iamService = mock(IamService.class);
     private final AppService appService = mock(AppService.class);
@@ -261,12 +268,15 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void operationRoutesManageOauthAppsAndClientStatistic() throws Exception {
+        OperationClientStatisticStore.INSTANCE.clear();
+        OperationClientStatisticStore.INSTANCE.recordBrowse("oauth-client-1", LocalDate.of(2026, 6, 15));
         Map<String, Object> oauthApp = map("clientId", "oauth-client-1",
                 "name", "Console",
                 "desc", "dev oauth",
                 "clientSecret", "oauth-secret-1",
                 "redirectUri", "http://localhost/callback",
-                "status", true);
+                "status", true,
+                "createdAt", "2026-06-15 10:00:00");
         when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(listResult(oauthApp));
 
@@ -304,11 +314,16 @@ public class WanwuFrontendApiControllerTest {
                         .param("endDate", "2026-06-30"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.overview.cumulativeClient.value").value(0.0))
-                .andExpect(jsonPath("$.data.trend.client.lines[0].items[0].key").value("2026-06-01"));
+                .andExpect(jsonPath("$.data.overview.cumulativeClient.value").value(1.0))
+                .andExpect(jsonPath("$.data.overview.additionClient.value").value(1.0))
+                .andExpect(jsonPath("$.data.overview.activeClient.value").value(1.0))
+                .andExpect(jsonPath("$.data.overview.browse.value").value(1.0))
+                .andExpect(jsonPath("$.data.trend.client.lines[0].items[0].key").value("2026-06-01"))
+                .andExpect(jsonPath("$.data.trend.client.lines[0].items[14].value").value(1.0))
+                .andExpect(jsonPath("$.data.trend.browse.lines[0].items[14].value").value(1.0));
 
         verify(iamService).createOauthApp(anyString(), any(Map.class));
-        verify(iamService).listOauthApps(anyString(), anyString(), anyInt(), anyInt());
+        verify(iamService, times(2)).listOauthApps(anyString(), anyString(), anyInt(), anyInt());
         verify(iamService).updateOauthApp(any(Map.class));
         verify(iamService).updateOauthAppStatus(any(Map.class));
         verify(iamService).deleteOauthApp(any(Map.class));

@@ -31,7 +31,7 @@ Date: 2026-06-30
   - `PUT /user/api/v1/oauth/app`
   - `PUT /user/api/v1/oauth/app/status`
   - `DELETE /user/api/v1/oauth/app`
-- `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape.
+- `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape. The Java development slice now derives cumulative/new client counts from IAM OAuth apps and derives active-client/browse counts from local OAuth runtime visits.
 - `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
   - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
   - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.
@@ -40,7 +40,7 @@ Date: 2026-06-30
   - `/oauth/userinfo` resolves a Bearer access token to the development user profile.
   - `/oauth/jwks` exposes the generated RSA public key used by the development ID token signer.
 - `wanwu-api` extends `IamService` with OAuth app management operations.
-- `wanwu-service-iam` stores OAuth apps in Docker development in-memory state with generated `clientId` and `clientSecret`.
+- `wanwu-service-iam` stores OAuth apps in the Docker development MySQL JSON compatibility repository with generated `clientId` and `clientSecret`.
 - The admin development account now exposes `operation`, `operation.oauth`, and `operation.statistic_client` so the zero-change frontend can display Operation Management.
 
 ## OAuth Field Mapping
@@ -67,7 +67,7 @@ Frontend-entry smoke target:
 - `http://localhost:3000/user/api/v1/base/login` returns operation permissions for `admin`.
 - OAuth app create/list/update/status/delete works through `/oauth/app*`.
 - OAuth authorize/code/token/refresh/userinfo works through `/service/api/openapi/v1/oauth/*` using the managed app credentials.
-- `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`.
+- `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`; the values are non-zero when managed OAuth apps or local OAuth visits exist in the requested date range.
 
 ## Current Boundary
 
@@ -75,9 +75,8 @@ This slice is a frontend-compatible Operation Management loop. It prevents the z
 
 It does not yet implement:
 
-- MySQL persistence for OAuth apps.
 - Redis-backed code/refresh-token storage.
 - PEM-backed OAuth key configuration instead of the generated development RSA key.
-- Real client installation statistics in OperateService.
-- Redis-backed global browse statistics.
+- Full OperateService client statistics parity beyond IAM OAuth app counts.
+- Redis-backed global browse statistics beyond the BFF-local OAuth visit counter.
 - Full App Observability dashboard routes under `v1/statistic.go`.

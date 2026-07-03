@@ -86,51 +86,14 @@ public class WanwuOperationApiController {
 
     @GetMapping("/statistic/client")
     public FrontendResponse<Map<String, Object>> clientStatistic(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "startDate", required = false) String startDate,
             @RequestParam(value = "endDate", required = false) String endDate) {
-        return FrontendResponse.ok(clientStatisticPayload(startDate, endDate));
-    }
-
-    private Map<String, Object> clientStatisticPayload(String startDate, String endDate) {
-        Map<String, Object> overview = new LinkedHashMap<>();
-        overview.put("cumulativeClient", overviewItem(0, 0));
-        overview.put("additionClient", overviewItem(0, 0));
-        overview.put("activeClient", overviewItem(0, 0));
-        overview.put("browse", overviewItem(0, 0));
-
-        Map<String, Object> trend = new LinkedHashMap<>();
-        trend.put("client", chart("Client", "Client Count", startDate, endDate));
-        trend.put("browse", chart("Browse", "Browse Count", startDate, endDate));
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("overview", overview);
-        result.put("trend", trend);
-        return result;
-    }
-
-    private Map<String, Object> overviewItem(float value, float periodOverPeriod) {
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("value", value);
-        item.put("periodOverPeriod", periodOverPeriod);
-        return item;
-    }
-
-    private Map<String, Object> chart(String tableName, String lineName, String startDate, String endDate) {
-        Map<String, Object> line = new LinkedHashMap<>();
-        line.put("lineName", lineName);
-        line.put("items", Collections.singletonList(chartItem(defaultIfBlank(startDate, defaultIfBlank(endDate, "")), 0)));
-
-        Map<String, Object> chart = new LinkedHashMap<>();
-        chart.put("tableName", tableName);
-        chart.put("lines", Collections.singletonList(line));
-        return chart;
-    }
-
-    private Map<String, Object> chartItem(String key, float value) {
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("key", key);
-        item.put("value", value);
-        return item;
+        UserContext ctx = userContext(authorization);
+        Map<String, Object> oauthApps = iamService == null
+                ? Collections.<String, Object>emptyMap()
+                : iamService.listOauthApps(ctx.userId, "", 1, 10000);
+        return FrontendResponse.ok(OperationClientStatisticStore.INSTANCE.clientStatistic(oauthApps, startDate, endDate));
     }
 
     private boolean isValidRedirectUri(Map<String, Object> request) {

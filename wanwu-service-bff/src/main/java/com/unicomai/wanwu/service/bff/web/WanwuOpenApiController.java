@@ -712,6 +712,7 @@ public class WanwuOpenApiController {
             if (!"code".equals(defaultIfBlank(responseType, "code"))) {
                 return oauthError("unsupported response_type");
             }
+            OperationClientStatisticStore.INSTANCE.recordBrowse(text(app, "clientId"));
             String loginUri = appendQuery("/aibase/login",
                     "client_id", text(app, "clientId"),
                     "response_type", "code",
@@ -739,6 +740,7 @@ public class WanwuOpenApiController {
             }
             String userId = oauthUserId(jwtToken);
             Map<String, Object> app = validateOauthApp(clientId, null, redirectUri);
+            OperationClientStatisticStore.INSTANCE.recordBrowse(text(app, "clientId"));
             String code = "wanwu-oauth-code-" + compactId();
             oauthCodes.put(code, new OAuthCode(text(app, "clientId"), userId, stringList(scope), Instant.now().plusSeconds(600).toEpochMilli()));
             String callback = appendQuery(text(app, "redirectUri"), "code", code, "state", defaultIfBlank(state, ""));
@@ -767,6 +769,7 @@ public class WanwuOpenApiController {
             if (payload == null || !payload.clientId.equals(text(app, "clientId")) || payload.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid authorization code"));
             }
+            OperationClientStatisticStore.INSTANCE.recordBrowse(payload.clientId);
             return ResponseEntity.ok(oauthTokenResponse(payload.userId, payload.clientId, payload.scopes));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(ex.getMessage()));
@@ -789,6 +792,7 @@ public class WanwuOpenApiController {
                     || oldRefresh.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid refresh token"));
             }
+            OperationClientStatisticStore.INSTANCE.recordBrowse(oldRefresh.clientId);
             Map<String, Object> data = oauthTokenResponse(oldRefresh.userId, oldRefresh.clientId, oldRefresh.scopes);
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("access_token", data.get("access_token"));
@@ -849,6 +853,7 @@ public class WanwuOpenApiController {
         data.put("remark", "");
         data.put("company", "Wanwu Java");
         data.put("avatar", "/user/api/v1/static/icon/user-default-icon.png");
+        OperationClientStatisticStore.INSTANCE.recordBrowse(payload.clientId());
         return ResponseEntity.ok(data);
     }
 
