@@ -24,6 +24,7 @@ Date: 2026-06-30
   - `/model/experience/dialog`, `/model/experience/dialogs`, `/model/experience/dialog/records`.
   - `/model/experience/llm` as a local OpenAI-compatible SSE echo path that saves user and assistant records.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1`.
+- `wanwu-service-bff` also maps `/callback/v1/model/{modelId}` to `ModelService#getModel`, returning Go-style callback model metadata with API keys redacted to `useless-api-key` and `config.endpointUrl` rewritten to `/callback/v1/model/{modelId}`.
 - Docker Compose `full` profile includes `model` on ports `8082` and `20882`.
 
 ## Current Storage Boundary
@@ -44,4 +45,4 @@ The same boundary now stores model experience dialogs by `sessionId` and records
 
 - Real external LLM provider streaming and token statistics for model experience; current SSE path is deterministic local echo for frontend compatibility.
 - LLM inference validation parity beyond the current `validate-thinking` success stub.
-- Callback/OpenAPI model inference endpoints.
+- Real callback/OpenAPI model inference proxying beyond the current development callback route shells and model-info redaction contract.

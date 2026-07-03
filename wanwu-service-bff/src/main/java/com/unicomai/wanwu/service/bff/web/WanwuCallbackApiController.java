@@ -1,5 +1,9 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.common.rpc.RpcConstants;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +24,16 @@ import java.util.UUID;
 
 @RestController
 public class WanwuCallbackApiController {
+
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
+
+    public WanwuCallbackApiController() {
+    }
+
+    public WanwuCallbackApiController(ModelService modelService) {
+        this.modelService = modelService;
+    }
 
     @PostMapping("/callback/v1/file/url/base64")
     public FrontendResponse<String> fileUrlToBase64(@RequestBody(required = false) Map<String, Object> request) {
@@ -57,6 +71,13 @@ public class WanwuCallbackApiController {
 
     @GetMapping("/callback/v1/model/{modelId}")
     public FrontendResponse<Map<String, Object>> modelInfo(@PathVariable("modelId") String modelId) {
+        if (modelService != null) {
+            try {
+                return FrontendResponse.ok(callbackModelInfo(modelService.getModel("", "", modelId)));
+            } catch (RuntimeException ignored) {
+                // Keep callback discovery available in Docker development when the model service is absent.
+            }
+        }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("modelId", modelId);
         data.put("model", modelId);
@@ -211,6 +232,54 @@ public class WanwuCallbackApiController {
         data.put("created", 0);
         data.put("model", modelId);
         return data;
+    }
+
+    private Map<String, Object> callbackModelInfo(ModelInfo model) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        if (model == null) {
+            return data;
+        }
+        data.put("modelId", model.getModelId());
+        data.put("uuid", model.getUuid());
+        data.put("provider", model.getProvider());
+        data.put("modelType", model.getModelType());
+        data.put("model", model.getModel());
+        data.put("displayName", model.getDisplayName());
+        data.put("avatar", model.getAvatar());
+        data.put("publishDate", model.getPublishDate());
+        data.put("isActive", model.getIsActive());
+        data.put("userId", model.getUserId());
+        data.put("orgId", model.getOrgId());
+        data.put("createdAt", model.getCreatedAt());
+        data.put("updatedAt", model.getUpdatedAt());
+        data.put("modelDesc", model.getModelDesc());
+        data.put("tags", model.getTags());
+        data.put("config", redactedCallbackConfig(model));
+        data.put("scopeType", model.getScopeType());
+        data.put("allowEdit", model.getAllowEdit());
+        data.put("importSource", model.getImportSource());
+        data.put("status", Boolean.FALSE.equals(model.getIsActive()) ? "unavailable" : "available");
+        return data;
+    }
+
+    private Map<String, Object> redactedCallbackConfig(ModelInfo model) {
+        Map<String, Object> config = new LinkedHashMap<>();
+        if (model.getConfig() != null) {
+            config.putAll(model.getConfig());
+        }
+        for (String key : new String[]{"apiKey", "apiSecret", "appKey", "accessKey"}) {
+            if (config.containsKey(key)) {
+                config.put(key, "useless-api-key");
+            }
+        }
+        if (!isBlank(model.getModelId()) && !isBlank(model.getModel())) {
+            config.put("endpointUrl", callbackEndpoint(model.getModelId()));
+        }
+        return config;
+    }
+
+    private String callbackEndpoint(String modelId) {
+        return "/callback/v1/model/" + modelId;
     }
 
     private Map<String, Object> usage() {

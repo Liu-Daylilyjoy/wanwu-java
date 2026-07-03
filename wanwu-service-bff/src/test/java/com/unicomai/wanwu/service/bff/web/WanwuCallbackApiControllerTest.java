@@ -1,11 +1,18 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -17,6 +24,42 @@ public class WanwuCallbackApiControllerTest {
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new WanwuCallbackApiController())
             .build();
+
+    @Test
+    public void modelInfoCallbackReturnsRedactedModelConfigAndCallbackEndpoint() throws Exception {
+        ModelService modelService = mock(ModelService.class);
+        ModelInfo model = new ModelInfo();
+        model.setModelId("model-123");
+        model.setModel("deepseek-chat");
+        model.setProvider("DeepSeek");
+        model.setModelType("llm");
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("apiKey", "real-key");
+        config.put("apiSecret", "real-secret");
+        config.put("appKey", "real-app-key");
+        config.put("accessKey", "real-access-key");
+        config.put("endpointUrl", "https://api.deepseek.com/v1");
+        config.put("region", "cn");
+        model.setConfig(config);
+        when(modelService.getModel("", "", "model-123")).thenReturn(model);
+
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(modelService))
+                .build();
+
+        callbackMvc.perform(get("/callback/v1/model/model-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.modelId").value("model-123"))
+                .andExpect(jsonPath("$.data.model").value("deepseek-chat"))
+                .andExpect(jsonPath("$.data.provider").value("DeepSeek"))
+                .andExpect(jsonPath("$.data.config.apiKey").value("useless-api-key"))
+                .andExpect(jsonPath("$.data.config.apiSecret").value("useless-api-key"))
+                .andExpect(jsonPath("$.data.config.appKey").value("useless-api-key"))
+                .andExpect(jsonPath("$.data.config.accessKey").value("useless-api-key"))
+                .andExpect(jsonPath("$.data.config.endpointUrl").value("/callback/v1/model/model-123"))
+                .andExpect(jsonPath("$.data.config.region").value("cn"));
+    }
 
     @Test
     public void fileAndModelCallbackRoutesKeepGoRouteShapesAvailable() throws Exception {
