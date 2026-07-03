@@ -21,7 +21,7 @@ Date: 2026-07-01
   - Metadata key/value shells.
   - Permission owner/admin/user/org compatibility.
   - QA pair create/list/update/switch/delete, import-tip, request-content CSV/TSV import, local CSV export record, and local text hit.
-  - Community report list/add/update/delete, deterministic local generate, batch-add placeholder, and frontend status fields.
+  - Community report list/add/update/delete, deterministic local generate, request-content CSV/TSV batch-add import, and frontend status fields.
   - External API create/list/update/delete, external dataset selection, external knowledge create/update/delete, and external knowledge list integration.
   - Local dynamic knowledge graph generation plus QA/document export record list, delete, and local download compatibility.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1/knowledge`.
@@ -48,7 +48,7 @@ The document path stores imported `docInfoList` entries in memory, derives searc
 
 The export-record path now follows the Go `knowledge_export_task` frontend contract for `exportRecordId`, `author`, `status`, `filePath`, `errorMsg`, `exportTime`, and `knowledgeName`. QA export and document export write to the same snapshot-backed record list; `/knowledge/export/record/list` paginates it, `/knowledge/export/record` deletes it, and `/knowledge/export/file/{exportRecordId}/{fileName}` returns local CSV/ZIP bytes for the unchanged frontend download button. The Go service runs asynchronous export tasks and uploads files to MinIO; the Java reproduction completes the local development export synchronously.
 
-The community report path now has the frontend-visible loop from Go's `KnowledgeBaseReportService`: list returns `list`, `total`, pagination, `createdAt`, `status`, `canGenerate`, `canAddReport`, `generateLabel`, and `lastImportStatus`; single add, update, delete, generate, and batch-add calls mutate the same snapshot. `generate` creates or refreshes a deterministic development report, and `batch-add` records the uploaded file id as an imported report placeholder. The Go implementation delegates to graph/RAG report generation and CSV import tasks; those runtime integrations remain later work.
+The community report path now has the frontend-visible loop from Go's `KnowledgeBaseReportService`: list returns `list`, `total`, pagination, `createdAt`, `status`, `canGenerate`, `canAddReport`, `generateLabel`, and `lastImportStatus`; single add, update, delete, generate, and batch-add calls mutate the same snapshot. `generate` creates or refreshes a deterministic development report, `batch-add` can parse request-provided CSV/TSV `title,content` rows into imported reports, and frontend uploads that only provide `fileUploadId` still create a visible imported placeholder. The Go implementation delegates to graph/RAG report generation and asynchronous uploaded-file CSV import tasks; those runtime integrations remain later work.
 
 The external knowledge path now follows the Go BFF contract from `knowledge_external.go`: `/knowledge/external/api/select`, `/knowledge/external/api`, `/knowledge/external/select`, and `/knowledge/external` all dispatch to `KnowledgeService`. The Go service validates and lists Dify datasets over the external API; the Java Docker reproduction uses a persisted local candidate dataset list per external API so frontend flows do not depend on an external Dify server. Creating an external knowledge base mounts one candidate, creates a normal Wanwu `knowledgeId` with `external = 1`, and returns `externalKnowledgeInfo` in `/knowledge/select`. Updating or deleting external knowledge mutates the same snapshot and releases the candidate for reuse.
 
@@ -57,5 +57,5 @@ The external knowledge path now follows the Go BFF contract from `knowledge_exte
 - Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
 - Real uploaded object byte ingestion across BFF/MinIO, parser-backed file conversion, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and asynchronous callback status updates.
 - Real uploaded QA file byte ingestion across BFF/MinIO, asynchronous QA import tasks, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
-- Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, CSV report import parsing, Dify external API validation/listing, and RAG query integration.
+- Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, uploaded CSV report byte ingestion, Dify external API validation/listing, and RAG query integration.
 - Callback status updates from asynchronous document processing.

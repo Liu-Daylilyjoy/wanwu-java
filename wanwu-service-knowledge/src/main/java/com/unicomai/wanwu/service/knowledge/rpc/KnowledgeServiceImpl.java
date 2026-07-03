@@ -1162,8 +1162,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         String knowledgeId = string(safe.get("knowledgeId"));
         existingKnowledge(knowledgeId);
         String fileUploadId = string(safe.get("fileUploadId"));
+        String content = reportImportContent(safe);
+        List<Map<String, String>> importedReports = parseReportImportRows(content);
+        if (!importedReports.isEmpty()) {
+            for (int i = importedReports.size() - 1; i >= 0; i--) {
+                Map<String, String> imported = importedReports.get(i);
+                reports(knowledgeId).add(0, newReport(knowledgeId,
+                        imported.get("title"),
+                        imported.get("content"),
+                        true,
+                        false));
+            }
+            saveSnapshot();
+            return;
+        }
         if (isBlank(fileUploadId)) {
-            throw new IllegalArgumentException("fileUploadId cannot be empty");
+            throw new IllegalArgumentException("fileUploadId or content cannot be empty");
         }
         reports(knowledgeId).add(0, newReport(knowledgeId,
                 "Imported Community Report",
@@ -2479,6 +2493,39 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return rows;
     }
 
+    private String reportImportContent(Map<String, Object> request) {
+        String content = firstText(request, "content", "text", "csv", "tsv");
+        if (isBlank(content)) {
+            content = decodedText(firstText(request, "contentBase64", "base64", "textBase64"));
+        }
+        return content;
+    }
+
+    private List<Map<String, String>> parseReportImportRows(String content) {
+        String normalized = normalizeContent(content);
+        if (isBlank(normalized)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+        String[] lines = normalized.split("\\n+");
+        for (String line : lines) {
+            List<String> cells = line.indexOf('\t') >= 0 ? splitTabLine(line) : splitCsvLine(line);
+            if (cells.size() < 2 || isReportHeader(cells)) {
+                continue;
+            }
+            String title = cells.get(0).trim();
+            String body = cells.get(1).trim();
+            if (isBlank(title) || isBlank(body)) {
+                continue;
+            }
+            Map<String, String> row = new LinkedHashMap<String, String>();
+            row.put("title", title);
+            row.put("content", body);
+            rows.add(row);
+        }
+        return rows;
+    }
+
     private List<String> splitTabLine(String line) {
         String[] raw = line.split("\\t");
         List<String> cells = new ArrayList<String>();
@@ -2517,6 +2564,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         String answer = cells.get(1).trim().toLowerCase(Locale.ENGLISH);
         return ("question".equals(question) || "问题".equals(question))
                 && ("answer".equals(answer) || "答案".equals(answer));
+    }
+
+    private boolean isReportHeader(List<String> cells) {
+        String title = cells.get(0).trim().toLowerCase(Locale.ENGLISH);
+        String content = cells.get(1).trim().toLowerCase(Locale.ENGLISH);
+        return ("title".equals(title) || "name".equals(title) || "标题".equals(title))
+                && ("content".equals(content) || "body".equals(content) || "内容".equals(content));
     }
 
     private void createImportedQaPair(String userId, String orgId, String knowledgeId, String question, String answer) {

@@ -272,6 +272,29 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void reportBatchAddParsesInlineCsvAndKeepsFileUploadFallback() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Report Import KB", 0)).get("knowledgeId");
+
+        service.batchAddReports("dev-admin", "default-org", reportBatchContent(knowledgeId,
+                "title,content\n"
+                        + "Alpha Report,Alpha imported report content.\n"
+                        + "\"Beta, Report\",\"Beta imported report content with comma.\""));
+        Map<String, Object> parsed = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(2, parsed.get("total"));
+        assertEquals(2, parsed.get("lastImportStatus"));
+        List<Map<String, Object>> reports = listOfMaps(parsed.get("list"));
+        assertEquals("Alpha Report", reports.get(0).get("title"));
+        assertEquals("Beta, Report", reports.get(1).get("title"));
+
+        service.batchAddReports("dev-admin", "default-org", reportBatch(knowledgeId, "report-upload-id"));
+        Map<String, Object> withFallback = service.listReports("dev-admin", "default-org",
+                reportList(knowledgeId, 1, 10));
+        assertEquals(3, withFallback.get("total"));
+        assertEquals("Imported Community Report", listOfMaps(withFallback.get("list")).get(0).get("title"));
+    }
+
+    @Test
     public void externalKnowledgeLifecycleFollowsFrontendAndGoContract() {
         Map<String, Object> createdApi = service.createExternalApi("dev-admin", "default-org",
                 externalApiCreate("Dify Dev", "https://dify.example/v1", "dev-key"));
@@ -944,6 +967,13 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("fileUploadId", fileUploadId);
+        return request;
+    }
+
+    private Map<String, Object> reportBatchContent(String knowledgeId, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("content", content);
         return request;
     }
 
