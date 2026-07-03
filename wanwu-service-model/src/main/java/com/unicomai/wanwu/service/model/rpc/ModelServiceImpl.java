@@ -457,6 +457,18 @@ public class ModelServiceImpl implements ModelService {
                 "Qwen3 ASR Flash",
                 config("apiKey", "dev-model-key", "inferUrl", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
                 SCOPE_PRIVATE);
+        putBuiltIn("5", "YuanJing", MODEL_TYPE_OCR, "unicom-ocr",
+                "YuanJing OCR",
+                config("apiKey", "dev-model-key", "inferUrl", "https://maas-api.ai-yuanjing.com/openapi/v1"),
+                SCOPE_PRIVATE);
+        putBuiltIn("6", "YuanJing", MODEL_TYPE_PDF, "pdf-parser",
+                "YuanJing PDF Parser",
+                config("apiKey", "dev-model-key", "inferUrl", "https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1"),
+                SCOPE_PRIVATE);
+        putBuiltIn("7", "YuanJing", MODEL_TYPE_GUI, "gui_agent_v1",
+                "gui_agent_v1",
+                config("apiKey", "dev-model-key", "inferUrl", "https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1"),
+                SCOPE_PRIVATE);
     }
 
     private void putBuiltIn(String id, String provider, String modelType, String model, String displayName,
@@ -699,6 +711,15 @@ public class ModelServiceImpl implements ModelService {
         if (MODEL_TYPE_RERANK.equals(safeModelType)) {
             return Collections.singletonList(recommend("jina-reranker-v2-base-multilingual", "Jina Reranker", MODEL_TYPE_RERANK, "noSupport", "noSupport"));
         }
+        if (MODEL_TYPE_OCR.equals(safeModelType)) {
+            return Collections.singletonList(recommend("unicom-ocr", "YuanJing OCR", MODEL_TYPE_OCR, "noSupport", "noSupport"));
+        }
+        if (MODEL_TYPE_PDF.equals(safeModelType)) {
+            return Collections.singletonList(recommend("pdf-parser", "YuanJing PDF Parser", MODEL_TYPE_PDF, "noSupport", "noSupport"));
+        }
+        if (MODEL_TYPE_GUI.equals(safeModelType)) {
+            return Collections.singletonList(recommend("gui_agent_v1", "gui_agent_v1", MODEL_TYPE_GUI, "noSupport", "noSupport"));
+        }
         if (MODEL_TYPE_ASR.equals(safeModelType)) {
             return Collections.singletonList(recommend("qwen3-asr-flash", "qwen3-asr-flash", MODEL_TYPE_ASR, "noSupport", "noSupport"));
         }
@@ -732,6 +753,12 @@ public class ModelServiceImpl implements ModelService {
         }
         if (MODEL_TYPE_MULTI_RERANK.equals(modelType)) {
             return "Multimodal Rerank";
+        }
+        if (MODEL_TYPE_OCR.equals(modelType)) {
+            return "OCR";
+        }
+        if (MODEL_TYPE_GUI.equals(modelType)) {
+            return "GUI";
         }
         if (MODEL_TYPE_PDF.equals(modelType)) {
             return "PDF Parser";

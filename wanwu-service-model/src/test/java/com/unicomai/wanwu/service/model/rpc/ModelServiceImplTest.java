@@ -133,6 +133,13 @@ public class ModelServiceImplTest {
     }
 
     @Test
+    public void yuanjingSpecializedSelectAndRecommendReturnDevelopmentModels() {
+        assertSpecializedModel("ocr", "unicom-ocr", "OCR");
+        assertSpecializedModel("pdf-parser", "pdf-parser", "PDF Parser");
+        assertSpecializedModel("gui", "gui_agent_v1", "GUI");
+    }
+
+    @Test
     public void modelExperienceDialogLifecycleFollowsGoContract() {
         ModelExperienceDialogSaveCommand create = new ModelExperienceDialogSaveCommand();
         create.setUserId("dev-admin");
@@ -262,5 +269,16 @@ public class ModelServiceImplTest {
         record.setCreatedAt(1L);
         record.setUpdatedAt(1L);
         return record;
+    }
+
+    private void assertSpecializedModel(String modelType, String model, String tag) {
+        ModelListResult selected = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", modelType));
+        assertEquals(1, selected.getTotal());
+        assertEquals(model, selected.getList().get(0).getModel());
+
+        RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("YuanJing", modelType));
+        assertEquals(1, recommended.getTotal());
+        assertEquals(model, recommended.getList().get(0).getModel());
+        assertEquals(tag, recommended.getList().get(0).getTags().get(0).get("text"));
     }
 }
