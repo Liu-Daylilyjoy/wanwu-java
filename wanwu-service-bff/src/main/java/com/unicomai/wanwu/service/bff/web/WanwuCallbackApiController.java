@@ -117,6 +117,11 @@ public class WanwuCallbackApiController {
     public Object chatCompletions(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request) {
+        ResponseEntity<FrontendResponse<Object>> modelValidation =
+                validateCallbackModel(modelId, request, "/chat/completions");
+        if (modelValidation != null) {
+            return modelValidation;
+        }
         if (isTruthy(request, "stream")) {
             ResponseEntity<String> proxied = proxyModelStream(modelId, request, "/chat/completions");
             if (proxied != null) {
@@ -144,12 +149,17 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/callback/v1/model/{modelId}/embeddings",
             "/callback/v1/model/{modelId}/multimodal-embeddings"})
-    public Map<String, Object> embeddings(
+    public Object embeddings(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request,
             HttpServletRequest httpRequest) {
-        Map<String, Object> proxied = proxyModelJson(modelId, request,
-                routeSuffix(httpRequest, "embeddings", "multimodal-embeddings"));
+        String endpointSuffix = routeSuffix(httpRequest, "embeddings", "multimodal-embeddings");
+        ResponseEntity<FrontendResponse<Object>> modelValidation =
+                validateCallbackModel(modelId, request, endpointSuffix);
+        if (modelValidation != null) {
+            return modelValidation;
+        }
+        Map<String, Object> proxied = proxyModelJson(modelId, request, endpointSuffix);
         if (proxied != null) {
             recordCallbackModelStatistic(modelId, proxied, false);
             return proxied;
@@ -166,12 +176,17 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/callback/v1/model/{modelId}/rerank",
             "/callback/v1/model/{modelId}/multimodal-rerank"})
-    public Map<String, Object> rerank(
+    public Object rerank(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request,
             HttpServletRequest httpRequest) {
-        Map<String, Object> proxied = proxyModelJson(modelId, request,
-                routeSuffix(httpRequest, "rerank", "multimodal-rerank"));
+        String endpointSuffix = routeSuffix(httpRequest, "rerank", "multimodal-rerank");
+        ResponseEntity<FrontendResponse<Object>> modelValidation =
+                validateCallbackModel(modelId, request, endpointSuffix);
+        if (modelValidation != null) {
+            return modelValidation;
+        }
+        Map<String, Object> proxied = proxyModelJson(modelId, request, endpointSuffix);
         if (proxied != null) {
             recordCallbackModelStatistic(modelId, proxied, false);
             return proxied;
@@ -421,6 +436,52 @@ public class WanwuCallbackApiController {
         } catch (RuntimeException | IOException ignored) {
             return null;
         }
+    }
+
+    private ResponseEntity<FrontendResponse<Object>> validateCallbackModel(
+            String modelId, Map<String, Object> request, String endpointSuffix) {
+        if (modelService == null) {
+            return null;
+        }
+        try {
+            ModelInfo model = modelService.getModel("", "", modelId);
+            if (model == null) {
+                return null;
+            }
+            if (!Boolean.TRUE.equals(model.getIsActive())) {
+                return callbackModelFailure("model " + modelId + " is inactive");
+            }
+            String expectedModel = defaultIfBlank(model.getModel(), modelId);
+            String requestedModel = firstText(request, "model");
+            boolean chat = "/chat/completions".equals(endpointSuffix);
+            if ((chat && !expectedModel.equals(requestedModel))
+                    || (!chat && !isBlank(requestedModel) && !expectedModel.equals(requestedModel))) {
+                return callbackModelFailure("model " + modelId + " "
+                        + callbackModelOperation(endpointSuffix) + " err: model mismatch!");
+            }
+            return null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private ResponseEntity<FrontendResponse<Object>> callbackModelFailure(String message) {
+        return ResponseEntity.badRequest()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(FrontendResponse.<Object>failure(1001, message));
+    }
+
+    private String callbackModelOperation(String endpointSuffix) {
+        if ("/chat/completions".equals(endpointSuffix)) {
+            return "chat completions";
+        }
+        if (endpointSuffix != null && endpointSuffix.contains("rerank")) {
+            return "rerank";
+        }
+        if (endpointSuffix != null && endpointSuffix.contains("embeddings")) {
+            return "embeddings";
+        }
+        return "callback";
     }
 
     private String postJson(String endpoint, String apiKey, String json) throws IOException {

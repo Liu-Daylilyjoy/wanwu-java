@@ -98,6 +98,7 @@ public class WanwuCallbackApiControllerTest {
             model.setModel("deepseek-chat");
             model.setProvider("openai-compatible");
             model.setModelType("llm");
+            model.setIsActive(true);
             Map<String, Object> config = new LinkedHashMap<>();
             config.put("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
             config.put("apiKey", "local-key");
@@ -110,7 +111,7 @@ public class WanwuCallbackApiControllerTest {
 
             callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                            .content("{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.id").value("upstream-chat-001"))
                     .andExpect(jsonPath("$.choices[0].message.content").value("upstream answer"))
@@ -146,7 +147,7 @@ public class WanwuCallbackApiControllerTest {
 
             callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                            .content("{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.choices[0].message.content").value("usage answer"));
 
@@ -190,7 +191,8 @@ public class WanwuCallbackApiControllerTest {
 
             callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                            .content("{\"model\":\"deepseek-chat\",\"stream\":true,"
+                                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
                     .andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                     .andExpect(content().string(containsString("data: {\"id\":\"chunk-1\"")))
@@ -238,7 +240,7 @@ public class WanwuCallbackApiControllerTest {
 
             callbackMvc.perform(post("/callback/v1/model/model-vl/chat/completions")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"messages\":[{\"role\":\"user\",\"content\":["
+                            .content("{\"model\":\"deepseek-vl\",\"messages\":[{\"role\":\"user\",\"content\":["
                                     + "{\"type\":\"text\",\"text\":\"describe\"},"
                                     + "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + imageUrl + "\"}}]}]}"))
                     .andExpect(status().isOk())
@@ -249,6 +251,71 @@ public class WanwuCallbackApiControllerTest {
         } finally {
             upstreamServer.stop(0);
             imageServer.stop(0);
+        }
+    }
+
+    @Test
+    public void chatCompletionsRejectsInactiveCallbackModelBeforeProxying() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"should-not-proxy\"}");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            ModelInfo model = configuredModel("model-123", "deepseek-chat",
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "local-key");
+            model.setIsActive(false);
+            when(modelService.getModel("", "", "model-123")).thenReturn(model);
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(1001))
+                    .andExpect(jsonPath("$.msg", containsString("inactive")));
+
+            assertTrue(upstreamBody.get() == null);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void chatCompletionsRejectsCallbackModelMismatchBeforeProxying() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"should-not-proxy\"}");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-123"))
+                    .thenReturn(configuredModel("model-123", "deepseek-chat",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "local-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"model\":\"other-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(1001))
+                    .andExpect(jsonPath("$.msg", containsString("model mismatch")));
+
+            assertTrue(upstreamBody.get() == null);
+        } finally {
+            server.stop(0);
         }
     }
 
@@ -317,6 +384,38 @@ public class WanwuCallbackApiControllerTest {
             assertEquals(1L, captor.getAllValues().get(0).getTotalTokens());
             assertEquals("model-rerank", captor.getAllValues().get(1).getModelId());
             assertEquals(4L, captor.getAllValues().get(1).getTotalTokens());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void embeddingsRejectsCallbackModelMismatchBeforeProxying() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        server.createContext("/v1/embeddings", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"should-not-proxy\"}");
+        });
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            when(modelService.getModel("", "", "model-emb"))
+                    .thenReturn(configuredModel("model-emb", "text-embedding-3-small",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "emb-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-emb/embeddings")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"model\":\"other-embedding\",\"input\":\"hello\"}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(1001))
+                    .andExpect(jsonPath("$.msg", containsString("model mismatch")));
+
+            assertTrue(upstreamBody.get() == null);
         } finally {
             server.stop(0);
         }
@@ -456,6 +555,7 @@ public class WanwuCallbackApiControllerTest {
         model.setModel(modelName);
         model.setProvider("openai-compatible");
         model.setModelType("llm");
+        model.setIsActive(true);
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("endpointUrl", endpointUrl);
         config.put("apiKey", apiKey);
