@@ -97,6 +97,42 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void specializedModelCallbacksReturnGoCompatibleBodies() throws Exception {
+        mockMvc.perform(post("/callback/v1/model/model-ocr/ocr")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"file:///demo.pdf\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.message").value("success"))
+                .andExpect(jsonPath("$.data[0].page_num[0]").value(1))
+                .andExpect(jsonPath("$.data[0].type").value("text"));
+
+        mockMvc.perform(post("/callback/v1/model/model-pdf/pdf-parser")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"file_name\":\"demo.pdf\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("0"))
+                .andExpect(jsonPath("$.status").value("success"))
+                .andExpect(jsonPath("$.content", containsString("model-pdf")));
+
+        mockMvc.perform(post("/callback/v1/model/model-gui/gui")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"task\":\"open settings\",\"platform\":\"WIN\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.content.operation").value("finish"))
+                .andExpect(jsonPath("$.usage.total_tokens").value(0));
+
+        mockMvc.perform(post("/callback/v1/model/model-asr/asr")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"model\":\"qwen3-asr-flash\",\"messages\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.choices[0].message.role").value("assistant"))
+                .andExpect(jsonPath("$.choices[0].message.content[0].text", containsString("model-asr")));
+    }
+
+    @Test
     public void workflowMcpRagSkillAndSandboxCallbacksReturnFrontendSafeResponses() throws Exception {
         mockMvc.perform(get("/callback/v1/workflow/list"))
                 .andExpect(status().isOk())

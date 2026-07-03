@@ -128,17 +128,82 @@ public class WanwuCallbackApiController {
         return data;
     }
 
-    @PostMapping({"/callback/v1/model/{modelId}/ocr",
-            "/callback/v1/model/{modelId}/gui",
-            "/callback/v1/model/{modelId}/pdf-parser",
-            "/callback/v1/model/{modelId}/asr"})
-    public FrontendResponse<Map<String, Object>> modelTask(
+    @PostMapping("/callback/v1/model/{modelId}/ocr")
+    public Map<String, Object> modelOcr(
             @PathVariable("modelId") String modelId,
             @RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> data = echo("model_task_completed", request);
-        data.put("modelId", modelId);
-        data.put("text", "");
-        return FrontendResponse.ok(data);
+        Map<String, Object> item = new LinkedHashMap<>();
+        String text = defaultIfBlank(firstText(request, "text", "url", "data"), "Development OCR result for " + modelId);
+        item.put("page_num", Collections.singletonList(1));
+        item.put("type", "text");
+        item.put("text", text);
+        item.put("length", text.length());
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("code", 0);
+        data.put("message", "success");
+        data.put("version", "dev");
+        data.put("timestamp", Instant.EPOCH.toString());
+        data.put("id", "callback-" + compactId());
+        data.put("sha1", "");
+        data.put("time_cost", 0);
+        data.put("filename", defaultIfBlank(firstText(request, "file_name", "fileName"), "development-ocr.txt"));
+        data.put("data", Collections.singletonList(item));
+        return data;
+    }
+
+    @PostMapping("/callback/v1/model/{modelId}/pdf-parser")
+    public Map<String, Object> modelPdfParser(@PathVariable("modelId") String modelId) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("code", "0");
+        data.put("content", "Development PDF parser result for " + modelId);
+        data.put("message", "success");
+        data.put("status", "success");
+        data.put("trace_id", "callback-" + compactId());
+        data.put("prefix_image_url", "");
+        data.put("version", "dev");
+        return data;
+    }
+
+    @PostMapping("/callback/v1/model/{modelId}/gui")
+    public Map<String, Object> modelGui(
+            @PathVariable("modelId") String modelId,
+            @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("description", defaultIfBlank(firstText(request, "task"), "Development GUI result for " + modelId));
+        content.put("operation", "finish");
+        content.put("action", "finish");
+        content.put("box", Collections.emptyList());
+        content.put("value", "");
+        content.put("sensitivity", "normal");
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("code", 0);
+        data.put("message", "success");
+        data.put("content", content);
+        data.put("usage", usage());
+        return data;
+    }
+
+    @PostMapping("/callback/v1/model/{modelId}/asr")
+    public Map<String, Object> modelAsr(@PathVariable("modelId") String modelId) {
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("text", "Development transcription for " + modelId);
+        content.put("segmented_content", Collections.emptyList());
+
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "assistant");
+        message.put("content", Collections.singletonList(content));
+
+        Map<String, Object> choice = new LinkedHashMap<>();
+        choice.put("finish_reason", "stop");
+        choice.put("message", message);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("code", 0);
+        data.put("choices", Collections.singletonList(choice));
+        data.put("seconds", 0);
+        return data;
     }
 
     @GetMapping({"/callback/v1/workflow/list", "/callback/v1/chatflow/list"})
