@@ -32,6 +32,12 @@ Date: 2026-06-30
   - `PUT /user/api/v1/oauth/app/status`
   - `DELETE /user/api/v1/oauth/app`
 - `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape.
+- `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
+  - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
+  - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.
+  - `/oauth/code/token` validates `clientSecret` and exchanges the code for access/id/refresh tokens.
+  - `/oauth/code/token/refresh` rotates refresh/access tokens.
+  - `/oauth/userinfo` resolves a Bearer access token to the development user profile.
 - `wanwu-api` extends `IamService` with OAuth app management operations.
 - `wanwu-service-iam` stores OAuth apps in Docker development in-memory state with generated `clientId` and `clientSecret`.
 - The admin development account now exposes `operation`, `operation.oauth`, and `operation.statistic_client` so the zero-change frontend can display Operation Management.
@@ -59,6 +65,7 @@ Frontend-entry smoke target:
 
 - `http://localhost:3000/user/api/v1/base/login` returns operation permissions for `admin`.
 - OAuth app create/list/update/status/delete works through `/oauth/app*`.
+- OAuth authorize/code/token/refresh/userinfo works through `/service/api/openapi/v1/oauth/*` using the managed app credentials.
 - `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`.
 
 ## Current Boundary
@@ -68,7 +75,7 @@ This slice is a frontend-compatible Operation Management loop. It prevents the z
 It does not yet implement:
 
 - MySQL persistence for OAuth apps.
-- OAuth authorize/code/token/refresh/JWKS/userinfo runtime endpoints under `/openapi`.
+- RSA/JWT signing and a real JWKS key set for OAuth tokens.
 - Real client installation statistics in OperateService.
 - Redis-backed global browse statistics.
 - Full App Observability dashboard routes under `v1/statistic.go`.

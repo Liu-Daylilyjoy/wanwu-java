@@ -25,12 +25,14 @@ import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
+import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -44,6 +46,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.net.URLEncoder;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,6 +56,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/service/api/openapi/v1")
@@ -77,7 +83,13 @@ public class WanwuOpenApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private KnowledgeService knowledgeService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private IamService iamService;
+
     private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
+    private final Map<String, OAuthCode> oauthCodes = new ConcurrentHashMap<>();
+    private final Map<String, OAuthToken> oauthAccessTokens = new ConcurrentHashMap<>();
+    private final Map<String, OAuthToken> oauthRefreshTokens = new ConcurrentHashMap<>();
 
     public WanwuOpenApiController() {
     }
@@ -92,9 +104,15 @@ public class WanwuOpenApiController {
 
     public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
                                   OpenApiChatflowSessionStore chatflowSessionStore) {
+        this(appService, modelService, knowledgeService, null, chatflowSessionStore);
+    }
+
+    public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
+                                  IamService iamService, OpenApiChatflowSessionStore chatflowSessionStore) {
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
+        this.iamService = iamService;
         this.chatflowSessionStore = chatflowSessionStore == null ? new OpenApiChatflowSessionStore() : chatflowSessionStore;
     }
 
@@ -683,26 +701,119 @@ public class WanwuOpenApiController {
     }
 
     @GetMapping("/oauth/login")
-    public ResponseEntity<String> oauthLogin() {
-        return ResponseEntity.ok("ok");
+    public ResponseEntity<?> oauthLogin(
+            @RequestParam(value = "client_id", required = false) String clientId,
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri,
+            @RequestParam(value = "response_type", required = false, defaultValue = "code") String responseType,
+            @RequestParam(value = "scope", required = false) String scope,
+            @RequestParam(value = "state", required = false) String state) {
+        try {
+            Map<String, Object> app = validateOauthApp(clientId, null, redirectUri);
+            if (!"code".equals(defaultIfBlank(responseType, "code"))) {
+                return oauthError("unsupported response_type");
+            }
+            String loginUri = appendQuery("/aibase/login",
+                    "client_id", text(app, "clientId"),
+                    "response_type", "code",
+                    "scope", defaultIfBlank(scope, ""),
+                    "client_name", text(app, "name"),
+                    "redirect_uri", text(app, "redirectUri"),
+                    "state", defaultIfBlank(state, ""));
+            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(loginUri)).build();
+        } catch (IllegalArgumentException ex) {
+            return oauthError(ex.getMessage());
+        }
     }
 
     @GetMapping("/oauth/code/authorize")
-    public FrontendResponse<Map<String, Object>> oauthAuthorize(
-            @RequestParam(value = "client_id", required = false) String clientId) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("code", "dev-oauth-code");
-        data.put("client_id", defaultIfBlank(clientId, "wanwu-java"));
-        return FrontendResponse.ok(data);
+    public ResponseEntity<?> oauthAuthorize(
+            @RequestParam(value = "client_id", required = false) String clientId,
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri,
+            @RequestParam(value = "response_type", required = false, defaultValue = "code") String responseType,
+            @RequestParam(value = "scope", required = false) String scope,
+            @RequestParam(value = "state", required = false) String state,
+            @RequestParam(value = "jwt_token", required = false) String jwtToken) {
+        try {
+            if (!"code".equals(defaultIfBlank(responseType, "code"))) {
+                return oauthError("unsupported response_type");
+            }
+            String userId = oauthUserId(jwtToken);
+            Map<String, Object> app = validateOauthApp(clientId, null, redirectUri);
+            String code = "wanwu-oauth-code-" + compactId();
+            oauthCodes.put(code, new OAuthCode(text(app, "clientId"), userId, stringList(scope), Instant.now().plusSeconds(600).toEpochMilli()));
+            String callback = appendQuery(text(app, "redirectUri"), "code", code, "state", defaultIfBlank(state, ""));
+            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(callback)).build();
+        } catch (IllegalArgumentException ex) {
+            return oauthError(ex.getMessage());
+        }
     }
 
-    @PostMapping({"/oauth/code/token", "/oauth/code/token/refresh"})
-    public Map<String, Object> oauthToken() {
+    @PostMapping("/oauth/code/token")
+    public ResponseEntity<Map<String, Object>> oauthToken(
+            @RequestParam(value = "grant_type", required = false) String grantType,
+            @RequestParam(value = "code", required = false) String code,
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri,
+            @RequestParam(value = "client_id", required = false) String clientId,
+            @RequestParam(value = "client_secret", required = false) String clientSecret) {
+        try {
+            if (!"authorization_code".equals(grantType)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("unsupported grant_type"));
+            }
+            if (isBlank(clientSecret)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("client_secret is required"));
+            }
+            Map<String, Object> app = validateOauthApp(clientId, clientSecret, redirectUri);
+            OAuthCode payload = oauthCodes.remove(defaultIfBlank(code, ""));
+            if (payload == null || !payload.clientId.equals(text(app, "clientId")) || payload.expiresAt < Instant.now().toEpochMilli()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid authorization code"));
+            }
+            return ResponseEntity.ok(oauthTokenResponse(payload.userId, payload.clientId, payload.scopes));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/oauth/code/token/refresh")
+    public ResponseEntity<Map<String, Object>> oauthRefresh(@RequestBody(required = false) Map<String, Object> request) {
+        try {
+            Map<String, Object> body = body(request);
+            if (!"refresh_token".equals(text(body, "grant_type"))) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("unsupported grant_type"));
+            }
+            if (isBlank(text(body, "client_secret"))) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("client_secret is required"));
+            }
+            Map<String, Object> app = validateOauthApp(text(body, "client_id"), text(body, "client_secret"), "");
+            OAuthToken oldRefresh = oauthRefreshTokens.remove(text(body, "refresh_token"));
+            if (oldRefresh == null || !oldRefresh.clientId.equals(text(app, "clientId"))
+                    || oldRefresh.expiresAt < Instant.now().toEpochMilli()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid refresh token"));
+            }
+            Map<String, Object> data = oauthTokenResponse(oldRefresh.userId, oldRefresh.clientId, oldRefresh.scopes);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("access_token", data.get("access_token"));
+            response.put("refresh_token", data.get("refresh_token"));
+            response.put("expires_at", String.valueOf(Instant.now().plusSeconds(3600).toEpochMilli()));
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(ex.getMessage()));
+        }
+    }
+
+    private Map<String, Object> oauthTokenResponse(String userId, String clientId, List<String> scopes) {
+        String accessToken = "wanwu-oauth-access-" + compactId();
+        String refreshToken = "wanwu-oauth-refresh-" + compactId();
+        OAuthToken access = new OAuthToken(userId, clientId, scopes, Instant.now().plusSeconds(3600).toEpochMilli());
+        OAuthToken refresh = new OAuthToken(userId, clientId, scopes, Instant.now().plusSeconds(86400).toEpochMilli());
+        oauthAccessTokens.put(accessToken, access);
+        oauthRefreshTokens.put(refreshToken, refresh);
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("access_token", "dev-oauth-access-token");
-        data.put("refresh_token", "dev-oauth-refresh-token");
-        data.put("token_type", "Bearer");
+        data.put("access_token", accessToken);
         data.put("expires_in", 3600);
+        data.put("id_token", "wanwu-oauth-id-" + compactId());
+        data.put("token_type", "Bearer");
+        data.put("refresh_token", refreshToken);
+        data.put("scope", scopes);
         return data;
     }
 
@@ -714,16 +825,30 @@ public class WanwuOpenApiController {
         data.put("authorization_endpoint", "/service/api/openapi/v1/oauth/code/authorize");
         data.put("token_endpoint", "/service/api/openapi/v1/oauth/code/token");
         data.put("userinfo_endpoint", "/service/api/openapi/v1/oauth/userinfo");
+        data.put("response_types_supported", Collections.singletonList("code"));
+        data.put("id_token_signing_alg_values_supported", Collections.singletonList("none"));
+        data.put("subject_types_supported", Collections.singletonList("public"));
         return data;
     }
 
     @GetMapping("/oauth/userinfo")
-    public Map<String, Object> oauthUserInfo() {
+    public ResponseEntity<Map<String, Object>> oauthUserInfo(@RequestHeader HttpHeaders headers) {
+        String token = apiToken(headers);
+        OAuthToken payload = oauthAccessTokens.get(defaultIfBlank(token, ""));
+        if (payload == null || payload.expiresAt < Instant.now().toEpochMilli()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("invalid access token"));
+        }
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("sub", DEV_ADMIN_ID);
-        data.put("name", "admin");
-        data.put("org_id", DEV_ORG_ID);
-        return data;
+        data.put("userId", payload.userId);
+        data.put("username", DEV_APP_ID.equals(payload.userId) ? "app" : "admin");
+        data.put("nickname", DEV_APP_ID.equals(payload.userId) ? "App User" : "Administrator");
+        data.put("phone", "");
+        data.put("email", DEV_APP_ID.equals(payload.userId) ? "app@example.com" : "admin@example.com");
+        data.put("gender", "");
+        data.put("remark", "");
+        data.put("company", "Wanwu Java");
+        data.put("avatar", "/user/api/v1/static/icon/user-default-icon.png");
+        return ResponseEntity.ok(data);
     }
 
     private OpenApiContext context(HttpHeaders headers) {
@@ -996,6 +1121,16 @@ public class WanwuOpenApiController {
     }
 
     private List<String> stringList(Object value) {
+        if (value instanceof String) {
+            List<String> result = new ArrayList<>();
+            String[] parts = ((String) value).split("[,\\s]+");
+            for (String part : parts) {
+                if (!isBlank(part)) {
+                    result.add(part);
+                }
+            }
+            return result;
+        }
         if (!(value instanceof List)) {
             return Collections.emptyList();
         }
@@ -1074,6 +1209,119 @@ public class WanwuOpenApiController {
 
     private String defaultIfBlank(String value, String fallback) {
         return isBlank(value) ? fallback : value;
+    }
+
+    private ResponseEntity<Map<String, Object>> oauthError(String message) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(message));
+    }
+
+    private Map<String, Object> validateOauthApp(String clientId, String clientSecret, String redirectUri) {
+        if (isBlank(clientId)) {
+            throw new IllegalArgumentException("client_id is required");
+        }
+        Map<String, Object> app = oauthApp(clientId);
+        if (!booleanValue(app.get("status"), true)) {
+            throw new IllegalArgumentException("oauth app disabled");
+        }
+        if (!clientId.equals(text(app, "clientId"))) {
+            throw new IllegalArgumentException("invalid client_id");
+        }
+        if (!isBlank(clientSecret) && !clientSecret.equals(text(app, "clientSecret"))) {
+            throw new IllegalArgumentException("invalid client_secret");
+        }
+        if (!isBlank(redirectUri) && !redirectUri.equals(text(app, "redirectUri"))) {
+            throw new IllegalArgumentException("invalid redirect_uri");
+        }
+        return app;
+    }
+
+    private Map<String, Object> oauthApp(String clientId) {
+        if (iamService != null) {
+            Map<String, Object> page = iamService.listOauthApps("", "", 1, 1000);
+            for (Map<String, Object> item : mapList(page == null ? null : page.get("list"))) {
+                if (clientId.equals(text(item, "clientId"))) {
+                    return item;
+                }
+            }
+        }
+        if ("wanwu-java".equals(clientId)) {
+            return devOauthApp();
+        }
+        throw new IllegalArgumentException("oauth app not found");
+    }
+
+    private Map<String, Object> devOauthApp() {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("clientId", "wanwu-java");
+        app.put("name", "Wanwu Java");
+        app.put("desc", "Development OAuth App");
+        app.put("clientSecret", "wanwu-java-secret");
+        app.put("redirectUri", "http://localhost/oauth/callback");
+        app.put("status", true);
+        return app;
+    }
+
+    private String oauthUserId(String jwtToken) {
+        String token = defaultIfBlank(jwtToken, "");
+        if (token.startsWith("Bearer ")) {
+            token = token.substring("Bearer ".length()).trim();
+        }
+        if (DEV_APP_TOKEN.equals(token)) {
+            return DEV_APP_ID;
+        }
+        if (DEV_ADMIN_TOKEN.equals(token)) {
+            return DEV_ADMIN_ID;
+        }
+        throw new IllegalArgumentException("invalid jwt_token");
+    }
+
+    private String appendQuery(String base, String... pairs) {
+        StringBuilder builder = new StringBuilder(defaultIfBlank(base, "/"));
+        char separator = builder.indexOf("?") >= 0 ? '&' : '?';
+        for (int i = 0; pairs != null && i + 1 < pairs.length; i += 2) {
+            builder.append(separator)
+                    .append(encode(pairs[i]))
+                    .append('=')
+                    .append(encode(defaultIfBlank(pairs[i + 1], "")));
+            separator = '&';
+        }
+        return builder.toString();
+    }
+
+    private String encode(String value) {
+        try {
+            return URLEncoder.encode(defaultIfBlank(value, ""), "UTF-8").replace("+", "%20");
+        } catch (UnsupportedEncodingException ex) {
+            throw new IllegalStateException("UTF-8 is unavailable", ex);
+        }
+    }
+
+    private static class OAuthCode {
+        private final String clientId;
+        private final String userId;
+        private final List<String> scopes;
+        private final long expiresAt;
+
+        private OAuthCode(String clientId, String userId, List<String> scopes, long expiresAt) {
+            this.clientId = clientId;
+            this.userId = userId;
+            this.scopes = scopes == null ? Collections.<String>emptyList() : new ArrayList<>(scopes);
+            this.expiresAt = expiresAt;
+        }
+    }
+
+    private static class OAuthToken {
+        private final String userId;
+        private final String clientId;
+        private final List<String> scopes;
+        private final long expiresAt;
+
+        private OAuthToken(String userId, String clientId, List<String> scopes, long expiresAt) {
+            this.userId = userId;
+            this.clientId = clientId;
+            this.scopes = scopes == null ? Collections.<String>emptyList() : new ArrayList<>(scopes);
+            this.expiresAt = expiresAt;
+        }
     }
 
     private static class OpenApiContext {

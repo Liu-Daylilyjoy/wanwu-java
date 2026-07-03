@@ -25,15 +25,15 @@ Covered routes in this Java slice:
 
 ## Java Design
 
-`WanwuStatisticApiController` is a BFF compatibility controller. It keeps the frontend contract stable while real Operate/App statistics aggregation is still being reproduced.
+`WanwuStatisticApiController` is a BFF compatibility controller. It keeps the frontend contract stable while reproducing the Go statistic dashboard in Java.
 
 - App select/list data is sourced from `AppService.listApplications`.
 - Model list data is sourced from `ModelService.listModels`.
 - API Key select/list data is sourced from `AppService.listApiKeys`.
-- API Key overview, trend, aggregate list, and detailed records now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`.
+- API Key overview, trend, aggregate list, detailed records, and exports now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`.
+- App/model overview, trend, aggregate lists, and exports now prefer AppService/MySQL runtime statistics written by frontend, OpenAPI, and OpenURL runtime paths.
 - `OpenApiUsageMeter` remains as a BFF-local fallback if the AppService statistic path is temporarily unavailable.
-- App/model overview and trend metrics remain zero-valued development data with the same field names the Vue dashboard reads.
-- Export routes return CSV bytes so export buttons no longer hit 404. They are intentionally not a full Excel reproduction yet.
+- Export routes return single-sheet xlsx workbooks compatible with the Go excelize export contract.
 
 The admin development account now exposes:
 
@@ -56,10 +56,10 @@ The controller is also included in the Docker Compose BFF smoke path for:
 - `/statistic/app`, `/statistic/model`, and `/statistic/api` return overview/trend contracts.
 - App/model/API lists return frontend-compatible `list/total/pageNo/pageSize`.
 - OpenAPI API Key statistics record runtime calls through `OpenApiUsageRecordFilter`; see `docs/openapi-api-key-statistics-reproduction.md`.
+- App/model statistics record frontend, OpenAPI, and OpenURL runtime calls through AppService/MySQL; see `docs/app-model-statistics-reproduction.md`.
 
 ## Remaining Work
 
-- Persist and aggregate real model/app usage records in AppService-compatible storage.
-- Reproduce the Go cron/statistics synchronization path.
-- Replace CSV compatibility exports with true Excel exports.
+- Reproduce the Go Redis daily hash plus cron/statistics synchronization path.
+- Replace deterministic local token/cost estimates with exact provider-reported runtime metrics.
 - Replace the direct MySQL API Key aggregate write with the Go-equivalent Redis daily aggregation plus synchronization job when Redis parity is introduced.

@@ -16,6 +16,7 @@ import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
+import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -34,6 +36,8 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -44,6 +48,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -52,9 +57,10 @@ public class WanwuOpenApiControllerTest {
     private final AppService appService = mock(AppService.class);
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
+    private final IamService iamService = mock(IamService.class);
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new WanwuOpenApiController(
-                    appService, modelService, knowledgeService, new OpenApiChatflowSessionStore()))
+                    appService, modelService, knowledgeService, iamService, new OpenApiChatflowSessionStore()))
             .build();
 
     @Test
@@ -349,11 +355,92 @@ public class WanwuOpenApiControllerTest {
         verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), any());
     }
 
+    @Test
+    public void oauthAuthorizationCodeFlowUsesManagedOauthApp() throws Exception {
+        when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(oauthPage());
+
+        MvcResult authorized = mockMvc.perform(get("/service/api/openapi/v1/oauth/code/authorize")
+                        .param("client_id", "oauth-client-1")
+                        .param("redirect_uri", "http://localhost/callback")
+                        .param("response_type", "code")
+                        .param("scope", "openid profile")
+                        .param("state", "state-1")
+                        .param("jwt_token", "dev-token"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("http://localhost/callback?code=")))
+                .andExpect(header().string("Location", containsString("state=state-1")))
+                .andReturn();
+
+        String location = authorized.getResponse().getHeader("Location");
+        String code = location.substring(location.indexOf("code=") + "code=".length(), location.indexOf("&state="));
+        MvcResult token = mockMvc.perform(post("/service/api/openapi/v1/oauth/code/token")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "authorization_code")
+                        .param("code", code)
+                        .param("redirect_uri", "http://localhost/callback")
+                        .param("client_id", "oauth-client-1")
+                        .param("client_secret", "oauth-secret-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.access_token").value(containsString("wanwu-oauth-access-")))
+                .andExpect(jsonPath("$.refresh_token").value(containsString("wanwu-oauth-refresh-")))
+                .andExpect(jsonPath("$.id_token").value(containsString("wanwu-oauth-id-")))
+                .andExpect(jsonPath("$.token_type").value("Bearer"))
+                .andExpect(jsonPath("$.scope[0]").value("openid"))
+                .andReturn();
+
+        String accessToken = JsonPath.read(token.getResponse().getContentAsString(), "$.access_token");
+        String refreshToken = JsonPath.read(token.getResponse().getContentAsString(), "$.refresh_token");
+        mockMvc.perform(get("/service/api/openapi/v1/oauth/userinfo")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("dev-admin"))
+                .andExpect(jsonPath("$.username").value("admin"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/oauth/code/token/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"grant_type\":\"refresh_token\",\"client_id\":\"oauth-client-1\","
+                                + "\"client_secret\":\"oauth-secret-1\",\"refresh_token\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.access_token").value(containsString("wanwu-oauth-access-")))
+                .andExpect(jsonPath("$.expires_at").exists());
+
+        mockMvc.perform(post("/service/api/openapi/v1/oauth/code/token")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "authorization_code")
+                        .param("code", code)
+                        .param("redirect_uri", "http://localhost/callback")
+                        .param("client_id", "oauth-client-1")
+                        .param("client_secret", "oauth-secret-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("invalid authorization code"));
+    }
+
     private Map<String, Object> appRow() {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("uuid", "assistant-openapi-001");
         row.put("name", "OpenAPI Agent");
         row.put("desc", "from api");
         return row;
+    }
+
+    private Map<String, Object> oauthPage() {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(oauthApp()));
+        page.put("total", 1);
+        page.put("pageNo", 1);
+        page.put("pageSize", 1000);
+        return page;
+    }
+
+    private Map<String, Object> oauthApp() {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("clientId", "oauth-client-1");
+        app.put("name", "Console");
+        app.put("desc", "dev oauth");
+        app.put("clientSecret", "oauth-secret-1");
+        app.put("redirectUri", "http://localhost/callback");
+        app.put("status", true);
+        return app;
     }
 }
