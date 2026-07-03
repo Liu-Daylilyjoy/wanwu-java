@@ -2,9 +2,12 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -21,7 +24,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -113,6 +118,45 @@ public class WanwuCallbackApiControllerTest {
             assertEquals("Bearer local-key", authorization.get());
             assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
             assertTrue(upstreamBody.get().contains("\"content\":\"hi\""));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void chatCompletionsRecordsModelUsageForNonStreamProxy() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> respondJson(exchange,
+                "{\"id\":\"upstream-chat-usage\",\"object\":\"chat.completion\","
+                        + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"usage answer\"},\"finish_reason\":\"stop\"}],"
+                        + "\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"total_tokens\":20}}"));
+        server.start();
+        try {
+            ModelService modelService = mock(ModelService.class);
+            AppService appService = mock(AppService.class);
+            when(modelService.getModel("", "", "model-123"))
+                    .thenReturn(configuredModel("model-123", "deepseek-chat",
+                            "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "local-key"));
+
+            MockMvc callbackMvc = MockMvcBuilders
+                    .standaloneSetup(new WanwuCallbackApiController(modelService, appService))
+                    .build();
+
+            callbackMvc.perform(post("/callback/v1/model/model-123/chat/completions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.choices[0].message.content").value("usage answer"));
+
+            ArgumentCaptor<RecordModelStatisticCommand> captor = forClass(RecordModelStatisticCommand.class);
+            verify(appService).recordModelStatistic(captor.capture());
+            assertEquals("model-123", captor.getValue().getModelId());
+            assertEquals("deepseek-chat", captor.getValue().getModel());
+            assertEquals(12L, captor.getValue().getPromptTokens());
+            assertEquals(8L, captor.getValue().getCompletionTokens());
+            assertEquals(20L, captor.getValue().getTotalTokens());
+            assertTrue(!captor.getValue().isStream());
         } finally {
             server.stop(0);
         }

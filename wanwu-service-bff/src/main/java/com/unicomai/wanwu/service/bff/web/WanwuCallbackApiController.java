@@ -1,6 +1,8 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -44,11 +46,19 @@ public class WanwuCallbackApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private AppService appService;
+
     public WanwuCallbackApiController() {
     }
 
     public WanwuCallbackApiController(ModelService modelService) {
+        this(modelService, null);
+    }
+
+    public WanwuCallbackApiController(ModelService modelService, AppService appService) {
         this.modelService = modelService;
+        this.appService = appService;
     }
 
     @PostMapping("/callback/v1/file/url/base64")
@@ -114,6 +124,7 @@ public class WanwuCallbackApiController {
         }
         Map<String, Object> proxied = proxyModelJson(modelId, request, "/chat/completions");
         if (proxied != null) {
+            recordCallbackModelStatistic(modelId, proxied, false);
             return proxied;
         }
         Map<String, Object> message = new LinkedHashMap<>();
@@ -592,6 +603,41 @@ public class WanwuCallbackApiController {
         return data;
     }
 
+    @SuppressWarnings("unchecked")
+    private void recordCallbackModelStatistic(String modelId, Map<String, Object> response, boolean stream) {
+        if (appService == null || isBlank(modelId)) {
+            return;
+        }
+        try {
+            ModelInfo model = modelService == null ? null : modelService.getModel("", "", modelId);
+            Map<?, ?> usage = response == null || !(response.get("usage") instanceof Map)
+                    ? Collections.emptyMap() : (Map<?, ?>) response.get("usage");
+            long promptTokens = longValue(usage, "prompt_tokens");
+            long completionTokens = longValue(usage, "completion_tokens");
+            long totalTokens = longValue(usage, "total_tokens");
+            if (totalTokens <= 0L) {
+                totalTokens = promptTokens + completionTokens;
+            }
+
+            RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+            command.setUserId("");
+            command.setOrgId("");
+            command.setModelId(modelId);
+            command.setModel(model == null ? modelId : defaultIfBlank(model.getModel(), modelId));
+            command.setProvider(model == null ? "" : defaultIfBlank(model.getProvider(), ""));
+            command.setModelType(model == null ? "llm" : defaultIfBlank(model.getModelType(), "llm"));
+            command.setPromptTokens(promptTokens);
+            command.setCompletionTokens(completionTokens);
+            command.setTotalTokens(totalTokens);
+            command.setSuccess(true);
+            command.setStream(stream);
+            command.setCosts(0L);
+            command.setFirstTokenLatency(0L);
+            appService.recordModelStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private Map<String, Object> redactedCallbackConfig(ModelInfo model) {
         Map<String, Object> config = new LinkedHashMap<>();
         if (model.getConfig() != null) {
@@ -674,6 +720,21 @@ public class WanwuCallbackApiController {
         }
         Object value = map.get(key);
         return Boolean.TRUE.equals(value) || "true".equalsIgnoreCase(String.valueOf(value));
+    }
+
+    private long longValue(Map<?, ?> map, String key) {
+        if (map == null || key == null) {
+            return 0L;
+        }
+        Object value = map.get(key);
+        if (value instanceof Number) {
+            return Math.max(0L, ((Number) value).longValue());
+        }
+        try {
+            return Math.max(0L, Long.parseLong(String.valueOf(value)));
+        } catch (RuntimeException ignored) {
+            return 0L;
+        }
     }
 
     private String compactId() {
