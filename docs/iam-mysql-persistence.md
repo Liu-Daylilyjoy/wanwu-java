@@ -1,6 +1,6 @@
 # IAM MySQL Persistence Slice
 
-Date: 2026-06-30
+Date: 2026-07-03
 
 ## Original Go Integration
 
@@ -23,13 +23,13 @@ This slice wires Java IAM into the existing Docker MySQL service:
 - `bff` now waits for healthy `iam`, reducing startup races during login and permission calls.
 - `wanwu-service-iam` depends on `wanwu-common-data` for MyBatis-Plus, Flyway, and MySQL driver support.
 - `wanwu-service-iam/src/main/resources/db/migration/V1__create_iam_records.sql` creates `iam_records`.
-- `IamServiceImpl` loads persisted records on startup and saves user, role, org, OAuth app, and platform custom-setting mutations.
+- `IamServiceImpl` loads persisted records on startup and saves user, role, org, and OAuth app mutations. Platform custom settings have moved to `wanwu-service-operate`; IAM keeps only legacy fallback methods for older tests and compatibility.
 
 ## Persistence Shape
 
 The current table is intentionally a compatibility snapshot table:
 
-- `record_type`: user, role, org, oauth, custom_tab, custom_login, custom_home
+- `record_type`: user, role, org, oauth
 - `record_id`: stable business id such as `user-1`, `role-1`, `org-1`, or `oauth-client-1`
 - `payload`: JSON response-shaped record
 - `created_at` and `updated_at`: millisecond timestamps

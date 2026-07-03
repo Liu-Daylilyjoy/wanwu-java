@@ -27,6 +27,8 @@ services:
         condition: service_healthy
       app:
         condition: service_healthy
+      operate:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null"]
       interval: 10s
@@ -179,6 +181,36 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8086/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  operate:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_MODULE: wanwu-service-operate
+    image: wanwu-java/operate:0.1.0-SNAPSHOT
+    container_name: wanwu-java-operate
+    environment:
+      DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      SPRING_DATASOURCE_URL: ${WANWU_OPERATE_DATASOURCE_URL:-jdbc:mysql://mysql:3306/operate_service?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=Asia/Shanghai}
+      SPRING_DATASOURCE_USERNAME: ${WANWU_OPERATE_DATASOURCE_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${WANWU_OPERATE_DATASOURCE_PASSWORD:-}
+      JAVA_OPTS: ${WANWU_OPERATE_JAVA_OPTS:-}
+    ports:
+      - "8088:8088"
+      - "20888:20888"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/actuator/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -1,6 +1,6 @@
 # Operation Management Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-03
 
 ## Original Go Mapping
 
@@ -22,6 +22,9 @@ Date: 2026-06-30
   - `internal\bff-service\service\statistic_client.go`
   - `internal\bff-service\model\response\statistic.go`
 - Go `v1/statistic_client.go` router registration is currently commented out, but the frontend still calls `/statistic/client`.
+- Go Operate custom system configuration boundary is covered separately by the setting page:
+  - `proto\operate-service\operate-service.proto`
+  - `internal\operate-service\server\grpc\operate\system_custom.go`
 
 ## Covered Java Behavior
 
@@ -32,6 +35,7 @@ Date: 2026-06-30
   - `PUT /user/api/v1/oauth/app/status`
   - `DELETE /user/api/v1/oauth/app`
 - `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape. The Java development slice now derives cumulative/new client counts from IAM OAuth apps and derives active-client/browse counts from local OAuth runtime visits.
+- `wanwu-service-operate` is now a real Docker service in the `full` profile and provides the OperateService custom system configuration RPCs used by the platform setting page. Client statistics are still served by the BFF/IAM compatibility path in this slice.
 - `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
   - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
   - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.

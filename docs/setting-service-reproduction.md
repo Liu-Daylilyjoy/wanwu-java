@@ -1,6 +1,6 @@
 # Setting Service Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-03
 
 ## Original Go Mapping
 
@@ -22,8 +22,14 @@ Date: 2026-06-30
   - `POST /user/api/v1/custom/tab`
   - `POST /user/api/v1/custom/login`
   - `POST /user/api/v1/custom/home`
-- `wanwu-api` extends `IamService` with development custom setting mutations.
-- `wanwu-service-iam` stores custom tab, login, and home config in the Docker development in-memory state and merges it into `platformConfig()`, which backs `/user/api/v1/base/custom` and login custom data.
+- `wanwu-api` exposes the Go-equivalent `OperateService` custom system configuration methods:
+  - `createSystemCustomTab`
+  - `createSystemCustomLogin`
+  - `createSystemCustomHome`
+  - `getSystemCustom`
+- `wanwu-service-operate` stores custom tab, login, and home config in `operate_service.operate_records` through Flyway/MyBatis and merges non-empty fields by mode, matching the Go `mergeCustomFields` behavior.
+- `wanwu-service-bff` writes setting updates to `OperateService` and reads `/user/api/v1/base/custom` from `OperateService`, with the zero-change frontend response shape preserved.
+- `docker-compose.yml` includes `wanwu-service-operate` in the `full` profile and makes BFF wait for it before becoming healthy.
 - The admin development account now exposes the `setting` permission so the zero-change frontend can display the platform setting tab inside `web/src/views/permission/index.vue`.
 
 ## Field Mapping
@@ -44,9 +50,9 @@ Date: 2026-06-30
 
 Executed in Docker with Java 8:
 
-- `mvn -q -pl wanwu-service-bff,wanwu-service-iam -am "-Dtest=WanwuFrontendApiControllerTest,IamServiceImplTest" -DfailIfNoTests=false test`
-- BFF contract test: `WanwuFrontendApiControllerTest` covers all three setting write routes and the admin login permission shape.
-- IAM service test: `IamServiceImplTest` covers setting permission exposure and custom config write/readback.
+- `mvn -q -pl wanwu-service-bff,wanwu-service-operate -am "-Dtest=WanwuFrontendApiControllerTest,OperateServiceImplTest" -DfailIfNoTests=false test`
+- BFF contract test: `WanwuFrontendApiControllerTest` covers all three setting write routes, `/base/custom`, and the admin login permission shape.
+- Operate service test: `OperateServiceImplTest` covers setting config write/readback, mode isolation, and non-empty field merge behavior.
 
 Frontend-entry smoke target:
 
@@ -60,7 +66,5 @@ This slice is a frontend-compatible platform setting loop. It prevents the zero-
 
 It does not yet implement:
 
-- The independent Java `OperateService` RPC contract.
-- MySQL persistence for system custom config.
 - Uploaded asset storage or URL/path resolution beyond preserving the avatar maps sent by the frontend.
-- Mode-specific custom config beyond the single Docker development default mode.
+- Full Go light/dark theme seed config from YAML; Java accepts mode-specific records but only seeds the default development shell.

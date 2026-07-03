@@ -84,6 +84,7 @@ import com.unicomai.wanwu.api.model.dto.ProviderModelTypeInfo;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelInfo;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
+import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -135,14 +136,16 @@ public class WanwuFrontendApiControllerTest {
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final McpService mcpService = mock(McpService.class);
+    private final OperateService operateService = mock(OperateService.class);
     private final SafetyService safetyService = mock(SafetyService.class);
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(
-                    new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService),
+                    new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService,
+                            operateService),
                     new WanwuResourceApiController(mcpService),
                     new WanwuSkillApiController(mcpService),
                     new WanwuSafetyApiController(safetyService),
-                    new WanwuSettingApiController(iamService),
+                    new WanwuSettingApiController(operateService),
                     new WanwuOperationApiController(iamService),
                     new WanwuExplorationApiController(appService),
                     new WanwuStatisticApiController(appService, modelService),
@@ -261,9 +264,21 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
-        verify(iamService).updateCustomTab(any(Map.class));
-        verify(iamService).updateCustomLogin(any(Map.class));
-        verify(iamService).updateCustomHome(any(Map.class));
+        verify(operateService).createSystemCustomTab(anyString(), anyString(), anyString(), any(Map.class));
+        verify(operateService).createSystemCustomLogin(anyString(), anyString(), anyString(), any(Map.class));
+        verify(operateService).createSystemCustomHome(anyString(), anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    public void baseCustomReadsOperatePlatformConfig() throws Exception {
+        when(operateService.getSystemCustom("default")).thenReturn(platformConfig());
+
+        mockMvc.perform(get("/user/api/v1/base/custom"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.loginEmail.email.status").value(false));
+
+        verify(operateService).getSystemCustom("default");
     }
 
     @Test

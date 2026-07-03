@@ -96,6 +96,7 @@ import com.unicomai.wanwu.api.model.dto.ProviderListQuery;
 import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
+import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.HttpHeaders;
@@ -154,6 +155,9 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private McpService mcpService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private OperateService operateService;
+
     public WanwuFrontendApiController() {
     }
 
@@ -172,11 +176,18 @@ public class WanwuFrontendApiController {
 
     public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
                                       KnowledgeService knowledgeService, McpService mcpService) {
+        this(iamService, appService, modelService, knowledgeService, mcpService, null);
+    }
+
+    public WanwuFrontendApiController(IamService iamService, AppService appService, ModelService modelService,
+                                      KnowledgeService knowledgeService, McpService mcpService,
+                                      OperateService operateService) {
         this.iamService = iamService;
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
         this.mcpService = mcpService;
+        this.operateService = operateService;
     }
 
     @GetMapping("/base/captcha")
@@ -397,6 +408,9 @@ public class WanwuFrontendApiController {
 
     @GetMapping("/base/custom")
     public FrontendResponse<Map<String, Object>> platformConfig() {
+        if (operateService != null) {
+            return FrontendResponse.ok(operateService.getSystemCustom("default"));
+        }
         return FrontendResponse.ok(iamService.platformConfig());
     }
 
