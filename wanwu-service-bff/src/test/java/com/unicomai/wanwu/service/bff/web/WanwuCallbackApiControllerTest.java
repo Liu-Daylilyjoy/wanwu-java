@@ -57,7 +57,7 @@ public class WanwuCallbackApiControllerTest {
                 .andExpect(jsonPath("$.data.config.apiSecret").value("useless-api-key"))
                 .andExpect(jsonPath("$.data.config.appKey").value("useless-api-key"))
                 .andExpect(jsonPath("$.data.config.accessKey").value("useless-api-key"))
-                .andExpect(jsonPath("$.data.config.endpointUrl").value("/callback/v1/model/model-123"))
+                .andExpect(jsonPath("$.data.config.endpointUrl").value("http://bff:8080/callback/v1/model/model-123"))
                 .andExpect(jsonPath("$.data.config.region").value("cn"));
     }
 

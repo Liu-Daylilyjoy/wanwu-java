@@ -25,6 +25,8 @@ import java.util.UUID;
 @RestController
 public class WanwuCallbackApiController {
 
+    private static final String DEFAULT_CALLBACK_MODEL_BASE_URL = "http://bff:8080/callback/v1/model";
+
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
 
@@ -344,7 +346,26 @@ public class WanwuCallbackApiController {
     }
 
     private String callbackEndpoint(String modelId) {
-        return "/callback/v1/model/" + modelId;
+        return trimTrailingSlash(callbackModelBaseUrl()) + "/" + modelId;
+    }
+
+    private String callbackModelBaseUrl() {
+        String configured = System.getProperty("wanwu.callback.model-base-url");
+        if (isBlank(configured)) {
+            configured = System.getenv("WANWU_CALLBACK_MODEL_BASE_URL");
+        }
+        if (isBlank(configured)) {
+            configured = System.getenv("WANWU_CALLBACK_LLM_BASE_URL");
+        }
+        return defaultIfBlank(configured, DEFAULT_CALLBACK_MODEL_BASE_URL);
+    }
+
+    private String trimTrailingSlash(String value) {
+        String result = defaultIfBlank(value, "");
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
     }
 
     private Map<String, Object> usage() {
