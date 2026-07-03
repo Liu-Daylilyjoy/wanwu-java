@@ -150,6 +150,7 @@ public class WanwuCallbackApiController {
         Map<String, Object> proxied = proxyModelJson(modelId, request,
                 routeSuffix(httpRequest, "embeddings", "multimodal-embeddings"));
         if (proxied != null) {
+            recordCallbackModelStatistic(modelId, proxied, false);
             return proxied;
         }
         Map<String, Object> item = new LinkedHashMap<>();
@@ -171,6 +172,7 @@ public class WanwuCallbackApiController {
         Map<String, Object> proxied = proxyModelJson(modelId, request,
                 routeSuffix(httpRequest, "rerank", "multimodal-rerank"));
         if (proxied != null) {
+            recordCallbackModelStatistic(modelId, proxied, false);
             return proxied;
         }
         Map<String, Object> item = new LinkedHashMap<>();

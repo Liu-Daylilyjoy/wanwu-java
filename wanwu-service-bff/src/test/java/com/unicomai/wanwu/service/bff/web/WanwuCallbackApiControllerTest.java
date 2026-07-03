@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -269,6 +270,7 @@ public class WanwuCallbackApiControllerTest {
         server.start();
         try {
             ModelService modelService = mock(ModelService.class);
+            AppService appService = mock(AppService.class);
             when(modelService.getModel("", "", "model-emb"))
                     .thenReturn(configuredModel("model-emb", "text-embedding-3-small",
                             "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "emb-key"));
@@ -277,7 +279,7 @@ public class WanwuCallbackApiControllerTest {
                             "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "rerank-key"));
 
             MockMvc callbackMvc = MockMvcBuilders
-                    .standaloneSetup(new WanwuCallbackApiController(modelService))
+                    .standaloneSetup(new WanwuCallbackApiController(modelService, appService))
                     .build();
 
             callbackMvc.perform(post("/callback/v1/model/model-emb/embeddings")
@@ -302,6 +304,13 @@ public class WanwuCallbackApiControllerTest {
             assertEquals("Bearer rerank-key", rerankAuthorization.get());
             assertTrue(rerankBody.get().contains("\"model\":\"jina-reranker-v2-base-multilingual\""));
             assertTrue(rerankBody.get().contains("\"documents\":[\"hello world\"]"));
+
+            ArgumentCaptor<RecordModelStatisticCommand> captor = forClass(RecordModelStatisticCommand.class);
+            verify(appService, times(2)).recordModelStatistic(captor.capture());
+            assertEquals("model-emb", captor.getAllValues().get(0).getModelId());
+            assertEquals(1L, captor.getAllValues().get(0).getTotalTokens());
+            assertEquals("model-rerank", captor.getAllValues().get(1).getModelId());
+            assertEquals(4L, captor.getAllValues().get(1).getTotalTokens());
         } finally {
             server.stop(0);
         }
