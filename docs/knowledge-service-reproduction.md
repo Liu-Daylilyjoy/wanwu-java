@@ -20,7 +20,7 @@ Date: 2026-07-01
   - Document URL analysis, local document import/list/delete, document config, import tip, upload limit, request-content segment generation, segment create/update/delete/status/labels, and child segment create/list/update/delete.
   - Metadata key/value shells.
   - Permission owner/admin/user/org compatibility.
-  - QA pair create/list/update/switch/delete, import-tip, local CSV export record, and local text hit.
+  - QA pair create/list/update/switch/delete, import-tip, request-content CSV/TSV import, local CSV export record, and local text hit.
   - Community report list/add/update/delete, deterministic local generate, batch-add placeholder, and frontend status fields.
   - External API create/list/update/delete, external dataset selection, external knowledge create/update/delete, and external knowledge list integration.
   - Local dynamic knowledge graph generation plus QA/document export record list, delete, and local download compatibility.
@@ -42,7 +42,7 @@ The document knowledge hit path now follows the Go BFF and proto response shape 
 
 The graph path now follows the Go `KnowledgeGraphResp` and schema contract from `response/knowledge.go`. `/knowledge/graph` derives nodes and edges from the local persisted state: knowledge base, bound tags, associated keywords, imported documents, parent segments, labels, and child segments. It returns the Go field names (`processingCount`, `successCount`, `failCount`, `total`, `graph.directed`, `graph.multigraph`, `graph.graph.source_id`, `nodes[].entity_name`, `nodes[].entity_type`, `edges[].source_entity`, and `edges[].target_entity`) so the unchanged frontend can render a non-empty graph. This is a deterministic local projection; the Go-equivalent LLM/RAG graph extraction pipeline and graph-based report generation are still pending.
 
-The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, export QA pairs into a persisted local CSV export record, and run a deterministic hit test over enabled finished pairs. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous import or retrieval engine.
+The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, import request-provided CSV/TSV QA content into real pairs, export QA pairs into a persisted local CSV export record, and run a deterministic hit test over enabled finished pairs. Frontend uploads that only provide `docUrl` now at least create a visible imported placeholder pair using the uploaded filename. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous uploaded-object parsing or retrieval engine.
 
 The document path stores imported `docInfoList` entries in memory, derives searchable segments from request-provided `content`, `text`, `docContent`, `contentBase64`, or URL metadata when present, falls back to the previous document-name segment when no content is available, supports URL basename analysis, lets the frontend create/update/delete/enable/disable/tag parent segments, create/list/update/delete child segments, and creates persisted local ZIP export records for selected documents. Custom splitter and parent-child segment settings now affect local request-content chunking. The implementation deliberately does not fetch the uploaded object bytes from BFF storage or MinIO, build embeddings, or run asynchronous parser/index callbacks yet.
 
@@ -56,6 +56,6 @@ The external knowledge path now follows the Go BFF contract from `knowledge_exte
 
 - Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
 - Real uploaded object byte ingestion across BFF/MinIO, parser-backed file conversion, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and asynchronous callback status updates.
-- Real QA file import parsing, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
+- Real uploaded QA file byte ingestion across BFF/MinIO, asynchronous QA import tasks, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
 - Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, CSV report import parsing, Dify external API validation/listing, and RAG query integration.
 - Callback status updates from asynchronous document processing.

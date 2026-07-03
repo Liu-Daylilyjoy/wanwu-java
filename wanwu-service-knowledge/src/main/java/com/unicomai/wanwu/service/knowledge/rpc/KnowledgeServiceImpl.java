@@ -1534,15 +1534,20 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         existingKnowledge(knowledgeId);
         for (Object rawDoc : list(safe.get("docInfoList"))) {
             Map<String, Object> doc = map(rawDoc);
-            String docName = defaultIfBlank(string(doc.get("docName")), string(doc.get("name")));
+            String docName = defaultIfBlank(firstText(doc, "docName", "name"),
+                    fileNameFromUrl(firstText(doc, "docUrl", "url", "filePath")));
             if (isBlank(docName)) {
                 continue;
             }
-            Map<String, Object> create = new LinkedHashMap<String, Object>();
-            create.put("knowledgeId", knowledgeId);
-            create.put("question", "Imported from " + docName);
-            create.put("answer", "");
-            createQaPair(userId, orgId, create);
+            String content = qaImportContent(doc);
+            List<Map<String, String>> pairs = parseQaImportRows(content);
+            if (pairs.isEmpty()) {
+                createImportedQaPair(userId, orgId, knowledgeId, "Imported from " + docName, "");
+                continue;
+            }
+            for (Map<String, String> pair : pairs) {
+                createImportedQaPair(userId, orgId, knowledgeId, pair.get("question"), pair.get("answer"));
+            }
         }
     }
 
@@ -2439,6 +2444,87 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             return "Imported URL document: " + doc.docName + "\nSource URL: " + docUrl;
         }
         return "Imported document: " + doc.docName;
+    }
+
+    private String qaImportContent(Map<String, Object> docInfo) {
+        String content = firstText(docInfo, "content", "text", "docContent", "csv", "tsv");
+        if (isBlank(content)) {
+            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
+        }
+        return content;
+    }
+
+    private List<Map<String, String>> parseQaImportRows(String content) {
+        String normalized = normalizeContent(content);
+        if (isBlank(normalized)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+        String[] lines = normalized.split("\\n+");
+        for (String line : lines) {
+            List<String> cells = line.indexOf('\t') >= 0 ? splitTabLine(line) : splitCsvLine(line);
+            if (cells.size() < 2 || isQaHeader(cells)) {
+                continue;
+            }
+            String question = cells.get(0).trim();
+            String answer = cells.get(1).trim();
+            if (isBlank(question) || isBlank(answer)) {
+                continue;
+            }
+            Map<String, String> row = new LinkedHashMap<String, String>();
+            row.put("question", question);
+            row.put("answer", answer);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private List<String> splitTabLine(String line) {
+        String[] raw = line.split("\\t");
+        List<String> cells = new ArrayList<String>();
+        for (String cell : raw) {
+            cells.add(cell.trim());
+        }
+        return cells;
+    }
+
+    private List<String> splitCsvLine(String line) {
+        List<String> cells = new ArrayList<String>();
+        StringBuilder cell = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    cell.append('"');
+                    i++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (ch == ',' && !quoted) {
+                cells.add(cell.toString().trim());
+                cell.setLength(0);
+            } else {
+                cell.append(ch);
+            }
+        }
+        cells.add(cell.toString().trim());
+        return cells;
+    }
+
+    private boolean isQaHeader(List<String> cells) {
+        String question = cells.get(0).trim().toLowerCase(Locale.ENGLISH);
+        String answer = cells.get(1).trim().toLowerCase(Locale.ENGLISH);
+        return ("question".equals(question) || "问题".equals(question))
+                && ("answer".equals(answer) || "答案".equals(answer));
+    }
+
+    private void createImportedQaPair(String userId, String orgId, String knowledgeId, String question, String answer) {
+        Map<String, Object> create = new LinkedHashMap<String, Object>();
+        create.put("knowledgeId", knowledgeId);
+        create.put("question", question);
+        create.put("answer", answer);
+        createQaPair(userId, orgId, create);
     }
 
     private List<String> splitContent(String content, Map<String, Object> docSegment, boolean child) {

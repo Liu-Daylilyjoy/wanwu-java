@@ -157,6 +157,33 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaImportParsesInlineCsvAndFallsBackToDocUrlName() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Imported QA", 1)).get("knowledgeId");
+
+        service.importQaPairs("dev-admin", "default-org", qaImportContent(knowledgeId,
+                "question,answer\n"
+                        + "What is Wanwu?,An AI platform.\n"
+                        + "\"How does CSV quoting work?\",\"Commas, quotes, and answers are preserved.\""));
+        Map<String, Object> parsed = service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "CSV quoting", Collections.singletonList(-1)));
+        assertEquals(1, parsed.get("total"));
+        Map<String, Object> parsedPair = listOfMaps(parsed.get("list")).get(0);
+        assertEquals("How does CSV quoting work?", parsedPair.get("question"));
+        assertEquals("Commas, quotes, and answers are preserved.", parsedPair.get("answer"));
+
+        service.importQaPairs("dev-admin", "default-org", qaImportDocUrl(knowledgeId,
+                "/service/api/v1/file/download/qa_import_template.csv"));
+        Map<String, Object> fallback = service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "Imported from qa_import_template.csv", Collections.singletonList(-1)));
+        assertEquals(1, fallback.get("total"));
+
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org",
+                qaHit(knowledgeId, "Wanwu"));
+        assertEquals(1, listOfMaps(hit.get("searchList")).size());
+    }
+
+    @Test
     public void exportRecordsFollowQaAndDocFrontendContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Export KB", 0)).get("knowledgeId");
@@ -834,6 +861,23 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("QAPairIdList", Collections.singletonList(qaPairId));
+        return request;
+    }
+
+    private Map<String, Object> qaImportContent(String knowledgeId, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        Map<String, Object> doc = new LinkedHashMap<String, Object>();
+        doc.put("docName", "qa.csv");
+        doc.put("content", content);
+        request.put("docInfoList", Collections.singletonList(doc));
+        return request;
+    }
+
+    private Map<String, Object> qaImportDocUrl(String knowledgeId, String docUrl) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docInfoList", Collections.singletonList(singleton("docUrl", docUrl)));
         return request;
     }
 
