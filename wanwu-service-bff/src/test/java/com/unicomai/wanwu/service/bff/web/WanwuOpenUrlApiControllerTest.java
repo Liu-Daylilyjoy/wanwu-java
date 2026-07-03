@@ -11,6 +11,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
 import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -22,6 +23,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -110,6 +112,18 @@ public class WanwuOpenUrlApiControllerTest {
         assertEquals("continue public", streamCaptor.getValue().getPrompt());
         assertEquals(false, streamCaptor.getValue().isDraft());
         assertEquals("client-001", streamCaptor.getValue().getUserId());
+
+        org.mockito.ArgumentCaptor<RecordAppStatisticCommand> statisticCaptor =
+                forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(statisticCaptor.capture());
+        assertEquals("assistant-001", statisticCaptor.getValue().getAppId());
+        assertEquals("agent", statisticCaptor.getValue().getAppType());
+        assertEquals("dev-admin", statisticCaptor.getValue().getUserId());
+        assertEquals("default-org", statisticCaptor.getValue().getOrgId());
+        assertEquals("webURL", statisticCaptor.getValue().getSource());
+        assertEquals(true, statisticCaptor.getValue().isSuccess());
+        assertEquals(true, statisticCaptor.getValue().isStream());
+        assertTrue(statisticCaptor.getValue().getCallTime() > 0);
     }
 
     @Test

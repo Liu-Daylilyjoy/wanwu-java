@@ -45,6 +45,7 @@ Runtime recording currently covers:
 - OpenAPI agent chat: `source=openapi`, `appType=agent`
 - OpenAPI RAG chat: `source=openapi`, `appType=rag`
 - OpenAPI workflow run: `source=openapi`, `appType=workflow`
+- public OpenURL assistant stream: `source=webURL`, `appType=agent`
 
 Draft app calls are intentionally not recorded, matching Go's `AppStatisticSourceDraft` comment that draft versions do not contribute to app statistics.
 
@@ -54,17 +55,20 @@ Draft app calls are intentionally not recorded, matching Go's `AppStatisticSourc
 
 - `GET /user/api/v1/statistic/app`
 - `GET /user/api/v1/statistic/app/list`
+- `GET /user/api/v1/statistic/app/export`
 - `GET /user/api/v1/statistic/model`
 - `GET /user/api/v1/statistic/model/list`
+- `GET /user/api/v1/statistic/model/export`
 
 Frontend field names remain unchanged. For example, model overview still returns `totalTokensTotal`, `promptTokensTotal`, `completionTokensTotal`, `callCountTotal`, and `callFailureTotal`.
+
+The export endpoints now emit CSV files from the same persisted aggregate rows used by the dashboard list endpoints. Go emits xlsx workbooks through excelize; Java keeps CSV for now because the project does not yet carry an Excel writer dependency.
 
 ## Remaining Gaps
 
 - Go's Redis daily hash plus hourly cron has not been reproduced; Java currently writes MySQL directly.
 - Runtime costs and token counts are development estimates for local deterministic responses, not provider-reported metrics.
-- Public OpenURL `webURL` app statistic source is not wired yet.
-- CSV endpoints still return minimal placeholder exports, not Go-equivalent Excel exports.
+- Export content is real aggregate data, but the file format is CSV rather than Go-equivalent xlsx.
 
 ## Verification
 
@@ -73,4 +77,5 @@ Targeted tests:
 ```powershell
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-app -am -DfailIfNoTests=false -Dtest=AppServiceImplTest#appAndModelStatisticsPersistAggregates test
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -DfailIfNoTests=false -Dtest=WanwuStatisticApiControllerTest test
+docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -DfailIfNoTests=false -Dtest=WanwuOpenUrlApiControllerTest test
 ```

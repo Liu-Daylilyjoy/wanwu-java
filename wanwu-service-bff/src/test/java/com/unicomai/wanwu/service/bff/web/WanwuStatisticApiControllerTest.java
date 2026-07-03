@@ -221,6 +221,26 @@ public class WanwuStatisticApiControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].model").value("Stats Model"))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(42));
+
+        mockMvc.perform(get("/user/api/v1/statistic/app/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("startDate", "2026-06-29")
+                        .param("endDate", "2026-06-29")
+                        .param("appType", "agent")
+                        .param("apps", "agent-001"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("appName,appType,orgName,callCount")))
+                .andExpect(content().string(containsString("Stats Agent,agent,Default Organization,3,1")));
+
+        mockMvc.perform(get("/user/api/v1/statistic/model/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("startDate", "2026-06-29")
+                        .param("endDate", "2026-06-29")
+                        .param("modelType", "llm")
+                        .param("models", "model-001"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("uuid,modelId,model,provider")))
+                .andExpect(content().string(containsString("model-001,model-001,Stats Model,local")));
     }
 
     private ApiKeyInfo devAdminApiKey() {

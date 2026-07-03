@@ -12,6 +12,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
 import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.MediaType;
@@ -36,6 +37,8 @@ public class WanwuOpenUrlApiController {
     private static final String OPENURL_PREFIX = "/openurl/v1";
     private static final String SERVICE_OPENURL_PREFIX = "/service/url/openurl/v1";
     private static final String PUBLIC_CLIENT_ID = "openurl-public-client";
+    private static final String APP_TYPE_AGENT = "agent";
+    private static final String STAT_SOURCE_WEB_URL = "webURL";
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -163,8 +166,11 @@ public class WanwuOpenUrlApiController {
             @PathVariable("suffix") String suffix,
             @RequestHeader(value = "X-Client-ID", required = false) String clientId,
             @RequestBody OpenUrlConversationStreamRequest request) {
+        long startedAt = System.currentTimeMillis();
+        AppUrlInfo appUrl = null;
+        boolean success = false;
         try {
-            AppUrlInfo appUrl = appService.getAppUrlBySuffix(new AppUrlSuffixQuery(suffix));
+            appUrl = appService.getAppUrlBySuffix(new AppUrlSuffixQuery(suffix));
             OpenUrlConversationStreamRequest effectiveRequest = request == null
                     ? new OpenUrlConversationStreamRequest()
                     : request;
@@ -177,6 +183,7 @@ public class WanwuOpenUrlApiController {
             command.setUserId(publicUserId(clientId));
             command.setOrgId(appUrl.getOrgId());
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
+            success = true;
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body(toSseFrame(result));
@@ -184,6 +191,8 @@ public class WanwuOpenUrlApiController {
             return ResponseEntity.status(400)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
+        } finally {
+            recordOpenUrlAppStatistic(appUrl, success, startedAt);
         }
     }
 
@@ -229,6 +238,27 @@ public class WanwuOpenUrlApiController {
 
     private String publicUserId(String clientId) {
         return isBlank(clientId) ? PUBLIC_CLIENT_ID : clientId;
+    }
+
+    private void recordOpenUrlAppStatistic(AppUrlInfo appUrl, boolean success, long startedAt) {
+        if (appUrl == null) {
+            return;
+        }
+        try {
+            RecordAppStatisticCommand command = new RecordAppStatisticCommand();
+            command.setUserId(appUrl.getUserId());
+            command.setOrgId(appUrl.getOrgId());
+            command.setAppId(appUrl.getAppId());
+            command.setAppType(defaultIfBlank(appUrl.getAppType(), APP_TYPE_AGENT));
+            command.setSuccess(success);
+            command.setStream(true);
+            command.setStreamCosts(Math.max(0L, System.currentTimeMillis() - startedAt));
+            command.setSource(STAT_SOURCE_WEB_URL);
+            command.setCallTime(startedAt);
+            appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
+            // Statistics must not break the public OpenURL chat path.
+        }
     }
 
     private String toSseFrame(AssistantConversationStreamResult result) {
@@ -341,6 +371,10 @@ public class WanwuOpenUrlApiController {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private String defaultIfBlank(String value, String fallback) {
+        return isBlank(value) ? fallback : value;
     }
 
     public static class OpenUrlConversationCreateRequest {

@@ -72,6 +72,7 @@ public class WanwuStatisticApiController {
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
     private static final String ORG_NAME = "Default Organization";
+    private static final int EXPORT_PAGE_SIZE = 10000;
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -193,8 +194,40 @@ public class WanwuStatisticApiController {
     }
 
     @GetMapping("/statistic/app/export")
-    public ResponseEntity<byte[]> exportAppStatistic() {
-        return csv("app-statistic.csv", "appName,appType,callCount,callFailure\n");
+    public ResponseEntity<byte[]> exportAppStatistic(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "startDate", required = false) String startDate,
+            @RequestParam(value = "endDate", required = false) String endDate,
+            @RequestParam(value = "appType", required = false, defaultValue = "agent") String appType,
+            @RequestParam(value = "apps", required = false) String apps) {
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(startDate, endDate);
+        AppStatisticListResult persistent = persistentAppStatisticList(
+                ctx, range, split(apps), appType, 1, EXPORT_PAGE_SIZE);
+        if (persistent == null) {
+            return csv("app-statistic.csv", "appName,appType,orgName,callCount,callFailure,failureRate,streamCount,nonStreamCount,avgStreamCosts,avgNonStreamCosts\n");
+        }
+        Map<String, Map<String, Object>> appMap = safeAppMap(authorization, appType);
+        StringBuilder content = new StringBuilder();
+        content.append("appName,appType,orgName,callCount,callFailure,failureRate,streamCount,nonStreamCount,avgStreamCosts,avgNonStreamCosts\n");
+        for (AppStatisticItem item : safeAppStatisticItems(persistent.getList())) {
+            Map<String, Object> source = appMap.get(item.getAppId());
+            String appName = source == null
+                    ? item.getAppId()
+                    : defaultIfBlank(value(source, "appName"), value(source, "name"));
+            appendCsvRow(content,
+                    appName,
+                    defaultIfBlank(item.getAppType(), appType),
+                    ORG_NAME,
+                    item.getCallCount(),
+                    item.getCallFailure(),
+                    item.getFailureRate(),
+                    item.getStreamCount(),
+                    item.getNonStreamCount(),
+                    item.getAvgStreamCosts(),
+                    item.getAvgNonStreamCosts());
+        }
+        return csv("app-statistic-" + range.startDate + "-" + range.endDate + ".csv", content.toString());
     }
 
     @GetMapping("/statistic/model")
@@ -291,8 +324,42 @@ public class WanwuStatisticApiController {
     }
 
     @GetMapping("/statistic/model/export")
-    public ResponseEntity<byte[]> exportModelStatistic() {
-        return csv("model-statistic.csv", "model,provider,callCount,callFailure,totalTokens\n");
+    public ResponseEntity<byte[]> exportModelStatistic(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "startDate", required = false) String startDate,
+            @RequestParam(value = "endDate", required = false) String endDate,
+            @RequestParam(value = "modelType", required = false, defaultValue = "llm") String modelType,
+            @RequestParam(value = "models", required = false) String models) {
+        UserContext ctx = userContext(authorization);
+        DateRange range = dateRange(startDate, endDate);
+        ModelStatisticListResult persistent = persistentModelStatisticList(
+                ctx, range, split(models), modelType, 1, EXPORT_PAGE_SIZE);
+        if (persistent == null) {
+            return csv("model-statistic.csv", "uuid,modelId,model,provider,orgName,callCount,callFailure,failureRate,promptTokens,completionTokens,totalTokens,avgCosts,avgFirstTokenLatency\n");
+        }
+        Map<String, ModelInfo> modelMap = safeModelMap(authorization, modelType);
+        StringBuilder content = new StringBuilder();
+        content.append("uuid,modelId,model,provider,orgName,callCount,callFailure,failureRate,promptTokens,completionTokens,totalTokens,avgCosts,avgFirstTokenLatency\n");
+        for (ModelStatisticItem item : safeModelStatisticItems(persistent.getList())) {
+            ModelInfo info = modelMap.get(item.getModelId());
+            appendCsvRow(content,
+                    info == null ? item.getModelId() : defaultIfBlank(info.getUuid(), item.getModelId()),
+                    item.getModelId(),
+                    info == null
+                            ? defaultIfBlank(item.getModel(), item.getModelId())
+                            : defaultIfBlank(info.getDisplayName(), info.getModel()),
+                    info == null ? defaultIfBlank(item.getProvider(), "") : defaultIfBlank(info.getProvider(), ""),
+                    ORG_NAME,
+                    item.getCallCount(),
+                    item.getCallFailure(),
+                    item.getFailureRate(),
+                    item.getPromptTokens(),
+                    item.getCompletionTokens(),
+                    item.getTotalTokens(),
+                    item.getAvgCosts(),
+                    item.getAvgFirstTokenLatency());
+        }
+        return csv("model-statistic-" + range.startDate + "-" + range.endDate + ".csv", content.toString());
     }
 
     @GetMapping("/statistic/api/select")
@@ -724,12 +791,28 @@ public class WanwuStatisticApiController {
         return result;
     }
 
+    private Map<String, Map<String, Object>> safeAppMap(String authorization, String appType) {
+        try {
+            return appMap(authorization, appType);
+        } catch (RuntimeException ex) {
+            return Collections.emptyMap();
+        }
+    }
+
     private Map<String, ModelInfo> modelMap(String authorization, String modelType) {
         Map<String, ModelInfo> result = new LinkedHashMap<String, ModelInfo>();
         for (ModelInfo item : safeModels(listModels(authorization, modelType).getList())) {
             result.put(item.getModelId(), item);
         }
         return result;
+    }
+
+    private Map<String, ModelInfo> safeModelMap(String authorization, String modelType) {
+        try {
+            return modelMap(authorization, modelType);
+        } catch (RuntimeException ex) {
+            return Collections.emptyMap();
+        }
     }
 
     private String apiKeyName(ApiKeyInfo info, String apiKeyId) {
@@ -1098,6 +1181,24 @@ public class WanwuStatisticApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
                 .body(bytes);
+    }
+
+    private void appendCsvRow(StringBuilder content, Object... values) {
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                content.append(',');
+            }
+            content.append(csvValue(values[i]));
+        }
+        content.append('\n');
+    }
+
+    private String csvValue(Object value) {
+        String text = value == null ? "" : value.toString();
+        if (text.indexOf('"') >= 0 || text.indexOf(',') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0) {
+            return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
     }
 
     private static class UserContext {
