@@ -65,6 +65,26 @@ public class SafetyServiceImplTest {
     }
 
     @Test
+    public void sensitiveFileContentImportParsesMultipleWords() {
+        String tableId = text(service.createSensitiveWordTable(USER_ID, ORG_ID,
+                map("tableName", "Import Guard", "remark", "import", "type", "personal")), "tableId");
+
+        service.uploadSensitiveWord(USER_ID, ORG_ID,
+                map("tableId", tableId, "importType", "file",
+                        "content", "Political,Illegal,Other\nalpha,beta,loose\nalpha,,"));
+
+        Map<String, Object> words = service.listSensitiveWords(USER_ID, ORG_ID, tableId, 1, 10);
+        assertEquals(3, words.get("total"));
+        List<Map<String, Object>> list = list(words.get("list"));
+        assertEquals("alpha", text(list.get(0), "word"));
+        assertEquals("Political", text(list.get(0), "sensitiveType"));
+        assertEquals("beta", text(list.get(1), "word"));
+        assertEquals("Illegal", text(list.get(1), "sensitiveType"));
+        assertEquals("loose", text(list.get(2), "word"));
+        assertEquals("Other", text(list.get(2), "sensitiveType"));
+    }
+
+    @Test
     public void sensitiveStateIsPersistedAsSnapshotRecord() {
         SafetyRecordMapper mapper = mock(SafetyRecordMapper.class);
         service = new SafetyServiceImpl(mapper);

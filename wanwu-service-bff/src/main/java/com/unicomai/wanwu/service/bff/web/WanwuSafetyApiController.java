@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -102,7 +103,7 @@ public class WanwuSafetyApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return voidOk(authorization, (ctx, body) -> safetyService.uploadSensitiveWord(ctx.userId, ctx.orgId, body),
-                request);
+                enrichSensitiveWordFile(request));
     }
 
     @DeleteMapping("/safe/sensitive/word")
@@ -131,6 +132,51 @@ public class WanwuSafetyApiController {
 
     private Map<String, Object> body(Map<String, Object> request) {
         return request == null ? new LinkedHashMap<>() : request;
+    }
+
+    private Map<String, Object> enrichSensitiveWordFile(Map<String, Object> request) {
+        Map<String, Object> body = body(request);
+        if (!"file".equalsIgnoreCase(text(body, "importType")) || !isBlank(text(body, "content"))) {
+            return body;
+        }
+        String fileName = firstText(body, "fileName", "fileUploadId", "fileId");
+        byte[] bytes = UploadedFileStore.defaultStore().readBytes(fileName);
+        if (bytes.length == 0) {
+            return body;
+        }
+        String content = isXlsx(fileName)
+                ? SimpleXlsxReader.toDelimitedText(bytes)
+                : new String(bytes, StandardCharsets.UTF_8);
+        if (!isBlank(content)) {
+            body.put("content", content);
+        }
+        return body;
+    }
+
+    private String firstText(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            String value = text(map, key);
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String text(Map<String, Object> map, String key) {
+        if (map == null) {
+            return "";
+        }
+        Object value = map.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private boolean isXlsx(String fileName) {
+        return fileName != null && fileName.toLowerCase().endsWith(".xlsx");
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private UserContext userContext(String authorization) {

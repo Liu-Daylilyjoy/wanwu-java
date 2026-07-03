@@ -23,10 +23,10 @@ Go updates the table version when reply or vocabulary contents change, caps a ta
 The Java app service now adds `app_service.safety_records` as a Docker MySQL compatibility table. `SafetyServiceImpl` loads a single `snapshot/state` record at startup and saves it after every mutable Safety Guard operation:
 
 - sensitive table create/update/reply/delete
-- sensitive word single upload/delete
+- sensitive word single upload, BFF-local XLSX/CSV file import, and delete
 - personal table selector used by Agent/RAG safety configuration
 
-The snapshot stores table metadata, table words, and the next word sequence so Docker restarts do not reset word IDs. Java also now keeps the Go-compatible table `version`, duplicate single-word guard, and 100-word table cap.
+The snapshot stores table metadata, table words, and the next word sequence so Docker restarts do not reset word IDs. Java also now keeps the Go-compatible table `version`, duplicate single-word guard, 100-word table cap, and Go-style matrix sensitive word file parsing from unchanged frontend uploads.
 
 ## Verification
 
@@ -35,5 +35,5 @@ The snapshot stores table metadata, table words, and the next word sequence so D
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent `sensitive_word_tables` and `sensitive_word_vocabularies` tables.
-- Parse Excel sensitive-word uploads from object storage.
+- Replace the BFF-local upload handoff with Go-equivalent MinIO object lifecycle and richer `excelize` workbook parity.
 - Apply Aho-Corasick sensitive-word interception to Agent/RAG/Model streaming runtimes.

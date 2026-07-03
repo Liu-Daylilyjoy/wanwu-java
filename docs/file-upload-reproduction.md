@@ -45,7 +45,7 @@ This is a development upload loop, not the final Go object storage reproduction:
 
 - Files are local to the BFF container and disappear when the container filesystem is replaced.
 - There is no MinIO bucket, signed URL, expiration policy, malware scan, or cross-service file metadata table yet.
-- Knowledge document parsing, RAG ingestion, and workflow runtime file semantics remain separate business slices.
+- Knowledge document parsing, Safety Guard sensitive-word imports, RAG ingestion, and workflow runtime file semantics remain separate business slices.
 
 ## Verification
 

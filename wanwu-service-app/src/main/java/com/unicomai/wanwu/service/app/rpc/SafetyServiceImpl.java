@@ -15,9 +15,12 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -157,21 +160,31 @@ public class SafetyServiceImpl implements SafetyService {
         String tableId = text(request, "tableId");
         requireTable(orgId, tableId);
         List<Map<String, Object>> currentWords = wordsFor(orgId, tableId);
+        List<Map<String, Object>> entries = sensitiveWordEntries(request);
+        if (entries.isEmpty()) {
+            return;
+        }
+        boolean changed = false;
         synchronized (currentWords) {
-            if (currentWords.size() >= MAX_WORDS) {
-                throw new IllegalArgumentException("sensitive word table is full: " + tableId);
-            }
-            String word = defaultText(request, "word", defaultText(request, "fileName", "imported-sensitive-word"));
-            for (Map<String, Object> item : currentWords) {
-                if (word.equals(text(item, "word"))) {
-                    return;
+            for (Map<String, Object> entry : entries) {
+                String word = text(entry, "word").trim();
+                if (blank(word) || containsWord(currentWords, word)) {
+                    continue;
                 }
+                if (currentWords.size() >= MAX_WORDS) {
+                    throw new IllegalArgumentException("sensitive word table is full: " + tableId);
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("wordId", "word-" + wordSequence.getAndIncrement());
+                row.put("word", word);
+                row.put("sensitiveType", defaultText(entry, "sensitiveType",
+                        defaultText(request, "sensitiveType", "Other")));
+                currentWords.add(row);
+                changed = true;
             }
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("wordId", "word-" + wordSequence.getAndIncrement());
-            row.put("word", word);
-            row.put("sensitiveType", defaultText(request, "sensitiveType", "Other"));
-            currentWords.add(row);
+        }
+        if (!changed) {
+            return;
         }
         touchTableVersion(orgId, tableId);
         saveSnapshot();
@@ -195,6 +208,181 @@ public class SafetyServiceImpl implements SafetyService {
         item.put("type", defaultText(request, "type", TYPE_PERSONAL));
         item.put("version", version());
         return item;
+    }
+
+    private List<Map<String, Object>> sensitiveWordEntries(Map<String, Object> request) {
+        List<Map<String, Object>> entries = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        String defaultType = defaultText(request, "sensitiveType", "Other");
+        addWordsValue(entries, seen, request == null ? null : request.get("words"), defaultType);
+
+        String content = firstText(request, "content", "text", "csv", "tsv");
+        if (!blank(content)) {
+            addContentEntries(entries, seen, content, defaultType);
+        }
+
+        if (entries.isEmpty() && blank(content)) {
+            String fallback = defaultText(request, "word", defaultText(request, "fileName", "imported-sensitive-word"));
+            addEntry(entries, seen, fallback, defaultType);
+        }
+        return entries;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addWordsValue(List<Map<String, Object>> entries, Set<String> seen, Object value, String defaultType) {
+        if (value instanceof Iterable) {
+            Iterator<?> iterator = ((Iterable<?>) value).iterator();
+            while (iterator.hasNext()) {
+                addWordObject(entries, seen, iterator.next(), defaultType);
+            }
+        } else if (value instanceof Object[]) {
+            Object[] values = (Object[]) value;
+            for (Object item : values) {
+                addWordObject(entries, seen, item, defaultType);
+            }
+        } else if (value instanceof Map) {
+            addWordObject(entries, seen, value, defaultType);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addWordObject(List<Map<String, Object>> entries, Set<String> seen, Object value, String defaultType) {
+        if (value instanceof Map) {
+            Map<String, Object> map = (Map<String, Object>) value;
+            addEntry(entries, seen, firstText(map, "word", "name", "text"),
+                    defaultText(map, "sensitiveType", defaultType));
+            return;
+        }
+        addEntry(entries, seen, value == null ? "" : String.valueOf(value), defaultType);
+    }
+
+    private void addContentEntries(List<Map<String, Object>> entries, Set<String> seen, String content,
+                                   String defaultType) {
+        String[] lines = content.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        List<String> matrixTypes = Collections.emptyList();
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            List<String> columns = splitColumns(line);
+            if (columns.isEmpty()) {
+                continue;
+            }
+            if (matrixTypes.isEmpty()) {
+                matrixTypes = matrixHeaderTypes(columns);
+                if (!matrixTypes.isEmpty()) {
+                    continue;
+                }
+            }
+            if (!matrixTypes.isEmpty()) {
+                for (int column = 0; column < columns.size() && column < matrixTypes.size(); column++) {
+                    if (!blank(matrixTypes.get(column))) {
+                        addEntry(entries, seen, columns.get(column), matrixTypes.get(column));
+                    }
+                }
+                continue;
+            }
+            String word = columns.get(0).trim();
+            if (i == 0 && isHeader(word)) {
+                continue;
+            }
+            String normalizedType = columns.size() > 1 ? normalizedSensitiveType(columns.get(1).trim()) : "";
+            String type = blank(normalizedType) ? defaultType : normalizedType;
+            addEntry(entries, seen, word, type);
+        }
+    }
+
+    private List<String> matrixHeaderTypes(List<String> columns) {
+        List<String> types = new ArrayList<>();
+        boolean found = false;
+        for (String column : columns) {
+            String type = normalizedSensitiveType(column);
+            types.add(type);
+            if (!blank(type)) {
+                found = true;
+            }
+        }
+        return found ? types : Collections.<String>emptyList();
+    }
+
+    private List<String> splitColumns(String line) {
+        List<String> columns = new ArrayList<>();
+        char separator = line.indexOf('\t') >= 0 ? '\t' : ',';
+        StringBuilder current = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    current.append('"');
+                    i++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (ch == separator && !quoted) {
+                columns.add(current.toString().trim());
+                current.setLength(0);
+            } else {
+                current.append(ch);
+            }
+        }
+        columns.add(current.toString().trim());
+        return columns;
+    }
+
+    private void addEntry(List<Map<String, Object>> entries, Set<String> seen, String word, String sensitiveType) {
+        if (blank(word) || !seen.add(word)) {
+            return;
+        }
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("word", word.trim());
+        entry.put("sensitiveType", blank(sensitiveType) ? "Other" : sensitiveType.trim());
+        entries.add(entry);
+    }
+
+    private boolean containsWord(List<Map<String, Object>> currentWords, String word) {
+        for (Map<String, Object> item : currentWords) {
+            if (word.equals(text(item, "word"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isHeader(String value) {
+        String lower = value == null ? "" : value.trim().toLowerCase();
+        return "word".equals(lower) || "sensitiveword".equals(lower) || "sensitive_word".equals(lower)
+                || "敏感词".equals(value);
+    }
+
+    private String normalizedSensitiveType(String value) {
+        if (blank(value)) {
+            return "";
+        }
+        String normalized = value.trim();
+        if ("Political".equals(normalized) || "\u6d89\u653f".equals(normalized)) {
+            return "Political";
+        }
+        if ("Revile".equals(normalized) || "\u8fb1\u9a82".equals(normalized)) {
+            return "Revile";
+        }
+        if ("Pornography".equals(normalized) || "\u6d89\u9ec4".equals(normalized)) {
+            return "Pornography";
+        }
+        if ("ViolentTerror".equals(normalized) || "\u66b4\u6050".equals(normalized)) {
+            return "ViolentTerror";
+        }
+        if ("Illegal".equals(normalized) || "\u8fdd\u7981".equals(normalized)) {
+            return "Illegal";
+        }
+        if ("InformationSecurity".equals(normalized) || "\u4fe1\u606f\u5b89\u5168".equals(normalized)) {
+            return "InformationSecurity";
+        }
+        if ("Other".equals(normalized) || "\u5176\u4ed6".equals(normalized)) {
+            return "Other";
+        }
+        return "";
     }
 
     private Map<String, Object> tableDetail(Map<String, Object> item) {
@@ -363,6 +551,16 @@ public class SafetyServiceImpl implements SafetyService {
     private String defaultText(Map<String, Object> map, String key, String fallback) {
         String value = text(map, key);
         return blank(value) ? fallback : value;
+    }
+
+    private String firstText(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            String value = text(map, key);
+            if (!blank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String text(Map<String, Object> map, String key) {

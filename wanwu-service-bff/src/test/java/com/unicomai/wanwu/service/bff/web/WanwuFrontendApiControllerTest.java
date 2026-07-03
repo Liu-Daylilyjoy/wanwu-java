@@ -110,6 +110,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
@@ -1149,6 +1150,28 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"tableId\":\"table-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    public void safetyFileImportReadsUploadedXlsxContent() throws Exception {
+        String fileId = "sensitive-upload-bff-test.xlsx";
+        UploadedFileStore.defaultStore().writeBytes(fileId, SimpleXlsxWriter.write("sensitive",
+                Arrays.asList(
+                        Arrays.<Object>asList("Political", "Illegal", "Other"),
+                        Arrays.<Object>asList("alpha", "beta", "loose"))));
+
+        mockMvc.perform(post("/user/api/v1/safe/sensitive/word")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableId\":\"table-001\",\"importType\":\"file\",\"fileName\":\"" + fileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Map> captor = forClass(Map.class);
+        verify(safetyService).uploadSensitiveWord(anyString(), anyString(), captor.capture());
+        String content = String.valueOf(captor.getValue().get("content"));
+        assertTrue(content.contains("Political\tIllegal\tOther"));
+        assertTrue(content.contains("alpha\tbeta\tloose"));
     }
 
     @Test

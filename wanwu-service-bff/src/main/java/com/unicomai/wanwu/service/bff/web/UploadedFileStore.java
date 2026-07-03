@@ -21,28 +21,37 @@ final class UploadedFileStore {
     }
 
     String readText(String fileId) {
+        byte[] bytes = readBytes(fileId);
+        return bytes.length == 0 ? "" : new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    byte[] readBytes(String fileId) {
         if (isBlank(fileId)) {
-            return "";
+            return new byte[0];
         }
         Path path = filePath(fileId);
         if (!Files.isRegularFile(path)) {
-            return "";
+            return new byte[0];
         }
         try {
             long size = Files.size(path);
             if (size > 5 * 1024 * 1024) {
-                return "";
+                return new byte[0];
             }
-            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+            return Files.readAllBytes(path);
         } catch (IOException ex) {
-            return "";
+            return new byte[0];
         }
     }
 
     void writeText(String fileId, String content) throws IOException {
+        writeBytes(fileId, (content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
+    }
+
+    void writeBytes(String fileId, byte[] content) throws IOException {
         Path path = filePath(fileId);
         Files.createDirectories(path.getParent());
-        Files.write(path, (content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
+        Files.write(path, content == null ? new byte[0] : content);
     }
 
     private Path filePath(String fileId) {

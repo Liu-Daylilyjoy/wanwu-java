@@ -190,7 +190,8 @@ public class WanwuStaticDocsController {
     private static Map<String, List<String>> xlsxTemplates() {
         Map<String, List<String>> templates = new LinkedHashMap<String, List<String>>();
         templates.put("users.xlsx", Arrays.asList("username", "nickname", "password", "email", "phone", "role"));
-        templates.put("sensitive.xlsx", Arrays.asList("word", "reply", "enabled"));
+        templates.put("sensitive.xlsx", Arrays.asList("Political", "Revile", "Pornography", "ViolentTerror",
+                "Illegal", "InformationSecurity", "Other"));
         templates.put("graph_schema.xlsx", Arrays.asList("node", "relation", "target", "description"));
         templates.put("url_import_template.xlsx", Arrays.asList("name", "url"));
         templates.put("qa_import_template.xlsx", Arrays.asList("question", "answer", "similar_questions"));
