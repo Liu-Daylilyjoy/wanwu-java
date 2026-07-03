@@ -2,7 +2,9 @@ package com.unicomai.wanwu.service.operate.rpc;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +44,27 @@ public class OperateServiceImplTest {
         assertTrue(mapAt(mapAt(dark, "login"), "logo").isEmpty());
     }
 
+    @Test
+    public void clientStatisticUsesRecordedClients() {
+        OperateServiceImpl service = new OperateServiceImpl();
+        service.addClientRecord("oauth-client-1");
+
+        String today = LocalDate.now().toString();
+        Map<String, Object> statistic = service.getClientStatistic(today, today);
+
+        assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "cumulativeClient").get("value"));
+        assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "additionClient").get("value"));
+        assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "activeClient").get("value"));
+
+        Map<String, Object> clientChart = mapAt(mapAt(statistic, "trend"), "client");
+        assertEquals("ope_statistic_client_table", clientChart.get("tableName"));
+        List<Map<String, Object>> lines = listAt(clientChart, "lines");
+        assertEquals(3, lines.size());
+        assertEquals(1.0f, listAt(lines.get(0), "items").get(0).get("value"));
+        assertEquals(1.0f, listAt(lines.get(1), "items").get(0).get("value"));
+        assertEquals(1.0f, listAt(lines.get(2), "items").get(0).get("value"));
+    }
+
     private Map<String, Object> avatar(String path) {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("path", path);
@@ -60,5 +83,10 @@ public class OperateServiceImplTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapAt(Map<String, Object> source, String key) {
         return (Map<String, Object>) source.get(key);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listAt(Map<String, Object> source, String key) {
+        return (List<Map<String, Object>>) source.get(key);
     }
 }

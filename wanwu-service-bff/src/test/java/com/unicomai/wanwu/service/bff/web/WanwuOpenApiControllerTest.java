@@ -20,6 +20,7 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
+import com.unicomai.wanwu.api.operate.OperateService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
@@ -41,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,9 +61,11 @@ public class WanwuOpenApiControllerTest {
     private final ModelService modelService = mock(ModelService.class);
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final IamService iamService = mock(IamService.class);
+    private final OperateService operateService = mock(OperateService.class);
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new WanwuOpenApiController(
-                    appService, modelService, knowledgeService, iamService, new OpenApiChatflowSessionStore()))
+                    appService, modelService, knowledgeService, iamService, new OpenApiChatflowSessionStore(),
+                    operateService))
             .build();
 
     @Test
@@ -420,6 +424,8 @@ public class WanwuOpenApiControllerTest {
                         .param("client_secret", "oauth-secret-1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("invalid authorization code"));
+
+        verify(operateService, times(4)).addClientRecord("oauth-client-1");
     }
 
     private Map<String, Object> appRow() {

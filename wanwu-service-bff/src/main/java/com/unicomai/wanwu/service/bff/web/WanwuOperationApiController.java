@@ -1,6 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.iam.IamService;
+import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -30,11 +31,19 @@ public class WanwuOperationApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private OperateService operateService;
+
     public WanwuOperationApiController() {
     }
 
     public WanwuOperationApiController(IamService iamService) {
+        this(iamService, null);
+    }
+
+    public WanwuOperationApiController(IamService iamService, OperateService operateService) {
         this.iamService = iamService;
+        this.operateService = operateService;
     }
 
     @PostMapping("/oauth/app")
@@ -93,7 +102,45 @@ public class WanwuOperationApiController {
         Map<String, Object> oauthApps = iamService == null
                 ? Collections.<String, Object>emptyMap()
                 : iamService.listOauthApps(ctx.userId, "", 1, 10000);
-        return FrontendResponse.ok(OperationClientStatisticStore.INSTANCE.clientStatistic(oauthApps, startDate, endDate));
+        Map<String, Object> local = OperationClientStatisticStore.INSTANCE.clientStatistic(oauthApps, startDate, endDate);
+        if (operateService == null) {
+            return FrontendResponse.ok(local);
+        }
+        try {
+            Map<String, Object> result = operateService.getClientStatistic(startDate, endDate);
+            return FrontendResponse.ok(mergeBrowseCompatibility(result, local));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.ok(local);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeBrowseCompatibility(Map<String, Object> result, Map<String, Object> local) {
+        if (result == null || result.isEmpty()) {
+            return local;
+        }
+        Map<String, Object> overview = map(result.get("overview"));
+        Map<String, Object> localOverview = map(local.get("overview"));
+        if (!localOverview.isEmpty() && localOverview.get("browse") != null) {
+            overview.put("browse", localOverview.get("browse"));
+        }
+        result.put("overview", overview);
+
+        Map<String, Object> trend = map(result.get("trend"));
+        Map<String, Object> localTrend = map(local.get("trend"));
+        if (!localTrend.isEmpty() && localTrend.get("browse") != null) {
+            trend.put("browse", localTrend.get("browse"));
+        }
+        result.put("trend", trend);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        if (value instanceof Map) {
+            return new LinkedHashMap<>((Map<String, Object>) value);
+        }
+        return new LinkedHashMap<>();
     }
 
     private boolean isValidRedirectUri(Map<String, Object> request) {

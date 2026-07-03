@@ -15,4 +15,8 @@ public interface OperateService {
     void createSystemCustomHome(String userId, String orgId, String mode, Map<String, Object> request);
 
     Map<String, Object> getSystemCustom(String mode);
+
+    void addClientRecord(String clientId);
+
+    Map<String, Object> getClientStatistic(String startDate, String endDate);
 }

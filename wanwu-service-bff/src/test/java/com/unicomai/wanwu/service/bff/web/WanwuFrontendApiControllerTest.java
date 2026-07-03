@@ -146,7 +146,7 @@ public class WanwuFrontendApiControllerTest {
                     new WanwuSkillApiController(mcpService),
                     new WanwuSafetyApiController(safetyService),
                     new WanwuSettingApiController(operateService),
-                    new WanwuOperationApiController(iamService),
+                    new WanwuOperationApiController(iamService, operateService),
                     new WanwuExplorationApiController(appService),
                     new WanwuStatisticApiController(appService, modelService),
                     new WanwuTemplateApiController(appService))
@@ -294,6 +294,9 @@ public class WanwuFrontendApiControllerTest {
                 "createdAt", "2026-06-15 10:00:00");
         when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(listResult(oauthApp));
+        when(operateService.getClientStatistic(anyString(), anyString()))
+                .thenReturn(OperationClientStatisticStore.INSTANCE.clientStatistic(
+                        listResult(oauthApp), "2026-06-01", "2026-06-30"));
 
         mockMvc.perform(post("/user/api/v1/oauth/app")
                         .header("Authorization", "Bearer dev-token")
@@ -342,6 +345,7 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).updateOauthApp(any(Map.class));
         verify(iamService).updateOauthAppStatus(any(Map.class));
         verify(iamService).deleteOauthApp(any(Map.class));
+        verify(operateService).getClientStatistic("2026-06-01", "2026-06-30");
     }
 
     @Test

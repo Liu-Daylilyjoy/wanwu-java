@@ -34,8 +34,9 @@ Date: 2026-07-03
   - `PUT /user/api/v1/oauth/app`
   - `PUT /user/api/v1/oauth/app/status`
   - `DELETE /user/api/v1/oauth/app`
-- `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape. The Java development slice now derives cumulative/new client counts from IAM OAuth apps and derives active-client/browse counts from local OAuth runtime visits.
-- `wanwu-service-operate` is now a real Docker service in the `full` profile and provides the OperateService custom system configuration RPCs used by the platform setting page. Client statistics are still served by the BFF/IAM compatibility path in this slice.
+- `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape. The Java development slice now prefers `OperateService.getClientStatistic` for cumulative/new/active client data and merges the BFF-local browse counter as a frontend compatibility field.
+- `wanwu-service-operate` is now a real Docker service in the `full` profile and provides the OperateService custom system configuration RPCs used by the platform setting page.
+- `wanwu-service-operate` also implements `addClientRecord` and `getClientStatistic` with `operate_service.operate_records` snapshot persistence. OpenAPI OAuth login/authorize/token/refresh/userinfo visits synchronously record the managed OAuth client into OperateService, with a BFF-local fallback when the provider is unavailable.
 - `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
   - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
   - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.
@@ -71,7 +72,7 @@ Frontend-entry smoke target:
 - `http://localhost:3000/user/api/v1/base/login` returns operation permissions for `admin`.
 - OAuth app create/list/update/status/delete works through `/oauth/app*`.
 - OAuth authorize/code/token/refresh/userinfo works through `/service/api/openapi/v1/oauth/*` using the managed app credentials.
-- `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`; the values are non-zero when managed OAuth apps or local OAuth visits exist in the requested date range.
+- `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`; the client values are non-zero when OAuth clients have visited the development OAuth runtime, and browse remains non-zero when local OAuth visits exist in the requested date range.
 
 ## Current Boundary
 
@@ -81,6 +82,6 @@ It does not yet implement:
 
 - Redis-backed code/refresh-token storage.
 - PEM-backed OAuth key configuration instead of the generated development RSA key.
-- Full OperateService client statistics parity beyond IAM OAuth app counts.
+- Exact Go `client_records` / `client_daily_records` normalized table parity and Redis-backed daily aggregation jobs.
 - Redis-backed global browse statistics beyond the BFF-local OAuth visit counter.
 - Full App Observability dashboard routes under `v1/statistic.go`.

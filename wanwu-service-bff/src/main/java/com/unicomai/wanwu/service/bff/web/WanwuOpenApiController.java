@@ -29,6 +29,7 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
+import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.HttpHeaders;
@@ -87,6 +88,9 @@ public class WanwuOpenApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private OperateService operateService;
+
     private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
     private final Map<String, OAuthCode> oauthCodes = new ConcurrentHashMap<>();
     private final Map<String, OAuthToken> oauthRefreshTokens = new ConcurrentHashMap<>();
@@ -109,10 +113,17 @@ public class WanwuOpenApiController {
 
     public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
                                   IamService iamService, OpenApiChatflowSessionStore chatflowSessionStore) {
+        this(appService, modelService, knowledgeService, iamService, chatflowSessionStore, null);
+    }
+
+    public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
+                                  IamService iamService, OpenApiChatflowSessionStore chatflowSessionStore,
+                                  OperateService operateService) {
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
         this.iamService = iamService;
+        this.operateService = operateService;
         this.chatflowSessionStore = chatflowSessionStore == null ? new OpenApiChatflowSessionStore() : chatflowSessionStore;
     }
 
@@ -712,7 +723,7 @@ public class WanwuOpenApiController {
             if (!"code".equals(defaultIfBlank(responseType, "code"))) {
                 return oauthError("unsupported response_type");
             }
-            OperationClientStatisticStore.INSTANCE.recordBrowse(text(app, "clientId"));
+            recordOauthVisit(text(app, "clientId"));
             String loginUri = appendQuery("/aibase/login",
                     "client_id", text(app, "clientId"),
                     "response_type", "code",
@@ -740,7 +751,7 @@ public class WanwuOpenApiController {
             }
             String userId = oauthUserId(jwtToken);
             Map<String, Object> app = validateOauthApp(clientId, null, redirectUri);
-            OperationClientStatisticStore.INSTANCE.recordBrowse(text(app, "clientId"));
+            recordOauthVisit(text(app, "clientId"));
             String code = "wanwu-oauth-code-" + compactId();
             oauthCodes.put(code, new OAuthCode(text(app, "clientId"), userId, stringList(scope), Instant.now().plusSeconds(600).toEpochMilli()));
             String callback = appendQuery(text(app, "redirectUri"), "code", code, "state", defaultIfBlank(state, ""));
@@ -769,7 +780,7 @@ public class WanwuOpenApiController {
             if (payload == null || !payload.clientId.equals(text(app, "clientId")) || payload.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid authorization code"));
             }
-            OperationClientStatisticStore.INSTANCE.recordBrowse(payload.clientId);
+            recordOauthVisit(payload.clientId);
             return ResponseEntity.ok(oauthTokenResponse(payload.userId, payload.clientId, payload.scopes));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(ex.getMessage()));
@@ -792,7 +803,7 @@ public class WanwuOpenApiController {
                     || oldRefresh.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid refresh token"));
             }
-            OperationClientStatisticStore.INSTANCE.recordBrowse(oldRefresh.clientId);
+            recordOauthVisit(oldRefresh.clientId);
             Map<String, Object> data = oauthTokenResponse(oldRefresh.userId, oldRefresh.clientId, oldRefresh.scopes);
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("access_token", data.get("access_token"));
@@ -853,8 +864,20 @@ public class WanwuOpenApiController {
         data.put("remark", "");
         data.put("company", "Wanwu Java");
         data.put("avatar", "/user/api/v1/static/icon/user-default-icon.png");
-        OperationClientStatisticStore.INSTANCE.recordBrowse(payload.clientId());
+        recordOauthVisit(payload.clientId());
         return ResponseEntity.ok(data);
+    }
+
+    private void recordOauthVisit(String clientId) {
+        OperationClientStatisticStore.INSTANCE.recordBrowse(clientId);
+        if (operateService == null) {
+            return;
+        }
+        try {
+            operateService.addClientRecord(clientId);
+        } catch (RuntimeException ignored) {
+            // Keep OAuth runtime available even if the development Operate provider is temporarily unavailable.
+        }
     }
 
     private OpenApiContext context(HttpHeaders headers) {
