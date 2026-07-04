@@ -15,6 +15,7 @@ Date: 2026-07-01
 - The controller now maps `file_info` or `fileInfo` into `RagChatCommand.fileInfo`.
 - `openApiRagChat` now returns `data.searchList` and `data.qaSearchList` from `RagChatResult`, while preserving `data.output`, `msg_id`, `history`, and `finish`.
 - When the request contains `stream=true`, Java returns a legacy `text/event-stream` response with a single `data: {...}` JSON frame followed by `data: [DONE]`.
+- Published OpenAPI RAG calls reuse `AppService.streamRagChat`, so the same question/answer/history/fileInfo/search-list snapshot is stored in `rag_chat_records` when AppService/MySQL is available.
 
 ## Tests
 
@@ -23,4 +24,4 @@ Date: 2026-07-01
 
 ## Remaining Gap
 
-The Java OpenAPI RAG endpoint now supports a legacy SSE envelope for `stream=true`, but it still emits one completed frame rather than provider token-by-token chunks. Full parity still needs real model streaming, exact upstream rag-service chunk sequencing, statistics recording, and API-key scoped app authorization.
+The Java OpenAPI RAG endpoint now supports a legacy SSE envelope for `stream=true`, but it still emits one completed frame rather than provider token-by-token chunks. Full parity still needs real model streaming, exact upstream rag-service chunk sequencing, exact provider cost attribution, and stricter API-key scoped app authorization.

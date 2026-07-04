@@ -151,6 +151,7 @@ import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.RagChatRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
@@ -1499,6 +1500,7 @@ public class AppServiceImpl implements AppService {
             result.setSearchList(Collections.<Map<String, Object>>emptyList());
             result.setQaSearchList(Collections.<Map<String, Object>>emptyList());
             result.setCreatedAt(clock.millis());
+            saveRagChat(userId, orgId, command, result);
             return result;
         }
         Map<String, Object> knowledgeHit = hitConfiguredKnowledge(
@@ -1530,6 +1532,7 @@ public class AppServiceImpl implements AppService {
         result.setSearchList(searchList);
         result.setQaSearchList(qaSearchList);
         result.setCreatedAt(clock.millis());
+        saveRagChat(userId, orgId, command, result);
         return result;
     }
 
@@ -5041,6 +5044,33 @@ public class AppServiceImpl implements AppService {
         return toJsonOrNull(schema);
     }
 
+    private void saveRagChat(String userId, String orgId, RagChatCommand command, RagChatResult result) {
+        long createdAt = result.getCreatedAt() <= 0L ? clock.millis() : result.getCreatedAt();
+        RagChatRecord record = new RagChatRecord();
+        record.setCreatedAt(createdAt);
+        record.setUpdatedAt(createdAt);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setRagId(command.getRagId());
+        record.setChatId(newRagChatId());
+        record.setDraft(command.isDraft());
+        record.setQuestion(command.getQuestion());
+        record.setResponse(result.getResponse());
+        record.setHistoryJson(toJsonOrNull(command.getHistory() == null
+                ? Collections.emptyList()
+                : command.getHistory()));
+        record.setFileInfoJson(toJsonOrNull(command.getFileInfo() == null
+                ? Collections.emptyList()
+                : command.getFileInfo()));
+        record.setSearchListJson(toJsonOrNull(result.getSearchList() == null
+                ? Collections.emptyList()
+                : result.getSearchList()));
+        record.setQaSearchListJson(toJsonOrNull(result.getQaSearchList() == null
+                ? Collections.emptyList()
+                : result.getQaSearchList()));
+        applicationRepository.saveRagChat(record);
+    }
+
     private Map<String, Object> workflowRunOutput(AppRecord workflow,
                                                   WorkflowDraftRecord draft,
                                                   Map<String, Object> input) {
@@ -5154,6 +5184,10 @@ public class AppServiceImpl implements AppService {
 
     private String newRagId() {
         return "rag-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newRagChatId() {
+        return "rag-chat-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String newWorkflowId() {

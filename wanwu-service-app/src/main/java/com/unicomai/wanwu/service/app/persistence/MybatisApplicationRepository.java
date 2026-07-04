@@ -20,6 +20,7 @@ import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.RagChatRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
@@ -43,6 +44,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity
 import com.unicomai.wanwu.service.app.persistence.entity.GeneralAgentConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.GeneralAgentConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.RagChatEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.ModelStatisticEntity;
@@ -68,6 +70,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper
 import com.unicomai.wanwu.service.app.persistence.mapper.GeneralAgentConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.GeneralAgentConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.RagChatMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.ModelStatisticMapper;
@@ -88,6 +91,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantSnapshotMapper assistantSnapshotMapper;
     private final RagDraftMapper ragDraftMapper;
     private final RagDraftConfigMapper ragDraftConfigMapper;
+    private final RagChatMapper ragChatMapper;
     private final RagSnapshotMapper ragSnapshotMapper;
     private final WorkflowDraftMapper workflowDraftMapper;
     private final WorkflowSnapshotMapper workflowSnapshotMapper;
@@ -114,6 +118,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantSnapshotMapper assistantSnapshotMapper,
                                         RagDraftMapper ragDraftMapper,
                                         RagDraftConfigMapper ragDraftConfigMapper,
+                                        RagChatMapper ragChatMapper,
                                         RagSnapshotMapper ragSnapshotMapper,
                                         WorkflowDraftMapper workflowDraftMapper,
                                         WorkflowSnapshotMapper workflowSnapshotMapper,
@@ -139,6 +144,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.assistantSnapshotMapper = assistantSnapshotMapper;
         this.ragDraftMapper = ragDraftMapper;
         this.ragDraftConfigMapper = ragDraftConfigMapper;
+        this.ragChatMapper = ragChatMapper;
         this.ragSnapshotMapper = ragSnapshotMapper;
         this.workflowDraftMapper = workflowDraftMapper;
         this.workflowSnapshotMapper = workflowSnapshotMapper;
@@ -368,6 +374,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Transactional
     public boolean deleteRag(String userId, String orgId, String ragId) {
         appUrlMapper.deleteByAssistant(userId, orgId, ragId);
+        ragChatMapper.deleteByRag(userId, orgId, ragId);
         ragSnapshotMapper.deleteByRag(userId, orgId, ragId);
         ragDraftConfigMapper.deleteByRag(userId, orgId, ragId);
         int draftDeleted = ragDraftMapper.deleteDraft(userId, orgId, ragId);
@@ -450,6 +457,20 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         }
         ragDraftConfigMapper.upsert(toEntity(config));
         return true;
+    }
+
+    @Override
+    public RagChatRecord saveRagChat(RagChatRecord record) {
+        RagChatEntity entity = toEntity(record);
+        ragChatMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<RagChatRecord> listRagChats(String userId, String orgId, String ragId, int limit) {
+        int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
+        return toRagChatRecords(ragChatMapper.selectByRag(userId, orgId, ragId, safeLimit));
     }
 
     @Override
@@ -1389,6 +1410,55 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setRagInfoJson(entity.getRagInfoJson());
         record.setRagConfigJson(entity.getRagConfigJson());
+        return record;
+    }
+
+    private RagChatEntity toEntity(RagChatRecord record) {
+        RagChatEntity entity = new RagChatEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setRagId(record.getRagId());
+        entity.setChatId(record.getChatId());
+        entity.setDraft(record.getDraft());
+        entity.setQuestion(record.getQuestion());
+        entity.setResponse(record.getResponse());
+        entity.setHistoryJson(record.getHistoryJson());
+        entity.setFileInfoJson(record.getFileInfoJson());
+        entity.setSearchListJson(record.getSearchListJson());
+        entity.setQaSearchListJson(record.getQaSearchListJson());
+        return entity;
+    }
+
+    private List<RagChatRecord> toRagChatRecords(List<RagChatEntity> entities) {
+        List<RagChatRecord> records = new java.util.ArrayList<>();
+        for (RagChatEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private RagChatRecord toRecord(RagChatEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        RagChatRecord record = new RagChatRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setRagId(entity.getRagId());
+        record.setChatId(entity.getChatId());
+        record.setDraft(entity.getDraft());
+        record.setQuestion(entity.getQuestion());
+        record.setResponse(entity.getResponse());
+        record.setHistoryJson(entity.getHistoryJson());
+        record.setFileInfoJson(entity.getFileInfoJson());
+        record.setSearchListJson(entity.getSearchListJson());
+        record.setQaSearchListJson(entity.getQaSearchListJson());
         return record;
     }
 

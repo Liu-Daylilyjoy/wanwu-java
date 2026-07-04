@@ -9,7 +9,7 @@ Date: 2026-07-01
 - Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses.
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
-- RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell, and multipart upload response compatibility.
+- RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell with MySQL-persisted chat snapshots, and multipart upload response compatibility.
 - Workflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, MySQL-persisted local run snapshots with schema-aware output, assistant workflow select from real created workflows, workflow tool select/action/tool-box compatibility backed by resource-center tools, `/workflow/api/workflow/parameter`, `/workflow/api/api/workflow/use`, `/workflow/api/workflow/openapi_schema`, and `/api/bot/upload_file` avatar upload compatibility.
 - Chatflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, local chatflow application list/detail plus conversation-delete compatibility for `/appspace/chatflow/*` and `/chatflow/*` frontend calls, and OpenAPI Chatflow conversation/message persistence for the public Chatflow route family.
 - Safety guard lifecycle: sensitive word table create/list/detail/update/reply/delete/select, single word upload, uploaded XLSX/CSV file import, list, delete, and Agent/RAG local chat input blocking through `wanwu-service-app` SafetyService-backed configuration.
@@ -38,8 +38,9 @@ RAG draft state is stored in the RAG-specific tables:
 - `rag_drafts`
 - `rag_draft_configs`
 - `rag_snapshots`
+- `rag_chat_records`
 
-The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types. The RAG chat endpoints `/rag/chat/draft` and `/rag/chat` return the AG-UI SSE event sequence consumed by the current frontend, while `/rag/upload` accepts multipart `files` and returns `fileList[{fileIndex,fileUrl}]` like the Go BFF.
+The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types. The RAG chat endpoints `/rag/chat/draft` and `/rag/chat` return the AG-UI SSE event sequence consumed by the current frontend, persist each question/answer/search-list snapshot in `rag_chat_records`, and `/rag/upload` accepts multipart `files` and returns `fileList[{fileIndex,fileUrl}]` like the Go BFF.
 
 Workflow and Chatflow draft and snapshot state is stored in Workflow-specific tables:
 
@@ -63,4 +64,4 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflo
 - Skill marketplace/custom/acquired skill flows are implemented in the resource service slice, not this app-service slice.
 - Safety guard management, local uploaded-file word import, Agent/RAG local chat input/output replacement, and BFF Model Experience global input/output replacement are implemented for Java's local deterministic streams; Go-equivalent provider token-stream Aho-Corasick interception remains later.
 - Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant templates remain a future slice.
-- RAG chat currently returns a deterministic local answer after validating draft/published RAG existence. Real retrieval, QA hit handling, knowledge search lists, reasoning frames, and model generation remain future slices.
+- RAG chat currently returns a deterministic local answer after validating draft/published RAG existence and persists the local chat snapshot for Docker restart verification. Real vector/rerank retrieval, reasoning frames, provider token streaming, and model generation remain future slices.

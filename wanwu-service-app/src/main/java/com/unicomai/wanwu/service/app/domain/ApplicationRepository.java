@@ -70,6 +70,10 @@ public interface ApplicationRepository {
 
     boolean rollbackRag(AppRecord record, RagDraftConfigRecord config);
 
+    RagChatRecord saveRagChat(RagChatRecord record);
+
+    List<RagChatRecord> listRagChats(String userId, String orgId, String ragId, int limit);
+
     AppRecord saveWorkflow(AppRecord record, WorkflowDraftRecord draft);
 
     List<AppRecord> listWorkflows(String userId, String orgId, String name);

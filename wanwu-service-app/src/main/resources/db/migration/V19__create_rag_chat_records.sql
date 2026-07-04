@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS rag_chat_records (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  org_id VARCHAR(64) NOT NULL,
+  rag_id VARCHAR(64) NOT NULL,
+  chat_id VARCHAR(96) NOT NULL,
+  draft TINYINT(1) NOT NULL DEFAULT 1,
+  question TEXT NOT NULL,
+  response MEDIUMTEXT NULL,
+  history_json JSON NULL,
+  file_info_json JSON NULL,
+  search_list_json JSON NULL,
+  qa_search_list_json JSON NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rag_chat_id (user_id, org_id, chat_id),
+  KEY idx_rag_chat_rag_id (rag_id),
+  KEY idx_rag_chat_user_org_rag (user_id, org_id, rag_id),
+  KEY idx_rag_chat_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

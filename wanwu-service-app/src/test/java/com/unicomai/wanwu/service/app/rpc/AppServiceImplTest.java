@@ -122,6 +122,7 @@ import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.RagChatRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
@@ -466,12 +467,28 @@ public class AppServiceImplTest {
         hit.put("prompt", "Policy answer comes from the configured knowledge base.");
         when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
 
-        RagChatResult result = service.streamRagChat(
-                ragChatCommand(created.getRagId(), "what is policy", true));
+        RagChatCommand chat = ragChatCommand(created.getRagId(), "what is policy", true);
+        Map<String, Object> history = new LinkedHashMap<>();
+        history.put("query", "prev");
+        history.put("response", "answer");
+        chat.setHistory(Collections.singletonList(history));
+        Map<String, Object> fileInfo = new LinkedHashMap<>();
+        fileInfo.put("fileName", "note.txt");
+        chat.setFileInfo(Collections.singletonList(fileInfo));
+        RagChatResult result = service.streamRagChat(chat);
 
         assertEquals(1, result.getSearchList().size());
         assertEquals("PolicyGuide.txt", result.getSearchList().get(0).get("title"));
         assertTrue(result.getResponse().contains("Policy answer comes from the configured knowledge base."));
+        List<RagChatRecord> chats = repository.listRagChats("dev-admin", "default-org", created.getRagId(), 10);
+        assertEquals(1, chats.size());
+        assertTrue(chats.get(0).getChatId().startsWith("rag-chat-"));
+        assertEquals(Boolean.TRUE, chats.get(0).getDraft());
+        assertEquals("what is policy", chats.get(0).getQuestion());
+        assertTrue(chats.get(0).getResponse().contains("Policy answer comes from the configured knowledge base."));
+        assertTrue(chats.get(0).getHistoryJson().contains("prev"));
+        assertTrue(chats.get(0).getFileInfoJson().contains("note.txt"));
+        assertTrue(chats.get(0).getSearchListJson().contains("PolicyGuide.txt"));
 
         ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
         verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), captor.capture());
@@ -2314,6 +2331,7 @@ public class AppServiceImplTest {
         private final List<AssistantSnapshotRecord> snapshots = new ArrayList<>();
         private final List<RagDraftConfigRecord> ragConfigs = new ArrayList<>();
         private final List<RagSnapshotRecord> ragSnapshots = new ArrayList<>();
+        private final List<RagChatRecord> ragChats = new ArrayList<>();
         private final List<WorkflowDraftRecord> workflowDrafts = new ArrayList<>();
         private final List<WorkflowSnapshotRecord> workflowSnapshots = new ArrayList<>();
         private final List<WorkflowRunRecord> workflowRuns = new ArrayList<>();
@@ -2655,6 +2673,13 @@ public class AppServiceImplTest {
                 }
             }
             ragSnapshots.removeAll(removed);
+            List<RagChatRecord> removedChats = new ArrayList<>();
+            for (RagChatRecord chat : ragChats) {
+                if (ragId.equals(chat.getRagId())) {
+                    removedChats.add(chat);
+                }
+            }
+            ragChats.removeAll(removedChats);
             return true;
         }
 
@@ -2785,6 +2810,28 @@ public class AppServiceImplTest {
             existing.setCategory(record.getCategory());
             saveRagConfig(config);
             return true;
+        }
+
+        @Override
+        public RagChatRecord saveRagChat(RagChatRecord record) {
+            record.setId(ids.incrementAndGet());
+            ragChats.add(record);
+            return record;
+        }
+
+        @Override
+        public List<RagChatRecord> listRagChats(String userId, String orgId, String ragId, int limit) {
+            List<RagChatRecord> matches = new ArrayList<>();
+            for (RagChatRecord chat : ragChats) {
+                if (userId.equals(chat.getUserId())
+                        && orgId.equals(chat.getOrgId())
+                        && ragId.equals(chat.getRagId())) {
+                    matches.add(chat);
+                }
+            }
+            matches.sort(Comparator.comparing(RagChatRecord::getCreatedAt).reversed());
+            int safeLimit = limit <= 0 ? matches.size() : Math.min(limit, matches.size());
+            return new ArrayList<>(matches.subList(0, safeLimit));
         }
 
         @Override
