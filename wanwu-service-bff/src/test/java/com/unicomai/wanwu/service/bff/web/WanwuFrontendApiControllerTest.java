@@ -3034,6 +3034,42 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].workFlowId").value("workflow-001"));
 
+        mockMvc.perform(post("/user/api/v1/assistant/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"actionId\":\"legacy-action-001\",\"assistantId\":\"assistant-action-test\",\"toolId\":\"custom-tool-001\",\"toolType\":\"custom\",\"actionName\":\"lookup_policy\",\"desc\":\"Lookup policy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actionId").value("legacy-action-001"))
+                .andExpect(jsonPath("$.data.enable").value(true));
+        mockMvc.perform(get("/user/api/v1/assistant/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-action-test"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].actionName").value("lookup_policy"))
+                .andExpect(jsonPath("$.data.total").value(1));
+        mockMvc.perform(put("/user/api/v1/assistant/action/enable")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"actionId\":\"legacy-action-001\",\"enable\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enable").value(false));
+        mockMvc.perform(get("/user/api/v1/assistant/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("actionId", "legacy-action-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enable").value(false));
+        mockMvc.perform(delete("/user/api/v1/assistant/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"actionId\":\"legacy-action-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/user/api/v1/assistant/action")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("assistantId", "assistant-action-test"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
         mockMvc.perform(post("/user/api/v1/assistant/tool/workflow")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)

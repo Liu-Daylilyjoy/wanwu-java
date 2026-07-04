@@ -132,6 +132,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/user/api/v1")
@@ -150,6 +151,8 @@ public class WanwuFrontendApiController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
     private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
+    private static final Map<String, Map<String, Object>> ASSISTANT_ACTIONS =
+            new ConcurrentHashMap<String, Map<String, Object>>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -1862,22 +1865,42 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping("/assistant/action")
-    public FrontendResponse<Map<String, Object>> assistantActions() {
-        return FrontendResponse.ok(emptyListResult());
+    public FrontendResponse<Map<String, Object>> assistantActions(
+            @RequestParam(value = "assistantId", required = false) String assistantId,
+            @RequestParam(value = "actionId", required = false) String actionId) {
+        if (!isBlank(actionId)) {
+            Map<String, Object> action = assistantAction(actionId);
+            return FrontendResponse.ok(action == null ? Collections.<String, Object>emptyMap() : action);
+        }
+        return FrontendResponse.ok(assistantActionList(assistantId));
     }
 
     @PostMapping("/assistant/action")
-    public FrontendResponse<Map<String, Object>> createAssistantAction() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> createAssistantAction(
+            @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> action = assistantActionRow(objectMap(request), null);
+        ASSISTANT_ACTIONS.put(String.valueOf(action.get("actionId")), action);
+        return FrontendResponse.ok(action);
     }
 
     @PutMapping({"/assistant/action", "/assistant/action/enable"})
-    public FrontendResponse<Map<String, Object>> updateAssistantAction() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> updateAssistantAction(
+            @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> body = objectMap(request);
+        String actionId = defaultIfBlank(firstText(body, "actionId"), findAssistantActionId(body));
+        Map<String, Object> existing = actionId.isEmpty() ? null : assistantAction(actionId);
+        Map<String, Object> action = assistantActionRow(body, existing);
+        ASSISTANT_ACTIONS.put(String.valueOf(action.get("actionId")), action);
+        return FrontendResponse.ok(action);
     }
 
     @DeleteMapping("/assistant/action")
-    public FrontendResponse<Map<String, Object>> deleteAssistantAction() {
+    public FrontendResponse<Map<String, Object>> deleteAssistantAction(
+            @RequestBody(required = false) Map<String, Object> request) {
+        String actionId = defaultIfBlank(firstText(request, "actionId"), findAssistantActionId(objectMap(request)));
+        if (!isBlank(actionId)) {
+            ASSISTANT_ACTIONS.remove(actionId);
+        }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -2788,6 +2811,113 @@ public class WanwuFrontendApiController {
             }
         }
         return result;
+    }
+
+    private Map<String, Object> assistantActionList(String assistantId) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> action : ASSISTANT_ACTIONS.values()) {
+            if (isBlank(assistantId) || assistantId.equals(firstText(action, "assistantId"))) {
+                rows.add(new LinkedHashMap<>(action));
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", rows);
+        result.put("total", rows.size());
+        return result;
+    }
+
+    private Map<String, Object> assistantAction(String actionId) {
+        Map<String, Object> action = ASSISTANT_ACTIONS.get(actionId);
+        return action == null ? null : new LinkedHashMap<>(action);
+    }
+
+    private Map<String, Object> assistantActionRow(Map<String, Object> request, Map<String, Object> existing) {
+        Map<String, Object> source = request == null ? Collections.<String, Object>emptyMap() : request;
+        Map<String, Object> row = existing == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<>(existing);
+        String actionId = defaultIfBlank(firstText(source, "actionId", "id"), firstText(row, "actionId", "id"));
+        if (isBlank(actionId)) {
+            actionId = defaultIfBlank(findAssistantActionId(source),
+                    "assistant-action-" + UUID.randomUUID().toString().replace("-", ""));
+        }
+        String actionName = defaultIfBlank(firstText(source, "actionName", "name"),
+                defaultIfBlank(firstText(row, "actionName", "name"), "local_action"));
+        String toolId = defaultIfBlank(firstText(source, "toolId"),
+                defaultIfBlank(firstText(row, "toolId"), "legacy-action-tool"));
+        String toolType = defaultIfBlank(firstText(source, "toolType", "type"),
+                defaultIfBlank(firstText(row, "toolType", "type"), "custom"));
+        boolean enable = actionEnableValue(source, row);
+
+        row.put("actionId", actionId);
+        row.put("id", actionId);
+        row.put("uniqueId", actionId);
+        row.put("assistantId", defaultIfBlank(firstText(source, "assistantId"), firstText(row, "assistantId")));
+        row.put("toolId", toolId);
+        row.put("toolType", toolType);
+        row.put("actionName", actionName);
+        row.put("name", defaultIfBlank(firstText(source, "displayName", "name"), actionName));
+        row.put("desc", defaultIfBlank(firstText(source, "desc", "description"), firstText(row, "desc")));
+        row.put("description", row.get("desc"));
+        row.put("enable", enable);
+        row.put("valid", true);
+        row.put("type", "action");
+        if (!row.containsKey("createdAt")) {
+            row.put("createdAt", System.currentTimeMillis());
+        }
+        row.put("updatedAt", System.currentTimeMillis());
+        if (source.get("toolConfig") instanceof Map) {
+            row.put("toolConfig", mapValue(source.get("toolConfig")));
+        } else if (!row.containsKey("toolConfig")) {
+            row.put("toolConfig", Collections.emptyMap());
+        }
+        return row;
+    }
+
+    private boolean actionEnableValue(Map<String, Object> request, Map<String, Object> existing) {
+        if (request != null && request.containsKey("enable")) {
+            return booleanValue(request.get("enable"), true);
+        }
+        if (request != null && request.size() == 1 && !isBlank(firstText(request, "actionId"))) {
+            return !booleanValue(existing == null ? null : existing.get("enable"), true);
+        }
+        return booleanValue(existing == null ? null : existing.get("enable"), true);
+    }
+
+    private String findAssistantActionId(Map<String, Object> request) {
+        if (request == null || request.isEmpty()) {
+            return "";
+        }
+        String actionId = firstText(request, "actionId", "id");
+        if (!isBlank(actionId)) {
+            return actionId;
+        }
+        String assistantId = firstText(request, "assistantId");
+        String toolId = firstText(request, "toolId");
+        String toolType = firstText(request, "toolType", "type");
+        String actionName = firstText(request, "actionName", "name");
+        if (isBlank(assistantId) && isBlank(toolId) && isBlank(toolType) && isBlank(actionName)) {
+            return "";
+        }
+        for (Map.Entry<String, Map<String, Object>> entry : ASSISTANT_ACTIONS.entrySet()) {
+            Map<String, Object> action = entry.getValue();
+            if (matchesActionField(action, "assistantId", assistantId)
+                    && matchesActionField(action, "toolId", toolId)
+                    && matchesActionField(action, "toolType", toolType)
+                    && matchesActionField(action, "actionName", actionName)) {
+                return entry.getKey();
+            }
+        }
+        return "";
+    }
+
+    private boolean matchesActionField(Map<String, Object> action, String key, String expected) {
+        return isBlank(expected) || expected.equals(firstText(action, key));
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value));
     }
 
     private String firstText(Map<?, ?> source, String... keys) {
