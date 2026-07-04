@@ -41,6 +41,27 @@ public class WanwuStaticDocsControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    public void docCenterManualResourcesAreServedFromClasspath() throws Exception {
+        mockMvc().perform(get("/user/api/v1/static/manual/getting-started.md"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("text/markdown")))
+                .andExpect(header().string("Cache-Control", containsString("no-cache")))
+                .andExpect(result -> assertTrue(result.getResponse()
+                        .getContentAsString()
+                        .contains("Wanwu Java")));
+    }
+
+    @Test
+    public void docCenterManualResourcesRejectUnknownAndTraversalPaths() throws Exception {
+        MockMvc mockMvc = mockMvc();
+
+        mockMvc.perform(get("/user/api/v1/static/manual/missing.png"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/user/api/v1/static/manual/..%2Fapplication.yml"))
+                .andExpect(status().isNotFound());
+    }
+
     private void assertCsv(MockMvc mockMvc, String name, String expectedText) throws Exception {
         mockMvc.perform(get("/user/api/v1/static/docs/" + name))
                 .andExpect(status().isOk())

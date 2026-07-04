@@ -1,5 +1,7 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,19 +11,26 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import javax.servlet.http.HttpServletRequest;
 
 @RestController
 public class WanwuStaticDocsController {
 
     private static final String DOCS_PREFIX = "/user/api/v1/static/docs";
+    private static final String MANUAL_PREFIX = "/user/api/v1/static/manual";
+    private static final String MANUAL_CLASSPATH_PREFIX = "static/manual/";
     private static final String XLSX_CONTENT_TYPE =
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -45,6 +54,28 @@ public class WanwuStaticDocsController {
         return ResponseEntity.notFound().build();
     }
 
+    @GetMapping(MANUAL_PREFIX + "/**")
+    public ResponseEntity<byte[]> downloadManualResource(HttpServletRequest request) {
+        String path = manualResourcePath(request);
+        if (path == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Resource resource = new ClassPathResource(MANUAL_CLASSPATH_PREFIX + path);
+        if (!resource.exists() || !resource.isReadable()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            byte[] body = readBytes(resource);
+            return ResponseEntity.ok()
+                    .contentType(mediaType(path))
+                    .contentLength(body.length)
+                    .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                    .body(body);
+        } catch (IOException ex) {
+            return ResponseEntity.status(500).body(new byte[0]);
+        }
+    }
+
     private static ResponseEntity<byte[]> response(String fileName, MediaType mediaType, byte[] body) {
         return ResponseEntity.ok()
                 .contentType(mediaType)
@@ -52,6 +83,76 @@ public class WanwuStaticDocsController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
                 .body(body);
+    }
+
+    private static String manualResourcePath(HttpServletRequest request) {
+        String prefix = MANUAL_PREFIX + "/";
+        String requestUri = request.getRequestURI();
+        int index = requestUri.indexOf(prefix);
+        if (index < 0) {
+            return null;
+        }
+        String rawPath = requestUri.substring(index + prefix.length());
+        if (rawPath.length() == 0) {
+            return null;
+        }
+        String decoded;
+        try {
+            decoded = URLDecoder.decode(rawPath, StandardCharsets.UTF_8.name());
+        } catch (IllegalArgumentException ex) {
+            return null;
+        } catch (java.io.UnsupportedEncodingException ex) {
+            return null;
+        }
+        String path = decoded.replace('\\', '/');
+        if (path.length() == 0 || path.startsWith("/") || path.indexOf('\0') >= 0 || path.indexOf(':') >= 0) {
+            return null;
+        }
+        String[] parts = path.split("/");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].length() == 0 || ".".equals(parts[i]) || "..".equals(parts[i])) {
+                return null;
+            }
+        }
+        return path;
+    }
+
+    private static byte[] readBytes(Resource resource) throws IOException {
+        InputStream input = resource.getInputStream();
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        } finally {
+            input.close();
+        }
+    }
+
+    private static MediaType mediaType(String path) {
+        String value = path.toLowerCase(Locale.ROOT);
+        if (value.endsWith(".md")) {
+            return MediaType.parseMediaType("text/markdown; charset=utf-8");
+        }
+        if (value.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (value.endsWith(".jpg") || value.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG;
+        }
+        if (value.endsWith(".gif")) {
+            return MediaType.IMAGE_GIF;
+        }
+        if (value.endsWith(".svg")) {
+            return MediaType.parseMediaType("image/svg+xml");
+        }
+        if (value.endsWith(".webp")) {
+            return MediaType.parseMediaType("image/webp");
+        }
+        return MediaType.APPLICATION_OCTET_STREAM;
     }
 
     private static byte[] csv(List<String> headers) {
