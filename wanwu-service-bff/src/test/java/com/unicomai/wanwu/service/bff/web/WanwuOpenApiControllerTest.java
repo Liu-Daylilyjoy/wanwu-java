@@ -12,6 +12,11 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
@@ -230,16 +235,63 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
-    public void chatflowOpenApiRoutesKeepLocalConversationState() throws Exception {
+    public void chatflowOpenApiRoutesUseAppServiceConversationState() throws Exception {
+        String conversationId = "conversation-chatflow-openapi-001";
+        Map<String, Object> created = new LinkedHashMap<>();
+        created.put("conversation_id", conversationId);
+        created.put("conversationId", conversationId);
+        created.put("conversation_name", "Policy chat");
+        created.put("conversationName", "Policy chat");
+        created.put("uuid", "chatflow-openapi-001");
+        when(appService.createChatflowOpenApiConversation(any(ChatflowConversationCreateCommand.class)))
+                .thenReturn(created);
+
+        Map<String, Object> chatResult = new LinkedHashMap<>();
+        chatResult.put("code", 0);
+        chatResult.put("message", "success");
+        chatResult.put("conversation_id", conversationId);
+        chatResult.put("response", "Chatflow response: hello chatflow");
+        chatResult.put("finish", 1);
+        when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class))).thenReturn(chatResult);
+
+        Map<String, Object> userMessage = new LinkedHashMap<>();
+        userMessage.put("role", "user");
+        userMessage.put("content", "hello chatflow");
+        Map<String, Object> assistantMessage = new LinkedHashMap<>();
+        assistantMessage.put("role", "assistant");
+        assistantMessage.put("content", "Chatflow response: hello chatflow");
+        Map<String, Object> messagePage = new LinkedHashMap<>();
+        messagePage.put("data", java.util.Arrays.asList(userMessage, assistantMessage));
+        messagePage.put("has_more", false);
+        messagePage.put("first_id", "1");
+        messagePage.put("last_id", "2");
+        when(appService.listChatflowOpenApiConversationMessages(any(ChatflowConversationMessageListQuery.class)))
+                .thenReturn(messagePage);
+
+        Map<String, Object> conversation = new LinkedHashMap<>();
+        conversation.put("conversation_id", conversationId);
+        conversation.put("conversation_name", "Policy chat");
+        Map<String, Object> conversationList = new LinkedHashMap<>();
+        conversationList.put("conversations", Collections.singletonList(conversation));
+        conversationList.put("list", Collections.singletonList(conversation));
+        conversationList.put("total", 1L);
+        Map<String, Object> emptyConversationList = new LinkedHashMap<>();
+        emptyConversationList.put("conversations", Collections.emptyList());
+        emptyConversationList.put("list", Collections.emptyList());
+        emptyConversationList.put("total", 0L);
+        when(appService.listChatflowOpenApiConversations(any(ChatflowConversationListQuery.class)))
+                .thenReturn(conversationList)
+                .thenReturn(emptyConversationList);
+
         String createdBody = mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_name\":\"Policy chat\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.conversation_id").exists())
+                .andExpect(jsonPath("$.data.conversation_id").value(conversationId))
                 .andExpect(jsonPath("$.data.conversation_name").value("Policy chat"))
                 .andReturn().getResponse().getContentAsString();
-        String conversationId = JsonPath.read(createdBody, "$.data.conversation_id");
+        assertEquals(conversationId, JsonPath.read(createdBody, "$.data.conversation_id"));
 
         mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
                         .header("Authorization", "Bearer dev-token")
@@ -280,6 +332,25 @@ public class WanwuOpenApiControllerTest {
                         .content("{\"uuid\":\"chatflow-openapi-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(0));
+
+        ArgumentCaptor<ChatflowConversationCreateCommand> createCaptor =
+                forClass(ChatflowConversationCreateCommand.class);
+        verify(appService).createChatflowOpenApiConversation(createCaptor.capture());
+        assertEquals("chatflow-openapi-001", createCaptor.getValue().getChatflowId());
+        assertEquals("Policy chat", createCaptor.getValue().getConversationName());
+        assertEquals("dev-admin", createCaptor.getValue().getUserId());
+        assertEquals("default-org", createCaptor.getValue().getOrgId());
+
+        ArgumentCaptor<ChatflowConversationChatCommand> chatCaptor =
+                forClass(ChatflowConversationChatCommand.class);
+        verify(appService).chatflowOpenApiChat(chatCaptor.capture());
+        assertEquals(conversationId, chatCaptor.getValue().getConversationId());
+        assertEquals("hello chatflow", chatCaptor.getValue().getQuery());
+        assertEquals("Beijing", chatCaptor.getValue().getParameters().get("city"));
+
+        verify(appService).listChatflowOpenApiConversationMessages(any(ChatflowConversationMessageListQuery.class));
+        verify(appService, times(2)).listChatflowOpenApiConversations(any(ChatflowConversationListQuery.class));
+        verify(appService).deleteChatflowOpenApiConversation(any(ChatflowConversationDeleteByIdCommand.class));
     }
 
     @Test

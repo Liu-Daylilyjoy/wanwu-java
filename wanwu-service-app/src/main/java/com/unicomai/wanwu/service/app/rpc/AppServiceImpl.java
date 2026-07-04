@@ -69,7 +69,12 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticItem;
@@ -169,6 +174,7 @@ public class AppServiceImpl implements AppService {
     private static final String SEARCH_TYPE_HISTORY = "history";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
+    private static final String CONVERSATION_TYPE_CHATFLOW_OPENAPI = "chatflow_openapi";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -1722,6 +1728,134 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public Map<String, Object> createChatflowOpenApiConversation(ChatflowConversationCreateCommand command) {
+        if (command == null || isBlank(command.getChatflowId())) {
+            throw new IllegalArgumentException("chatflow id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AppRecord chatflow = ensureChatflowExists(userId, orgId, command.getChatflowId());
+        String conversationName = defaultIfBlank(command.getConversationName(),
+                defaultIfBlank(chatflow.getName(), "New conversation"));
+        AssistantConversationRecord record = newConversation(
+                userId, orgId, chatflow.getAppId(), CONVERSATION_TYPE_CHATFLOW_OPENAPI, conversationName);
+        record.setTitle(conversationName);
+        applicationRepository.saveConversation(record);
+        return chatflowConversationInfo(record);
+    }
+
+    @Override
+    public Map<String, Object> listChatflowOpenApiConversations(ChatflowConversationListQuery query) {
+        if (query == null || isBlank(query.getChatflowId())) {
+            throw new IllegalArgumentException("chatflow id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AppRecord chatflow = ensureChatflowExists(userId, orgId, query.getChatflowId());
+        int pageNo = normalizePageNo(query.getPageNo());
+        int pageSize = normalizePageSize(defaultInt(query.getPageSize(), 1000));
+        List<AssistantConversationRecord> records = applicationRepository.listConversations(
+                userId, orgId, chatflow.getAppId(), CONVERSATION_TYPE_CHATFLOW_OPENAPI, offset(pageNo, pageSize), pageSize);
+        long total = applicationRepository.countConversations(
+                userId, orgId, chatflow.getAppId(), CONVERSATION_TYPE_CHATFLOW_OPENAPI);
+        List<Map<String, Object>> rows = new ArrayList<>(records.size());
+        for (AssistantConversationRecord record : records) {
+            rows.add(chatflowConversationInfo(record));
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("conversations", rows);
+        result.put("list", rows);
+        result.put("total", total);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> listChatflowOpenApiConversationMessages(ChatflowConversationMessageListQuery query) {
+        if (query == null || isBlank(query.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = ensureChatflowOpenApiConversation(
+                userId, orgId, query.getChatflowId(), query.getConversationId());
+        int limit = normalizePageSize(defaultInt(query.getLimit(), 50));
+        long totalTurns = applicationRepository.countConversationMessages(userId, orgId, conversation.getConversationId());
+        int offset = (int) Math.max(0L, totalTurns - limit);
+        List<AssistantConversationMessageRecord> records = applicationRepository.listConversationMessages(
+                userId, orgId, conversation.getConversationId(), offset, limit);
+        List<Map<String, Object>> messages = new ArrayList<>(records.size() * 2);
+        for (int i = 0; i < records.size(); i++) {
+            messages.add(chatflowOpenApiMessage(records.get(i), "user", i));
+            messages.add(chatflowOpenApiMessage(records.get(i), "assistant", i));
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("data", messages);
+        result.put("has_more", totalTurns > records.size());
+        result.put("first_id", messages.isEmpty() ? 0 : messages.get(0).get("id"));
+        result.put("last_id", messages.isEmpty() ? 0 : messages.get(messages.size() - 1).get("id"));
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> chatflowOpenApiChat(ChatflowConversationChatCommand command) {
+        if (command == null || isBlank(command.getChatflowId())) {
+            throw new IllegalArgumentException("chatflow id is required");
+        }
+        if (isBlank(command.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        if (isBlank(command.getQuery())) {
+            throw new IllegalArgumentException("query is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = ensureChatflowOpenApiConversation(
+                userId, orgId, command.getChatflowId(), command.getConversationId());
+        long now = clock.millis();
+        AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
+        message.setCreatedAt(now);
+        message.setUpdatedAt(now);
+        message.setUserId(userId);
+        message.setOrgId(orgId);
+        message.setAssistantId(conversation.getAssistantId());
+        message.setConversationId(conversation.getConversationId());
+        message.setDetailId(newDetailId());
+        message.setPrompt(command.getQuery());
+        message.setSysPrompt("");
+        message.setResponse("Chatflow response: " + command.getQuery());
+        message.setResponseListJson(toJsonOrNull(Collections.emptyList()));
+        message.setSearchListJson(toJsonOrNull(Collections.emptyList()));
+        message.setRequestFilesJson(toJsonOrNull(command.getParameters()));
+        message.setResponseFilesJson(toJsonOrNull(Collections.emptyList()));
+        message.setSubConversationListJson(toJsonOrNull(Collections.emptyList()));
+        message.setFileSize(0L);
+        message.setFileName("");
+        message.setQaType(0);
+        applicationRepository.saveConversationMessage(message);
+        applicationRepository.touchConversation(userId, orgId, conversation.getConversationId(), now);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", 0);
+        result.put("message", "success");
+        result.put("conversation_id", conversation.getConversationId());
+        result.put("response", message.getResponse());
+        result.put("finish", 1);
+        return result;
+    }
+
+    @Override
+    public void deleteChatflowOpenApiConversation(ChatflowConversationDeleteByIdCommand command) {
+        if (command == null || isBlank(command.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = ensureChatflowOpenApiConversation(
+                userId, orgId, command.getChatflowId(), command.getConversationId());
+        applicationRepository.deleteConversation(userId, orgId, conversation.getConversationId());
+    }
+
+    @Override
     public void addAssistantWorkflow(AssistantResourceCommand command) {
         AssistantDraftConfigRecord config = resourceConfig(command);
         List<Map<String, Object>> list = listMapOrDefault(config.getWorkflowInfosJson());
@@ -2451,6 +2585,62 @@ public class AppServiceImpl implements AppService {
         return new ConversationDeleteContext(userId, orgId, conversation);
     }
 
+    private AppRecord ensureChatflowExists(String userId, String orgId, String chatflowId) {
+        AppRecord record = applicationRepository.findWorkflow(userId, orgId, chatflowId, APP_TYPE_CHATFLOW);
+        if (record == null) {
+            throw new IllegalArgumentException("chatflow draft not found");
+        }
+        return record;
+    }
+
+    private AssistantConversationRecord ensureChatflowOpenApiConversation(String userId,
+                                                                          String orgId,
+                                                                          String chatflowId,
+                                                                          String conversationId) {
+        AppRecord chatflow = ensureChatflowExists(userId, orgId, chatflowId);
+        AssistantConversationRecord conversation = applicationRepository.findConversation(userId, orgId, conversationId);
+        if (conversation == null
+                || !chatflow.getAppId().equals(conversation.getAssistantId())
+                || !CONVERSATION_TYPE_CHATFLOW_OPENAPI.equals(conversation.getConversationType())) {
+            throw new IllegalArgumentException("chatflow conversation not found");
+        }
+        return conversation;
+    }
+
+    private Map<String, Object> chatflowConversationInfo(AssistantConversationRecord conversation) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("conversation_id", conversation.getConversationId());
+        item.put("conversationId", conversation.getConversationId());
+        item.put("conversation_name", defaultIfBlank(conversation.getTitle(), "New conversation"));
+        item.put("conversationName", defaultIfBlank(conversation.getTitle(), "New conversation"));
+        item.put("uuid", conversation.getAssistantId());
+        return item;
+    }
+
+    private Map<String, Object> chatflowOpenApiMessage(AssistantConversationMessageRecord record, String role, int index) {
+        long turnId = defaultLong(record.getId()) <= 0L ? index + 1L : defaultLong(record.getId());
+        long messageId = turnId * 2L + ("assistant".equals(role) ? 0L : -1L);
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", String.valueOf(messageId));
+        item.put("bot_id", defaultIfBlank(record.getAssistantId(), ""));
+        item.put("role", role);
+        item.put("content", "assistant".equals(role)
+                ? defaultIfBlank(record.getResponse(), "")
+                : defaultIfBlank(record.getPrompt(), ""));
+        item.put("conversation_id", defaultIfBlank(record.getConversationId(), ""));
+        item.put("meta_data", "assistant".equals(role)
+                ? Collections.<String, Object>emptyMap()
+                : mapOrDefault(record.getRequestFilesJson(), new LinkedHashMap<String, Object>()));
+        item.put("created_at", defaultLong(record.getCreatedAt()));
+        item.put("updated_at", defaultLong(record.getUpdatedAt()));
+        item.put("chat_id", String.valueOf(messageId));
+        item.put("content_type", "text");
+        item.put("type", "answer");
+        item.put("section_id", "");
+        item.put("reasoning_content", "");
+        return item;
+    }
+
     private Map<String, Object> toConversationItem(AssistantConversationRecord record) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("conversationId", record.getConversationId());
@@ -2861,6 +3051,10 @@ public class AppServiceImpl implements AppService {
 
     private boolean booleanValue(Boolean value) {
         return value != null && value;
+    }
+
+    private int defaultInt(int value, int fallback) {
+        return value <= 0 ? fallback : value;
     }
 
     private String normalizeConversationType(String value, String defaultValue) {

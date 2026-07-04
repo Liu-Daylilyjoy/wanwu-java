@@ -20,7 +20,12 @@ import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.ApiKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
@@ -168,6 +173,16 @@ public interface AppService {
     Map<String, Object> getChatflowApplication(ChatflowApplicationInfoQuery query);
 
     void deleteChatflowConversation(ChatflowConversationDeleteCommand command);
+
+    Map<String, Object> createChatflowOpenApiConversation(ChatflowConversationCreateCommand command);
+
+    Map<String, Object> listChatflowOpenApiConversations(ChatflowConversationListQuery query);
+
+    Map<String, Object> listChatflowOpenApiConversationMessages(ChatflowConversationMessageListQuery query);
+
+    Map<String, Object> chatflowOpenApiChat(ChatflowConversationChatCommand command);
+
+    void deleteChatflowOpenApiConversation(ChatflowConversationDeleteByIdCommand command);
 
     void addAssistantWorkflow(AssistantResourceCommand command);
 

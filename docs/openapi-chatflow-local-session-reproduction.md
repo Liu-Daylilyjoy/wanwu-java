@@ -1,4 +1,4 @@
-# OpenAPI Chatflow Local Session Reproduction
+# OpenAPI Chatflow Session Reproduction
 
 Date: 2026-07-01
 
@@ -10,17 +10,20 @@ Date: 2026-07-01
 
 ## Java Reproduction
 
-- `OpenApiChatflowSessionStore` provides a small BFF-local state holder for development OpenAPI conversations.
+- `AppService` now exposes Chatflow OpenAPI conversation create/list/message-list/chat/delete methods.
+- Chatflow OpenAPI conversations and deterministic development turns are persisted through the existing `assistant_conversations` and `assistant_conversation_messages` tables with `conversation_type=chatflow_openapi` and the Chatflow `appId` stored in `assistant_id`.
+- `OpenApiChatflowSessionStore` remains a BFF-local fallback when AppService is unavailable or a development request targets a Chatflow id that has not been created in Java yet.
 - `POST /service/api/openapi/v1/chatflow/conversation` creates a scoped conversation and returns `conversation_id`, `conversationId`, `conversation_name`, and `uuid`.
-- `POST /service/api/openapi/v1/chatflow/chat` records a user message and deterministic assistant response, then returns a legacy `text/event-stream` frame.
+- `POST /service/api/openapi/v1/chatflow/chat` records a user message and deterministic assistant response, emits one legacy `text/event-stream` frame, and records OpenAPI-source app statistics.
 - `POST /service/api/openapi/v1/chatflow/conversation/message/list` returns Go-shaped message rows under `data`, with `has_more`, `first_id`, and `last_id`.
 - `POST /service/api/openapi/v1/chatflow/conversation/list` returns `conversations`, `list`, and `total`.
-- `DELETE /service/api/openapi/v1/chatflow/conversation` removes the scoped local conversation.
+- `DELETE /service/api/openapi/v1/chatflow/conversation` removes the persisted scoped conversation and its messages.
 
 ## Verification
 
-- `WanwuOpenApiControllerTest#chatflowOpenApiRoutesKeepLocalConversationState` verifies create, chat, message list, conversation list, and delete behavior.
+- `AppServiceImplTest#chatflowOpenApiConversationsPersistMessagesAndListState` verifies persisted create, chat, message list, conversation list, and delete behavior.
+- `WanwuOpenApiControllerTest#chatflowOpenApiRoutesUseAppServiceConversationState` verifies the OpenAPI route family uses AppService first while preserving the Go-shaped response contracts.
 
 ## Remaining Gap
 
-This is a local development Chatflow loop, not the Go Coze runtime. Full parity still needs real project execution, streaming event sequencing, durable conversation persistence, published-app authorization, workflow node execution, and API usage metrics.
+This is still a deterministic development Chatflow loop, not the Go Coze runtime. Full parity still needs real project execution, streaming event sequencing, published-app authorization, workflow node execution, and exact provider/runtime usage attribution.

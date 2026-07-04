@@ -46,7 +46,12 @@ import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
@@ -629,6 +634,73 @@ public class AppServiceImplTest {
         service.deleteChatflow(delete);
         assertEquals(0, service.listApplications(
                 new ApplicationListQuery("chatflow", created.getWorkflowId(), "dev-admin", "default-org")).getTotal());
+    }
+
+    @Test
+    public void chatflowOpenApiConversationsPersistMessagesAndListState() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("PolicyChat");
+        create.setDesc("chatflow for openapi");
+        create.setSchema("{\"nodes\":[]}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Policy chat");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        Map<String, Object> created = service.createChatflowOpenApiConversation(createConversation);
+        String conversationId = String.valueOf(created.get("conversation_id"));
+        assertTrue(conversationId.startsWith("conversation-"));
+        assertEquals("Policy chat", created.get("conversation_name"));
+
+        ChatflowConversationChatCommand chat = new ChatflowConversationChatCommand();
+        chat.setChatflowId(chatflow.getWorkflowId());
+        chat.setConversationId(conversationId);
+        chat.setQuery("hello chatflow");
+        chat.setParameters(Collections.<String, Object>singletonMap("city", "Beijing"));
+        chat.setUserId("dev-admin");
+        chat.setOrgId("default-org");
+        Map<String, Object> chatResult = service.chatflowOpenApiChat(chat);
+        assertEquals(0, chatResult.get("code"));
+        assertEquals(conversationId, chatResult.get("conversation_id"));
+        assertEquals("Chatflow response: hello chatflow", chatResult.get("response"));
+
+        ChatflowConversationMessageListQuery messages = new ChatflowConversationMessageListQuery();
+        messages.setChatflowId(chatflow.getWorkflowId());
+        messages.setConversationId(conversationId);
+        messages.setLimit(10);
+        messages.setUserId("dev-admin");
+        messages.setOrgId("default-org");
+        Map<String, Object> messagePage = service.listChatflowOpenApiConversationMessages(messages);
+        List<Map<String, Object>> rows = castList(messagePage.get("data"));
+        assertEquals(2, rows.size());
+        assertEquals("user", rows.get(0).get("role"));
+        assertEquals("hello chatflow", rows.get(0).get("content"));
+        assertEquals("Beijing", castMap(rows.get(0).get("meta_data")).get("city"));
+        assertEquals("assistant", rows.get(1).get("role"));
+        assertEquals("Chatflow response: hello chatflow", rows.get(1).get("content"));
+
+        ChatflowConversationListQuery listQuery = new ChatflowConversationListQuery();
+        listQuery.setChatflowId(chatflow.getWorkflowId());
+        listQuery.setUserId("dev-admin");
+        listQuery.setOrgId("default-org");
+        Map<String, Object> conversations = service.listChatflowOpenApiConversations(listQuery);
+        assertEquals(1L, conversations.get("total"));
+        assertEquals(conversationId, castList(conversations.get("conversations")).get(0).get("conversation_id"));
+
+        ChatflowConversationDeleteByIdCommand delete = new ChatflowConversationDeleteByIdCommand();
+        delete.setChatflowId(chatflow.getWorkflowId());
+        delete.setConversationId(conversationId);
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        service.deleteChatflowOpenApiConversation(delete);
+        assertEquals(0L, service.listChatflowOpenApiConversations(listQuery).get("total"));
     }
 
     @Test

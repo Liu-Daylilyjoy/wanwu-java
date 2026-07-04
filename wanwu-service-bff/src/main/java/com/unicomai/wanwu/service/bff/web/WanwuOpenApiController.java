@@ -22,6 +22,11 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
@@ -71,6 +76,7 @@ public class WanwuOpenApiController {
     private static final String AGENT_APP_TYPE = "agent";
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
+    private static final String CHATFLOW_APP_TYPE = "chatflow";
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -433,8 +439,7 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         OpenApiContext ctx = context(headers);
         Map<String, Object> body = body(request);
-        return FrontendResponse.ok(chatflowSessionStore.create(
-                ctx.userId, ctx.orgId, text(body, "uuid"), text(body, "conversation_name")));
+        return FrontendResponse.ok(serviceCreateChatflowConversation(ctx, body));
     }
 
     @DeleteMapping("/chatflow/conversation")
@@ -443,9 +448,7 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         OpenApiContext ctx = context(headers);
         Map<String, Object> body = body(request);
-        chatflowSessionStore.delete(ctx.userId, ctx.orgId,
-                text(body, "uuid"),
-                firstText(body, "conversation_id", "conversationId"));
+        serviceDeleteChatflowConversation(ctx, body);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -454,7 +457,7 @@ public class WanwuOpenApiController {
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
         OpenApiContext ctx = context(headers);
-        return FrontendResponse.ok(chatflowSessionStore.list(ctx.userId, ctx.orgId, text(body(request), "uuid")));
+        return FrontendResponse.ok(serviceListChatflowConversations(ctx, body(request)));
     }
 
     @PostMapping("/chatflow/conversation/message/list")
@@ -463,12 +466,7 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         OpenApiContext ctx = context(headers);
         Map<String, Object> body = body(request);
-        return FrontendResponse.ok(chatflowSessionStore.messages(
-                ctx.userId,
-                ctx.orgId,
-                text(body, "uuid"),
-                firstText(body, "conversation_id", "conversationId"),
-                intValue(body.get("limit"), 50)));
+        return FrontendResponse.ok(serviceListChatflowMessages(ctx, body));
     }
 
     @PostMapping("/chatflow/chat")
@@ -477,13 +475,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         OpenApiContext ctx = context(headers);
         Map<String, Object> body = body(request);
-        Map<String, Object> data = chatflowSessionStore.chat(
-                ctx.userId,
-                ctx.orgId,
-                text(body, "uuid"),
-                firstText(body, "conversation_id", "conversationId"),
-                text(body, "query"),
-                objectMap(body.get("parameters")));
+        long startedAt = System.currentTimeMillis();
+        Map<String, Object> data = serviceChatflowChat(ctx, body);
+        recordAppStatistic(ctx, text(body, "uuid"), CHATFLOW_APP_TYPE, true, true, startedAt);
         return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + toJson(data) + "\n\n");
     }
 
@@ -922,6 +916,109 @@ public class WanwuOpenApiController {
         }
         List<String> values = headers.get(name);
         return values == null || values.isEmpty() ? "" : values.get(0);
+    }
+
+    private Map<String, Object> serviceCreateChatflowConversation(OpenApiContext ctx, Map<String, Object> body) {
+        String chatflowId = text(body, "uuid");
+        if (appService != null) {
+            try {
+                ChatflowConversationCreateCommand command = new ChatflowConversationCreateCommand();
+                command.setChatflowId(chatflowId);
+                command.setConversationName(text(body, "conversation_name"));
+                command.setUserId(ctx.userId);
+                command.setOrgId(ctx.orgId);
+                Map<String, Object> result = appService.createChatflowOpenApiConversation(command);
+                if (result != null) {
+                    return result;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return chatflowSessionStore.create(ctx.userId, ctx.orgId, chatflowId, text(body, "conversation_name"));
+    }
+
+    private void serviceDeleteChatflowConversation(OpenApiContext ctx, Map<String, Object> body) {
+        String chatflowId = text(body, "uuid");
+        String conversationId = firstText(body, "conversation_id", "conversationId");
+        if (appService != null) {
+            try {
+                ChatflowConversationDeleteByIdCommand command = new ChatflowConversationDeleteByIdCommand();
+                command.setChatflowId(chatflowId);
+                command.setConversationId(conversationId);
+                command.setUserId(ctx.userId);
+                command.setOrgId(ctx.orgId);
+                appService.deleteChatflowOpenApiConversation(command);
+                return;
+            } catch (RuntimeException ignored) {
+            }
+        }
+        chatflowSessionStore.delete(ctx.userId, ctx.orgId, chatflowId, conversationId);
+    }
+
+    private Map<String, Object> serviceListChatflowConversations(OpenApiContext ctx, Map<String, Object> body) {
+        String chatflowId = text(body, "uuid");
+        if (appService != null) {
+            try {
+                ChatflowConversationListQuery query = new ChatflowConversationListQuery();
+                query.setChatflowId(chatflowId);
+                query.setPageNo(1);
+                query.setPageSize(1000);
+                query.setUserId(ctx.userId);
+                query.setOrgId(ctx.orgId);
+                Map<String, Object> result = appService.listChatflowOpenApiConversations(query);
+                if (result != null) {
+                    return result;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return chatflowSessionStore.list(ctx.userId, ctx.orgId, chatflowId);
+    }
+
+    private Map<String, Object> serviceListChatflowMessages(OpenApiContext ctx, Map<String, Object> body) {
+        String chatflowId = text(body, "uuid");
+        String conversationId = firstText(body, "conversation_id", "conversationId");
+        int limit = intValue(body.get("limit"), 50);
+        if (appService != null) {
+            try {
+                ChatflowConversationMessageListQuery query = new ChatflowConversationMessageListQuery();
+                query.setChatflowId(chatflowId);
+                query.setConversationId(conversationId);
+                query.setLimit(limit);
+                query.setUserId(ctx.userId);
+                query.setOrgId(ctx.orgId);
+                Map<String, Object> result = appService.listChatflowOpenApiConversationMessages(query);
+                if (result != null) {
+                    return result;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return chatflowSessionStore.messages(ctx.userId, ctx.orgId, chatflowId, conversationId, limit);
+    }
+
+    private Map<String, Object> serviceChatflowChat(OpenApiContext ctx, Map<String, Object> body) {
+        String chatflowId = text(body, "uuid");
+        String conversationId = firstText(body, "conversation_id", "conversationId");
+        String queryText = text(body, "query");
+        Map<String, Object> parameters = objectMap(body.get("parameters"));
+        if (appService != null) {
+            try {
+                ChatflowConversationChatCommand command = new ChatflowConversationChatCommand();
+                command.setChatflowId(chatflowId);
+                command.setConversationId(conversationId);
+                command.setQuery(queryText);
+                command.setParameters(parameters);
+                command.setUserId(ctx.userId);
+                command.setOrgId(ctx.orgId);
+                Map<String, Object> result = appService.chatflowOpenApiChat(command);
+                if (result != null) {
+                    return result;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return chatflowSessionStore.chat(ctx.userId, ctx.orgId, chatflowId, conversationId, queryText, parameters);
     }
 
     private void recordAppStatistic(OpenApiContext ctx,
