@@ -128,6 +128,8 @@ public interface ApplicationRepository {
 
     boolean updateWorkflowPublishType(String userId, String orgId, String workflowId, String appType, String publishType, long updatedAt);
 
+    boolean convertWorkflowAppType(String userId, String orgId, String workflowId, String oldAppType, String newAppType, long updatedAt);
+
     boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft);
 
     WorkflowRunRecord saveWorkflowRun(WorkflowRunRecord record);

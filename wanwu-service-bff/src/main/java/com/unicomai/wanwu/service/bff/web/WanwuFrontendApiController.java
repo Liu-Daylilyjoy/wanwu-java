@@ -50,6 +50,7 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.AppTypeConvertCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
@@ -1064,8 +1065,10 @@ public class WanwuFrontendApiController {
     }
 
     @PostMapping("/appspace/workflow/convert")
-    public FrontendResponse<Map<String, Object>> convertWorkflow() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> convertWorkflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowIdRequest request) {
+        return convertFlowType(authorization, request, WORKFLOW_APP_TYPE, CHATFLOW_APP_TYPE);
     }
 
     @PostMapping("/appspace/chatflow")
@@ -1134,8 +1137,10 @@ public class WanwuFrontendApiController {
     }
 
     @PostMapping("/appspace/chatflow/convert")
-    public FrontendResponse<Map<String, Object>> convertChatflow() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> convertChatflow(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) WorkflowIdRequest request) {
+        return convertFlowType(authorization, request, CHATFLOW_APP_TYPE, WORKFLOW_APP_TYPE);
     }
 
     @PostMapping("/chatflow/application/list")
@@ -4182,6 +4187,22 @@ public class WanwuFrontendApiController {
             request.setSchema(form.get("schema"));
         }
         return request;
+    }
+
+    private FrontendResponse<Map<String, Object>> convertFlowType(String authorization,
+                                                                  WorkflowIdRequest request,
+                                                                  String oldAppType,
+                                                                  String newAppType) {
+        try {
+            UserContext userContext = userContext(authorization);
+            String workflowId = request == null ? "" : request.workflowId();
+            AppTypeConvertCommand command = new AppTypeConvertCommand(
+                    workflowId, oldAppType, newAppType, userContext.getUserId(), userContext.getOrgId());
+            appService.convertAppType(command);
+            return FrontendResponse.ok(workflowCreateResult(new WorkflowCreateResult(workflowId)));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     private Map<String, Object> workflowCreateResult(WorkflowCreateResult result) {

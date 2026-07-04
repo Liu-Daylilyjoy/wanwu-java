@@ -261,6 +261,21 @@ public interface AppMapper extends BaseMapper<AppEntity> {
                                   @Param("publishType") String publishType,
                                   @Param("updatedAt") Long updatedAt);
 
+    @Update({
+            "UPDATE apps",
+            "SET app_type = #{newAppType}, updated_at = #{updatedAt}",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND app_type = #{oldAppType}",
+            "  AND app_id = #{workflowId}"
+    })
+    int updateWorkflowAppType(@Param("userId") String userId,
+                              @Param("orgId") String orgId,
+                              @Param("workflowId") String workflowId,
+                              @Param("oldAppType") String oldAppType,
+                              @Param("newAppType") String newAppType,
+                              @Param("updatedAt") Long updatedAt);
+
     @Delete({
             "DELETE FROM apps",
             "WHERE user_id = #{userId}",

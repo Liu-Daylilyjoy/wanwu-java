@@ -65,6 +65,7 @@ import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
 import com.unicomai.wanwu.api.app.dto.AppStatisticTrend;
+import com.unicomai.wanwu.api.app.dto.AppTypeConvertCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -1742,6 +1743,26 @@ public class AppServiceImpl implements AppService {
                 workflow.getName(),
                 defaultIfBlank(workflow.getDesc(), ""),
                 draft == null ? defaultWorkflowSchema(query.getWorkflowId()) : defaultIfBlank(draft.getSchemaJson(), defaultWorkflowSchema(query.getWorkflowId())));
+    }
+
+    @Override
+    public void convertAppType(AppTypeConvertCommand command) {
+        if (command == null || isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String oldAppType = normalizeAppType(command.getOldAppType());
+        String newAppType = normalizeAppType(command.getNewAppType());
+        if (!isWorkflowLike(oldAppType) || !isWorkflowLike(newAppType)) {
+            throw new IllegalArgumentException("unsupported app type");
+        }
+        if (oldAppType.equals(newAppType)) {
+            return;
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        long now = clock.millis();
+        applicationRepository.convertWorkflowAppType(
+                userId, orgId, command.getAppId(), oldAppType, newAppType, now);
     }
 
     @Override

@@ -693,6 +693,12 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    public boolean convertWorkflowAppType(String userId, String orgId, String workflowId,
+                                          String oldAppType, String newAppType, long updatedAt) {
+        return appMapper.updateWorkflowAppType(userId, orgId, workflowId, oldAppType, newAppType, updatedAt) > 0;
+    }
+
+    @Override
     @Transactional
     public boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft) {
         appMapper.updateWorkflowUpdatedAt(record.getUserId(), record.getOrgId(), record.getAppId(), record.getAppType(), record.getUpdatedAt());

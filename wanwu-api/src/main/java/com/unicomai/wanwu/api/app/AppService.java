@@ -55,6 +55,7 @@ import com.unicomai.wanwu.api.app.dto.AppStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
+import com.unicomai.wanwu.api.app.dto.AppTypeConvertCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
@@ -178,6 +179,8 @@ public interface AppService {
     WorkflowExportResult exportWorkflow(WorkflowExportQuery query);
 
     WorkflowRunResult runWorkflow(WorkflowRunCommand command);
+
+    void convertAppType(AppTypeConvertCommand command);
 
     WorkflowCreateResult createChatflow(WorkflowCreateCommand command);
 

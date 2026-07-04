@@ -43,6 +43,7 @@ import com.unicomai.wanwu.api.app.dto.AppKeyCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
+import com.unicomai.wanwu.api.app.dto.AppTypeConvertCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
@@ -688,6 +689,21 @@ public class WanwuFrontendApiControllerTest {
         assertEquals("dev-admin", copyCaptor.getValue().getUserId());
         assertEquals("default-org", copyCaptor.getValue().getOrgId());
 
+        mockMvc.perform(post("/user/api/v1/appspace/workflow/convert")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"workflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"));
+
+        ArgumentCaptor<AppTypeConvertCommand> convertCaptor = forClass(AppTypeConvertCommand.class);
+        verify(appService).convertAppType(convertCaptor.capture());
+        assertEquals("workflow-001", convertCaptor.getValue().getAppId());
+        assertEquals("workflow", convertCaptor.getValue().getOldAppType());
+        assertEquals("chatflow", convertCaptor.getValue().getNewAppType());
+        assertEquals("dev-admin", convertCaptor.getValue().getUserId());
+        assertEquals("default-org", convertCaptor.getValue().getOrgId());
+
         mockMvc.perform(get("/user/api/v1/appspace/workflow/export/draft")
                         .header("Authorization", "Bearer dev-token")
                         .param("workflow_id", "workflow-001"))
@@ -821,6 +837,21 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"workflow_id\":\"chatflow-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.workflow_id").value("chatflow-002"));
+
+        mockMvc.perform(post("/user/api/v1/appspace/chatflow/convert")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workflow_id\":\"chatflow-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflow_id").value("chatflow-001"));
+
+        ArgumentCaptor<AppTypeConvertCommand> convertCaptor = forClass(AppTypeConvertCommand.class);
+        verify(appService).convertAppType(convertCaptor.capture());
+        assertEquals("chatflow-001", convertCaptor.getValue().getAppId());
+        assertEquals("chatflow", convertCaptor.getValue().getOldAppType());
+        assertEquals("workflow", convertCaptor.getValue().getNewAppType());
+        assertEquals("dev-admin", convertCaptor.getValue().getUserId());
+        assertEquals("default-org", convertCaptor.getValue().getOrgId());
 
         mockMvc.perform(get("/user/api/v1/appspace/chatflow/export/draft")
                         .header("Authorization", "Bearer dev-token")

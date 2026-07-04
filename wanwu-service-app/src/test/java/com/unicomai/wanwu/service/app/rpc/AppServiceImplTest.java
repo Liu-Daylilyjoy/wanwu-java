@@ -54,6 +54,7 @@ import com.unicomai.wanwu.api.app.dto.ApiKeyUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AppStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.AppStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.AppStatisticResult;
+import com.unicomai.wanwu.api.app.dto.AppTypeConvertCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
@@ -645,6 +646,43 @@ public class AppServiceImplTest {
         service.deleteWorkflow(delete);
         assertEquals(0, service.listApplications(
                 new ApplicationListQuery("workflow", created.getWorkflowId(), "dev-admin", "default-org")).getTotal());
+    }
+
+    @Test
+    public void convertAppTypeMovesWorkflowBetweenWorkflowAndChatflowLists() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("ConvertibleFlow");
+        create.setDesc("convertible");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        AppTypeConvertCommand toChatflow = new AppTypeConvertCommand(
+                created.getWorkflowId(), "workflow", "chatflow", "dev-admin", "default-org");
+        service.convertAppType(toChatflow);
+
+        assertEquals(0, service.listApplications(
+                new ApplicationListQuery("workflow", "Convertible", "dev-admin", "default-org")).getTotal());
+        ApplicationListResult chatflows = service.listApplications(
+                new ApplicationListQuery("chatflow", "Convertible", "dev-admin", "default-org"));
+        assertEquals(1, chatflows.getTotal());
+        assertEquals(created.getWorkflowId(), chatflows.getList().get(0).get("workflow_id"));
+        assertEquals("ConvertibleFlow", service.exportChatflow(
+                new WorkflowExportQuery(created.getWorkflowId(), "", false, "dev-admin", "default-org")).getName());
+
+        AppTypeConvertCommand toWorkflow = new AppTypeConvertCommand(
+                created.getWorkflowId(), "chatflow", "workflow", "dev-admin", "default-org");
+        service.convertAppType(toWorkflow);
+
+        assertEquals(0, service.listApplications(
+                new ApplicationListQuery("chatflow", "Convertible", "dev-admin", "default-org")).getTotal());
+        assertEquals(1, service.listApplications(
+                new ApplicationListQuery("workflow", "Convertible", "dev-admin", "default-org")).getTotal());
+        assertEquals("ConvertibleFlow", service.exportWorkflow(
+                new WorkflowExportQuery(created.getWorkflowId(), "", false, "dev-admin", "default-org")).getName());
     }
 
     @Test
@@ -3193,6 +3231,18 @@ public class AppServiceImplTest {
                 return false;
             }
             existing.setPublishType(publishType);
+            existing.setUpdatedAt(updatedAt);
+            return true;
+        }
+
+        @Override
+        public boolean convertWorkflowAppType(String userId, String orgId, String workflowId,
+                                              String oldAppType, String newAppType, long updatedAt) {
+            AppRecord existing = findWorkflow(userId, orgId, workflowId, oldAppType);
+            if (existing == null) {
+                return false;
+            }
+            existing.setAppType(newAppType);
             existing.setUpdatedAt(updatedAt);
             return true;
         }
