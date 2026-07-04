@@ -53,6 +53,8 @@ public class WanwuModelUseApiController {
             new ConcurrentHashMap<String, Map<String, Object>>();
     private static final Map<String, Map<String, Object>> ACTIONS =
             new ConcurrentHashMap<String, Map<String, Object>>();
+    private static final Map<String, Map<String, Map<String, Object>>> KNOWLEDGE_FILES_BY_ASSISTANT =
+            new ConcurrentHashMap<String, Map<String, Map<String, Object>>>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -207,21 +209,53 @@ public class WanwuModelUseApiController {
 
     @PostMapping(MODEL_PREFIX + "/assistant/knowledge/file/upload")
     public FrontendResponse<Map<String, Object>> uploadAssistantKnowledgeFiles(
+            @RequestParam(value = "assistantId", required = false) String assistantId,
+            @RequestParam(value = "appId", required = false) String appId,
             @RequestParam(value = "file", required = false) List<MultipartFile> file,
             @RequestParam(value = "files", required = false) List<MultipartFile> files) {
-        return FrontendResponse.ok(fileUploadResult(firstFiles(file, files)));
+        String ownerId = defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant"));
+        List<String> fileIds = new ArrayList<String>();
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (MultipartFile uploaded : firstFiles(file, files)) {
+            if (uploaded == null) {
+                continue;
+            }
+            Map<String, Object> row = knowledgeFileRow(uploaded);
+            String fileId = String.valueOf(row.get("fileId"));
+            knowledgeFiles(ownerId).put(fileId, row);
+            fileIds.add(fileId);
+            rows.add(row);
+        }
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("list", fileIds);
+        body.put("fileList", rows);
+        body.put("total", knowledgeFiles(ownerId).size());
+        return FrontendResponse.ok(body);
     }
 
     @GetMapping(MODEL_PREFIX + "/assistant/knowledge/file/list")
-    public FrontendResponse<Map<String, Object>> listAssistantKnowledgeFiles() {
+    public FrontendResponse<Map<String, Object>> listAssistantKnowledgeFiles(
+            @RequestParam(value = "assistantId", required = false) String assistantId,
+            @RequestParam(value = "appId", required = false) String appId) {
+        String ownerId = defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant"));
         Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", Collections.emptyList());
-        body.put("total", 0);
+        body.put("list", new ArrayList<Map<String, Object>>(knowledgeFiles(ownerId).values()));
+        body.put("total", knowledgeFiles(ownerId).size());
         return FrontendResponse.ok(body);
     }
 
     @DeleteMapping(MODEL_PREFIX + "/assistant/knowledge/file/delete")
-    public FrontendResponse<Map<String, Object>> deleteAssistantKnowledgeFile() {
+    public FrontendResponse<Map<String, Object>> deleteAssistantKnowledgeFile(
+            @RequestBody(required = false) Map<String, Object> request) {
+        String ownerId = defaultIfBlank(firstText(request, "assistantId", "appId"), "");
+        String fileId = fileIdValue(request == null ? null : request.get("fileId"));
+        if (hasText(ownerId)) {
+            knowledgeFiles(ownerId).remove(fileId);
+        } else {
+            for (Map<String, Map<String, Object>> files : KNOWLEDGE_FILES_BY_ASSISTANT.values()) {
+                files.remove(fileId);
+            }
+        }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -460,6 +494,44 @@ public class WanwuModelUseApiController {
         return body;
     }
 
+    private Map<String, Map<String, Object>> knowledgeFiles(String assistantId) {
+        String ownerId = defaultIfBlank(assistantId, "default-assistant");
+        Map<String, Map<String, Object>> files = KNOWLEDGE_FILES_BY_ASSISTANT.get(ownerId);
+        if (files == null) {
+            Map<String, Map<String, Object>> created = new ConcurrentHashMap<String, Map<String, Object>>();
+            Map<String, Map<String, Object>> existing = KNOWLEDGE_FILES_BY_ASSISTANT.putIfAbsent(ownerId, created);
+            files = existing == null ? created : existing;
+        }
+        return files;
+    }
+
+    private Map<String, Object> knowledgeFileRow(MultipartFile file) {
+        Map<String, Object> row = new LinkedHashMap<String, Object>();
+        String fileId = "model-use-knowledge-file-" + UUID.randomUUID().toString().replace("-", "");
+        String fileName = defaultIfBlank(file.getOriginalFilename(), "knowledge-file");
+        row.put("fileId", fileId);
+        row.put("id", fileId);
+        row.put("fileName", fileName);
+        row.put("file_name", fileName);
+        row.put("name", fileName);
+        row.put("size", file.getSize());
+        row.put("status", "success");
+        row.put("url", "/use/model/api/v1/assistant/knowledge/file/" + fileId);
+        return row;
+    }
+
+    private String fileIdValue(Object raw) {
+        if (raw instanceof Map) {
+            Map<?, ?> map = (Map<?, ?>) raw;
+            Object value = map.get("fileId");
+            if (value == null) {
+                value = map.get("id");
+            }
+            return value == null ? "" : String.valueOf(value);
+        }
+        return raw == null ? "" : String.valueOf(raw);
+    }
+
     private List<MultipartFile> firstFiles(List<MultipartFile> first, List<MultipartFile> second) {
         if (first != null && !first.isEmpty()) {
             return first;
@@ -528,6 +600,10 @@ public class WanwuModelUseApiController {
 
     private String defaultIfBlank(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private static class UserContext {

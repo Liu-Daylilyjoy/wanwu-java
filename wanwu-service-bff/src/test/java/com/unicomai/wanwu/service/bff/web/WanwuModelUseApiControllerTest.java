@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.bff.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
@@ -14,11 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
@@ -36,6 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 public class WanwuModelUseApiControllerTest {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
     private final AppService appService = mock(AppService.class);
     private final ModelService modelService = mock(ModelService.class);
     private final MockMvc mockMvc = MockMvcBuilders
@@ -142,6 +146,29 @@ public class WanwuModelUseApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.assistantId").value("auto-assistant-001"))
                 .andExpect(jsonPath("$.data.name").value("build app"));
+        MvcResult knowledgeUpload = mockMvc.perform(multipart("/use/model/api/v1/assistant/knowledge/file/upload")
+                        .file(new MockMultipartFile("files", "knowledge.txt", "text/plain",
+                                "knowledge".getBytes(StandardCharsets.UTF_8)))
+                        .param("assistantId", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0]", containsString("model-use-knowledge-file-")))
+                .andExpect(jsonPath("$.data.fileList[0].fileName").value("knowledge.txt"))
+                .andReturn();
+        String knowledgeFileId = firstKnowledgeFileId(knowledgeUpload);
+        mockMvc.perform(get("/use/model/api/v1/assistant/knowledge/file/list")
+                        .param("assistantId", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].fileName").value("knowledge.txt"))
+                .andExpect(jsonPath("$.data.total").value(1));
+        mockMvc.perform(delete("/use/model/api/v1/assistant/knowledge/file/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"fileId\":\"" + knowledgeFileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/use/model/api/v1/assistant/knowledge/file/list")
+                        .param("assistantId", "assistant-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
         mockMvc.perform(post("/use/model/api/v1/file/confirmPath")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fileName\":\"demo.txt\"}"))
@@ -213,6 +240,14 @@ public class WanwuModelUseApiControllerTest {
 
     private AssistantConversationPageResult page(Map<String, Object> row) {
         return new AssistantConversationPageResult(Collections.singletonList(row), 1, 1, 10);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String firstKnowledgeFileId(MvcResult result) throws Exception {
+        Map<String, Object> body = JSON.readValue(result.getResponse().getContentAsString(), Map.class);
+        Map<String, Object> data = (Map<String, Object>) body.get("data");
+        List<Object> list = (List<Object>) data.get("list");
+        return String.valueOf(list.get(0));
     }
 
     private Map<String, Object> row(String key1, String value1, String key2, String value2) {
