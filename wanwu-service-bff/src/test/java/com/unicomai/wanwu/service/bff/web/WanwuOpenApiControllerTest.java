@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.bff.web;
 import com.jayway.jsonpath.JsonPath;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
@@ -418,6 +419,8 @@ public class WanwuOpenApiControllerTest {
         Map<String, Object> hit = new LinkedHashMap<>();
         hit.put("searchList", Collections.singletonList(Collections.singletonMap("title", "OpenApiDoc.txt")));
         when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any())).thenReturn(hit);
+        when(appService.getAppKeyByKey("app-key"))
+                .thenReturn(appKey("app-key-1", "app-key", "mcpserver-001", "mcpserver"));
 
         mockMvc.perform(get("/service/api/openapi/v1/model/list")
                         .header("Authorization", "Bearer dev-token")
@@ -468,16 +471,38 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(jsonPath("$.keys[0].kty").value("RSA"))
                 .andExpect(jsonPath("$.keys[0].alg").value("RS256"));
 
-        mockMvc.perform(get("/service/api/openapi/v1/mcp/server/sse").param("apiKey", "app-key"))
+        mockMvc.perform(get("/service/api/openapi/v1/mcp/server/sse").param("key", "app-key"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-                .andExpect(content().string(containsString("notifications/initialized")));
+                .andExpect(content().string(containsString("notifications/initialized")))
+                .andExpect(content().string(containsString("mcpserver-001")));
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "app-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-call-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.mcpServerId").value("mcpserver-001"));
 
         verify(knowledgeService).createKnowledge(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).selectKnowledge(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).getDocConfig(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).importDocs(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), any());
+    }
+
+    @Test
+    public void mcpOpenApiRoutesRejectMissingOrWrongAppKey() throws Exception {
+        when(appService.getAppKeyByKey("agent-key"))
+                .thenReturn(appKey("app-key-2", "agent-key", "agent-001", "agent"));
+
+        mockMvc.perform(get("/service/api/openapi/v1/mcp/server/sse"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("token is nil"));
+
+        mockMvc.perform(get("/service/api/openapi/v1/mcp/server/sse").param("key", "agent-key"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("invalid appType"));
     }
 
     @Test
@@ -585,6 +610,17 @@ public class WanwuOpenApiControllerTest {
         info.setName("Real Key");
         info.setStatus(status);
         info.setExpiredAt(expiredAt);
+        return info;
+    }
+
+    private AppKeyInfo appKey(String apiId, String apiKey, String appId, String appType) {
+        AppKeyInfo info = new AppKeyInfo();
+        info.setApiId(apiId);
+        info.setApiKey(apiKey);
+        info.setUserId("dev-admin");
+        info.setOrgId("default-org");
+        info.setAppId(appId);
+        info.setAppType(appType);
         return info;
     }
 

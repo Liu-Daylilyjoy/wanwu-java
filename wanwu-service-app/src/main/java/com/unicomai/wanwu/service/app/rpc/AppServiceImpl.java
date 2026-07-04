@@ -1336,6 +1336,18 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public AppKeyInfo getAppKeyByKey(String appKey) {
+        if (isBlank(appKey)) {
+            throw new IllegalArgumentException("app key is required");
+        }
+        AppKeyRecord record = applicationRepository.findAppKeyByKey(appKey);
+        if (record == null) {
+            throw new IllegalArgumentException("app key not found");
+        }
+        return toAppKeyInfo(record);
+    }
+
+    @Override
     public Map<String, Object> getAssistantDraft(AssistantDetailQuery query) {
         if (query == null || isBlank(query.getAssistantId())) {
             throw new IllegalArgumentException("assistant id is required");

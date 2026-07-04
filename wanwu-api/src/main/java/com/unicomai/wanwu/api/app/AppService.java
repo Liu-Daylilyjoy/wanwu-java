@@ -284,6 +284,8 @@ public interface AppService {
 
     List<AppKeyInfo> listAppKeys(AppKeyListQuery query);
 
+    AppKeyInfo getAppKeyByKey(String appKey);
+
     void createAppUrl(AppUrlCreateCommand command);
 
     void updateAppUrl(AppUrlUpdateCommand command);

@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
@@ -77,6 +78,7 @@ public class WanwuOpenApiController {
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CHATFLOW_APP_TYPE = "chatflow";
+    private static final String MCP_SERVER_APP_TYPE = "mcpserver";
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final long OAUTH_CODE_SECONDS = 600L;
@@ -694,18 +696,25 @@ public class WanwuOpenApiController {
     }
 
     @GetMapping({"/mcp/server/sse", "/mcp/server/streamable"})
-    public ResponseEntity<String> mcpGet(@RequestParam(value = "apiKey", required = false) String apiKey) {
+    public ResponseEntity<String> mcpGet(@RequestParam(value = "key", required = false) String key,
+                                         @RequestParam(value = "apiKey", required = false) String apiKey) {
+        AppKeyInfo appKey = mcpAppKey(key, apiKey);
+        String token = defaultIfBlank(key, apiKey);
         String event = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{\"apiKey\":\""
-                + jsonEscape(defaultIfBlank(apiKey, "")) + "\"}}";
+                + jsonEscape(defaultIfBlank(token, "")) + "\",\"appId\":\""
+                + jsonEscape(defaultIfBlank(appKey.getAppId(), "")) + "\"}}";
         return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + event + "\n\n");
     }
 
     @PostMapping({"/mcp/server/message", "/mcp/server/streamable"})
-    public ResponseEntity<Map<String, Object>> mcpPost(@RequestBody(required = false) Map<String, Object> request) {
+    public ResponseEntity<Map<String, Object>> mcpPost(@RequestParam(value = "key", required = false) String key,
+                                                       @RequestParam(value = "apiKey", required = false) String apiKey,
+                                                       @RequestBody(required = false) Map<String, Object> request) {
+        AppKeyInfo appKey = mcpAppKey(key, apiKey);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("jsonrpc", "2.0");
         data.put("id", request == null ? null : request.get("id"));
-        data.put("result", Collections.emptyMap());
+        data.put("result", Collections.singletonMap("mcpServerId", defaultIfBlank(appKey.getAppId(), "")));
         return ResponseEntity.ok(data);
     }
 
@@ -889,6 +898,29 @@ public class WanwuOpenApiController {
         OpenApiAuthSupport.AuthResult auth = OpenApiAuthSupport.resolve(
                 appService, OpenApiAuthSupport.extractToken(headers));
         return new OpenApiContext(auth.userId, auth.orgId, auth.apiKeyId);
+    }
+
+    private AppKeyInfo mcpAppKey(String key, String legacyApiKey) {
+        String token = defaultIfBlank(key, legacyApiKey);
+        if (isBlank(token)) {
+            throw new OpenApiAuthException("token is nil");
+        }
+        if (appService == null) {
+            throw new OpenApiAuthException("invalid app key");
+        }
+        AppKeyInfo appKey;
+        try {
+            appKey = appService.getAppKeyByKey(token);
+        } catch (RuntimeException ex) {
+            throw new OpenApiAuthException("invalid app key");
+        }
+        if (appKey == null) {
+            throw new OpenApiAuthException("invalid app key");
+        }
+        if (!MCP_SERVER_APP_TYPE.equals(defaultIfBlank(appKey.getAppType(), ""))) {
+            throw new OpenApiAuthException("invalid appType");
+        }
+        return appKey;
     }
 
     private Map<String, Object> serviceCreateChatflowConversation(OpenApiContext ctx, Map<String, Object> body) {

@@ -941,12 +941,16 @@ public class AppServiceImplTest {
                 new AppKeyListQuery(created.getAssistantId(), "agent", "dev-admin", "default-org"));
         assertEquals(1, list.size());
         assertEquals(appKey.getApiKey(), list.get(0).getApiKey());
+        AppKeyInfo found = service.getAppKeyByKey(appKey.getApiKey());
+        assertEquals(appKey.getApiId(), found.getApiId());
+        assertEquals(created.getAssistantId(), found.getAppId());
 
         AppKeyDeleteCommand delete = new AppKeyDeleteCommand();
         delete.setApiId(appKey.getApiId());
         service.deleteAppKey(delete);
         assertTrue(service.listAppKeys(
                 new AppKeyListQuery(created.getAssistantId(), "agent", "dev-admin", "default-org")).isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> service.getAppKeyByKey(appKey.getApiKey()));
     }
 
     @Test
