@@ -977,11 +977,22 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "appType", required = false) String appType) {
+        String effectiveAppType = CHATFLOW_APP_TYPE.equals(appType) ? CHATFLOW_APP_TYPE : WORKFLOW_APP_TYPE;
+        return workflowLikeList(authorization, name, effectiveAppType);
+    }
+
+    @GetMapping("/appspace/chatflow/list")
+    public FrontendResponse<ApplicationListResult> chatflowList(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        return workflowLikeList(authorization, name, CHATFLOW_APP_TYPE);
+    }
+
+    private FrontendResponse<ApplicationListResult> workflowLikeList(String authorization, String name, String appType) {
         try {
             UserContext userContext = userContext(authorization);
-            String effectiveAppType = CHATFLOW_APP_TYPE.equals(appType) ? CHATFLOW_APP_TYPE : WORKFLOW_APP_TYPE;
             return FrontendResponse.ok(appService.listApplications(
-                    new ApplicationListQuery(effectiveAppType, name, userContext.getUserId(), userContext.getOrgId())));
+                    new ApplicationListQuery(appType, name, userContext.getUserId(), userContext.getOrgId())));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }

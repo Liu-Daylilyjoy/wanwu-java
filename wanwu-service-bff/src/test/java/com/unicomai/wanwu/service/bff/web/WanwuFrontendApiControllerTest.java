@@ -803,9 +803,17 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].appType").value("chatflow"))
                 .andExpect(jsonPath("$.data.list[0].workflow_id").value("chatflow-001"));
 
+        mockMvc.perform(get("/user/api/v1/appspace/chatflow/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("name", "Policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appType").value("chatflow"))
+                .andExpect(jsonPath("$.data.list[0].workflow_id").value("chatflow-001"));
+
         org.mockito.ArgumentCaptor<ApplicationListQuery> listCaptor = forClass(ApplicationListQuery.class);
-        verify(appService).listApplications(listCaptor.capture());
-        assertEquals("chatflow", listCaptor.getValue().getAppType());
+        verify(appService, times(2)).listApplications(listCaptor.capture());
+        assertEquals("chatflow", listCaptor.getAllValues().get(0).getAppType());
+        assertEquals("chatflow", listCaptor.getAllValues().get(1).getAppType());
 
         mockMvc.perform(post("/user/api/v1/appspace/chatflow/copy")
                         .header("Authorization", "Bearer dev-token")
