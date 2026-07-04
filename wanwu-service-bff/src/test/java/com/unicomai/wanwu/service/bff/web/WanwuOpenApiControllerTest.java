@@ -242,8 +242,7 @@ public class WanwuOpenApiControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uuid\":\"workflow-openapi-001\",\"parameters\":{\"city\":\"Beijing\"}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.output.result").value("workflow answer"));
+                .andExpect(jsonPath("$.result").value("workflow answer"));
 
         verify(appService).streamAssistantConversation(any(AssistantConversationStreamCommand.class));
         ArgumentCaptor<RagChatCommand> ragCaptor = forClass(RagChatCommand.class);
@@ -504,7 +503,13 @@ public class WanwuOpenApiControllerTest {
                         .file(new MockMultipartFile("file", "input.txt", "text/plain", "hello".getBytes()))
                         .header("Authorization", "Bearer dev-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.fileId").exists());
+                .andExpect(content().string(containsString("/service/api/openapi/v1/file/download/openapi-file-")));
+
+        mockMvc.perform(multipart("/service/api/openapi/v1/chatflow/file/upload")
+                        .file(new MockMultipartFile("file", "chatflow-input.txt", "text/plain", "hello".getBytes()))
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("/service/api/openapi/v1/file/download/openapi-file-")));
 
         mockMvc.perform(get("/service/api/openapi/v1/oauth/jwks"))
                 .andExpect(status().isOk())

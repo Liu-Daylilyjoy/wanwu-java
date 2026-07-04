@@ -425,7 +425,7 @@ public class WanwuOpenApiController {
     }
 
     @PostMapping("/workflow/run")
-    public FrontendResponse<Map<String, Object>> runWorkflow(
+    public ResponseEntity<Map<String, Object>> runWorkflow(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
         long startedAt = System.currentTimeMillis();
@@ -438,22 +438,22 @@ public class WanwuOpenApiController {
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
             WorkflowRunResult result = appService.runWorkflow(command);
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("workflow_id", result == null ? text(body, "uuid") : defaultIfBlank(result.getWorkflowId(), text(body, "uuid")));
-            data.put("output", result == null || result.getOutput() == null ? Collections.emptyMap() : result.getOutput());
+            Map<String, Object> data = result == null || result.getOutput() == null
+                    ? Collections.<String, Object>emptyMap()
+                    : new LinkedHashMap<>(result.getOutput());
             recordAppStatistic(ctx, command.getWorkflowId(), WORKFLOW_APP_TYPE, true, false, startedAt);
-            return FrontendResponse.ok(data);
+            return ResponseEntity.ok(data);
         } catch (IllegalArgumentException ex) {
-            return FrontendResponse.failure(1001, ex.getMessage());
+            return ResponseEntity.badRequest().body(errorBody(ex.getMessage()));
         }
     }
 
     @PostMapping("/workflow/file/upload")
-    public FrontendResponse<Map<String, Object>> workflowFileUpload(
+    public ResponseEntity<String> workflowFileUpload(
             @RequestHeader HttpHeaders headers,
             @RequestParam(value = "file", required = false) MultipartFile file) {
         context(headers);
-        return FrontendResponse.ok(uploadBody(file));
+        return ResponseEntity.ok(uploadUrl(file));
     }
 
     @PostMapping("/chatflow/conversation")
@@ -505,11 +505,11 @@ public class WanwuOpenApiController {
     }
 
     @PostMapping("/chatflow/file/upload")
-    public FrontendResponse<Map<String, Object>> chatflowFileUpload(
+    public ResponseEntity<String> chatflowFileUpload(
             @RequestHeader HttpHeaders headers,
             @RequestParam(value = "file", required = false) MultipartFile file) {
         context(headers);
-        return FrontendResponse.ok(uploadBody(file));
+        return ResponseEntity.ok(uploadUrl(file));
     }
 
     @GetMapping("/model/list")
@@ -1290,6 +1290,10 @@ public class WanwuOpenApiController {
         data.put("file_name", fileName);
         data.put("url", "/service/api/openapi/v1/file/download/" + fileId);
         return data;
+    }
+
+    private String uploadUrl(MultipartFile file) {
+        return defaultIfBlank(text(uploadBody(file), "url"), "");
     }
 
     private Map<String, Object> listResult(Object rows) {
