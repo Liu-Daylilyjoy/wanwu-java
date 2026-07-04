@@ -4,6 +4,8 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,15 +20,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -43,7 +48,8 @@ public class WanwuCommonApiController {
     private static final String DEV_APP_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DOC_FIRST_PATH = "getting-started.md";
-    private static final Map<String, String> DOCS = docs();
+    private static final String DOC_CENTER_PAGE_PREFIX = "/aibase/docCenter/pages/";
+    private static final DocIndex DOC_INDEX = loadDocIndex();
 
     private final Path avatarRoot;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
@@ -313,19 +319,15 @@ public class WanwuCommonApiController {
 
     @GetMapping("/doc_center/menu")
     public FrontendResponse<List<Map<String, Object>>> docCenterMenu() {
-        List<Map<String, Object>> menus = new ArrayList<Map<String, Object>>();
-        menus.add(docMenu("Getting Started", "doc1", DOC_FIRST_PATH));
-        menus.add(docMenu("Application Development", "doc2", "application-development.md"));
-        menus.add(docMenu("Operations", "doc3", "operations.md"));
-        return FrontendResponse.ok(menus);
+        return FrontendResponse.ok(copyMenus(DOC_INDEX.menus));
     }
 
     @GetMapping("/doc_center/markdown")
     public FrontendResponse<String> docCenterMarkdown(@RequestParam(value = "path", required = false) String path) {
-        String decoded = decode(defaultIfBlank(path, DOC_FIRST_PATH));
-        String content = DOCS.get(decoded);
+        String decoded = decode(defaultIfBlank(path, DOC_INDEX.firstPath));
+        String content = DOC_INDEX.docs.get(decoded);
         if (content == null) {
-            content = DOCS.get(DOC_FIRST_PATH);
+            content = DOC_INDEX.docs.get(DOC_INDEX.firstPath);
         }
         return FrontendResponse.ok(content);
     }
@@ -335,7 +337,7 @@ public class WanwuCommonApiController {
             @RequestParam(value = "content", required = false) String content) {
         String keyword = defaultIfBlank(content, "").toLowerCase(Locale.ROOT);
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (Map.Entry<String, String> entry : DOCS.entrySet()) {
+        for (Map.Entry<String, String> entry : DOC_INDEX.docs.entrySet()) {
             String title = title(entry.getKey());
             String markdown = entry.getValue();
             if (keyword.isEmpty()
@@ -347,7 +349,21 @@ public class WanwuCommonApiController {
         return FrontendResponse.ok(rows);
     }
 
-    private Map<String, Object> docMenu(String name, String index, String path) {
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> copyMenus(List<Map<String, Object>> source) {
+        List<Map<String, Object>> copy = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> item : source) {
+            Map<String, Object> menu = new LinkedHashMap<String, Object>(item);
+            Object children = item.get("children");
+            if (children instanceof List) {
+                menu.put("children", copyMenus((List<Map<String, Object>>) children));
+            }
+            copy.add(menu);
+        }
+        return copy;
+    }
+
+    private static Map<String, Object> docMenu(String name, String index, String path) {
         Map<String, Object> menu = new LinkedHashMap<String, Object>();
         menu.put("name", name);
         menu.put("index", index);
@@ -363,7 +379,7 @@ public class WanwuCommonApiController {
         Map<String, Object> content = new LinkedHashMap<String, Object>();
         content.put("title", title);
         content.put("content", snippet(markdown, keyword));
-        content.put("url", "/aibase/docCenter/pages/" + path);
+        content.put("url", DOC_CENTER_PAGE_PREFIX + path);
         item.put("list", Collections.singletonList(content));
         return item;
     }
@@ -545,13 +561,8 @@ public class WanwuCommonApiController {
     }
 
     private String title(String path) {
-        if (DOC_FIRST_PATH.equals(path)) {
-            return "Getting Started";
-        }
-        if ("application-development.md".equals(path)) {
-            return "Application Development";
-        }
-        return "Operations";
+        String title = DOC_INDEX.titles.get(path);
+        return title == null ? titleFromPath(path) : title;
     }
 
     private String decode(String value) {
@@ -597,7 +608,131 @@ public class WanwuCommonApiController {
         return isBlank(value) ? fallback : value;
     }
 
-    private static Map<String, String> docs() {
+    private static DocIndex loadDocIndex() {
+        Map<String, String> docs = readClasspathDocs();
+        if (docs.isEmpty()) {
+            docs = fallbackDocs();
+        }
+        List<String> paths = new ArrayList<String>(docs.keySet());
+        Collections.sort(paths, new Comparator<String>() {
+            @Override
+            public int compare(String left, String right) {
+                if (DOC_FIRST_PATH.equals(left)) {
+                    return DOC_FIRST_PATH.equals(right) ? 0 : -1;
+                }
+                if (DOC_FIRST_PATH.equals(right)) {
+                    return 1;
+                }
+                return left.compareTo(right);
+            }
+        });
+
+        Map<String, String> orderedDocs = new LinkedHashMap<String, String>();
+        Map<String, String> titles = new LinkedHashMap<String, String>();
+        List<Map<String, Object>> menus = new ArrayList<Map<String, Object>>();
+        int index = 1;
+        for (String path : paths) {
+            orderedDocs.put(path, docs.get(path));
+            String title = titleFromPath(path);
+            titles.put(path, title);
+            menus.add(docMenu(title, "doc" + index, path));
+            index++;
+        }
+        String firstPath = orderedDocs.containsKey(DOC_FIRST_PATH) ? DOC_FIRST_PATH : paths.get(0);
+        return new DocIndex(
+                Collections.unmodifiableMap(orderedDocs),
+                Collections.unmodifiableMap(titles),
+                Collections.unmodifiableList(menus),
+                firstPath);
+    }
+
+    private static Map<String, String> readClasspathDocs() {
+        Map<String, String> docs = new LinkedHashMap<String, String>();
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        try {
+            Resource[] resources = resolver.getResources("classpath*:/static/manual/**/*.md");
+            for (Resource resource : resources) {
+                String path = resourcePath(resource);
+                if (path == null || path.isEmpty()) {
+                    continue;
+                }
+                docs.put(path, readUtf8(resource));
+            }
+        } catch (IOException ignored) {
+            return Collections.emptyMap();
+        }
+        return docs;
+    }
+
+    private static String resourcePath(Resource resource) throws IOException {
+        String url = resource.getURL().toString().replace('\\', '/');
+        String marker = "/static/manual/";
+        int index = url.lastIndexOf(marker);
+        String path = index >= 0 ? url.substring(index + marker.length()) : resource.getFilename();
+        if (path == null) {
+            return "";
+        }
+        return decodeStatic(path);
+    }
+
+    private static String readUtf8(Resource resource) throws IOException {
+        InputStream input = resource.getInputStream();
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            input.close();
+        }
+    }
+
+    private static String decodeStatic(String value) {
+        try {
+            return URLDecoder.decode(value, "UTF-8");
+        } catch (Exception ex) {
+            return value;
+        }
+    }
+
+    private static String titleFromPath(String path) {
+        String filename = path == null ? "" : path.replace('\\', '/');
+        int slash = filename.lastIndexOf('/');
+        if (slash >= 0) {
+            filename = filename.substring(slash + 1);
+        }
+        if (filename.endsWith(".md")) {
+            filename = filename.substring(0, filename.length() - 3);
+        }
+        int dot = filename.indexOf('.');
+        if (dot >= 0 && dot + 1 < filename.length() && Character.isDigit(filename.charAt(0))) {
+            filename = filename.substring(dot + 1);
+        }
+        filename = filename.replace('-', ' ').replace('_', ' ').trim();
+        if (filename.isEmpty()) {
+            return "Document";
+        }
+        String[] words = filename.split("\\s+");
+        StringBuilder title = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            if (title.length() > 0) {
+                title.append(' ');
+            }
+            title.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) {
+                title.append(word.substring(1));
+            }
+        }
+        return title.toString();
+    }
+
+    private static Map<String, String> fallbackDocs() {
         Map<String, String> docs = new LinkedHashMap<String, String>();
         docs.put(DOC_FIRST_PATH,
                 "# Getting Started\n\nWanwu Java is a Docker-first reproduction of the Wanwu platform backend. "
@@ -609,6 +744,23 @@ public class WanwuCommonApiController {
                 "# Operations\n\nModel access, OAuth applications, statistics, safety guard, and upload compatibility are available as development slices. "
                         + "Persistence and production integrations are reproduced incrementally.");
         return Collections.unmodifiableMap(docs);
+    }
+
+    private static class DocIndex {
+        private final Map<String, String> docs;
+        private final Map<String, String> titles;
+        private final List<Map<String, Object>> menus;
+        private final String firstPath;
+
+        private DocIndex(Map<String, String> docs,
+                         Map<String, String> titles,
+                         List<Map<String, Object>> menus,
+                         String firstPath) {
+            this.docs = docs;
+            this.titles = titles;
+            this.menus = menus;
+            this.firstPath = firstPath;
+        }
     }
 
     private static class UserContext {
