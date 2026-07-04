@@ -3,6 +3,7 @@ package com.unicomai.wanwu.api.app;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionListQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
@@ -251,6 +252,8 @@ public interface AppService {
     void deleteLegacyAssistantAction(AssistantActionDeleteCommand command);
 
     Map<String, Object> getLegacyAssistantAction(AssistantActionInfoQuery query);
+
+    Map<String, Object> listLegacyAssistantActions(AssistantActionListQuery query);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

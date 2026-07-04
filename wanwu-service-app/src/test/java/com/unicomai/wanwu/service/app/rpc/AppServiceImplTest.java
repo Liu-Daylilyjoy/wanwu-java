@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.app.rpc;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionListQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
@@ -1525,6 +1526,14 @@ public class AppServiceImplTest {
         assertEquals(actionId, info.get("actionId"));
         assertEquals("Weather Action", info.get("name"));
 
+        AssistantActionListQuery listQuery = new AssistantActionListQuery();
+        listQuery.setUserId("dev-admin");
+        listQuery.setOrgId("default-org");
+        listQuery.setAssistantId("assistant-legacy-001");
+        Map<String, Object> listed = service.listLegacyAssistantActions(listQuery);
+        assertEquals(1, listed.get("total"));
+        assertEquals(actionId, mapListValue(listed, "list").get(0).get("actionId"));
+
         Map<String, Object> updatePayload = new LinkedHashMap<String, Object>();
         updatePayload.put("assistantId", "assistant-legacy-001");
         updatePayload.put("actionId", actionId);
@@ -1798,6 +1807,11 @@ public class AppServiceImplTest {
         IllegalArgumentException expired = assertThrows(IllegalArgumentException.class,
                 () -> service.getAppUrlBySuffix(new AppUrlSuffixQuery(info.getSuffix())));
         assertEquals("app url expired", expired.getMessage());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> mapListValue(Map<String, Object> source, String key) {
+        return (List<Map<String, Object>>) source.get(key);
     }
 
     private AssistantCreateCommand command(String name, String desc) {
@@ -3678,6 +3692,21 @@ public class AppServiceImplTest {
                 }
             }
             return null;
+        }
+
+        @Override
+        public List<AssistantActionRecord> listAssistantActions(String userId, String orgId, String assistantId) {
+            List<AssistantActionRecord> matches = new ArrayList<>();
+            for (AssistantActionRecord action : assistantActions) {
+                if (userId.equals(action.getUserId())
+                        && orgId.equals(action.getOrgId())
+                        && (assistantId == null || assistantId.isEmpty()
+                        || assistantId.equals(action.getAssistantId()))) {
+                    matches.add(action);
+                }
+            }
+            matches.sort(Comparator.comparing(AssistantActionRecord::getId).reversed());
+            return matches;
         }
 
         @Override

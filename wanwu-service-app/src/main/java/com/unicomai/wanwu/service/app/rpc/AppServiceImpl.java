@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionListQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
@@ -2229,6 +2230,22 @@ public class AppServiceImpl implements AppService {
             return fallbackLegacyAssistantAction(actionId);
         }
         return toLegacyAssistantAction(record);
+    }
+
+    @Override
+    public Map<String, Object> listLegacyAssistantActions(AssistantActionListQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        String assistantId = defaultIfBlank(query == null ? "" : query.getAssistantId(), "");
+        List<AssistantActionRecord> records = applicationRepository.listAssistantActions(userId, orgId, assistantId);
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>(records.size());
+        for (AssistantActionRecord record : records) {
+            rows.add(toLegacyAssistantAction(record));
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("list", rows);
+        result.put("total", rows.size());
+        return result;
     }
 
     @Override

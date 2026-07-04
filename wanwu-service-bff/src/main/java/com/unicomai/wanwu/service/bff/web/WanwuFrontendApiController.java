@@ -4,6 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
@@ -133,7 +137,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/user/api/v1")
@@ -152,8 +155,6 @@ public class WanwuFrontendApiController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
     private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
-    private static final Map<String, Map<String, Object>> ASSISTANT_ACTIONS =
-            new ConcurrentHashMap<String, Map<String, Object>>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -1870,40 +1871,53 @@ public class WanwuFrontendApiController {
 
     @GetMapping("/assistant/action")
     public FrontendResponse<Map<String, Object>> assistantActions(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "assistantId", required = false) String assistantId,
             @RequestParam(value = "actionId", required = false) String actionId) {
+        UserContext userContext = userContext(authorization);
         if (!isBlank(actionId)) {
-            Map<String, Object> action = assistantAction(actionId);
+            Map<String, Object> action = assistantAction(userContext, actionId);
             return FrontendResponse.ok(action == null ? Collections.<String, Object>emptyMap() : action);
         }
-        return FrontendResponse.ok(assistantActionList(assistantId));
+        return FrontendResponse.ok(assistantActionList(userContext, assistantId));
     }
 
     @PostMapping("/assistant/action")
     public FrontendResponse<Map<String, Object>> createAssistantAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
         Map<String, Object> action = assistantActionRow(objectMap(request), null);
-        ASSISTANT_ACTIONS.put(String.valueOf(action.get("actionId")), action);
-        return FrontendResponse.ok(action);
+        return FrontendResponse.ok(appService.createLegacyAssistantAction(
+                assistantActionCommand(userContext, action)));
     }
 
     @PutMapping({"/assistant/action", "/assistant/action/enable"})
     public FrontendResponse<Map<String, Object>> updateAssistantAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext userContext = userContext(authorization);
         Map<String, Object> body = objectMap(request);
-        String actionId = defaultIfBlank(firstText(body, "actionId"), findAssistantActionId(body));
-        Map<String, Object> existing = actionId.isEmpty() ? null : assistantAction(actionId);
+        String actionId = defaultIfBlank(firstText(body, "actionId"), findAssistantActionId(userContext, body));
+        Map<String, Object> existing = actionId.isEmpty() ? null : assistantAction(userContext, actionId);
         Map<String, Object> action = assistantActionRow(body, existing);
-        ASSISTANT_ACTIONS.put(String.valueOf(action.get("actionId")), action);
-        return FrontendResponse.ok(action);
+        return FrontendResponse.ok(appService.updateLegacyAssistantAction(
+                assistantActionCommand(userContext, action)));
     }
 
     @DeleteMapping("/assistant/action")
     public FrontendResponse<Map<String, Object>> deleteAssistantAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        String actionId = defaultIfBlank(firstText(request, "actionId"), findAssistantActionId(objectMap(request)));
+        UserContext userContext = userContext(authorization);
+        String actionId = defaultIfBlank(firstText(request, "actionId"), findAssistantActionId(userContext, objectMap(request)));
         if (!isBlank(actionId)) {
-            ASSISTANT_ACTIONS.remove(actionId);
+            AssistantActionDeleteCommand command = new AssistantActionDeleteCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            command.setActionId(actionId);
+            command.setAssistantId(firstText(request, "assistantId"));
+            appService.deleteLegacyAssistantAction(command);
         }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
@@ -2817,22 +2831,43 @@ public class WanwuFrontendApiController {
         return result;
     }
 
-    private Map<String, Object> assistantActionList(String assistantId) {
-        List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> action : ASSISTANT_ACTIONS.values()) {
-            if (isBlank(assistantId) || assistantId.equals(firstText(action, "assistantId"))) {
-                rows.add(new LinkedHashMap<>(action));
-            }
-        }
+    private Map<String, Object> assistantActionList(UserContext userContext, String assistantId) {
+        List<Map<String, Object>> rows = assistantActionRows(userContext, assistantId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", rows);
         result.put("total", rows.size());
         return result;
     }
 
-    private Map<String, Object> assistantAction(String actionId) {
-        Map<String, Object> action = ASSISTANT_ACTIONS.get(actionId);
-        return action == null ? null : new LinkedHashMap<>(action);
+    private List<Map<String, Object>> assistantActionRows(UserContext userContext, String assistantId) {
+        AssistantActionListQuery query = new AssistantActionListQuery();
+        query.setUserId(userContext.getUserId());
+        query.setOrgId(userContext.getOrgId());
+        query.setAssistantId(defaultIfBlank(assistantId, ""));
+        return mapList(appService.listLegacyAssistantActions(query).get("list"));
+    }
+
+    private Map<String, Object> assistantAction(UserContext userContext, String actionId) {
+        if (isBlank(actionId)) {
+            return null;
+        }
+        for (Map<String, Object> action : assistantActionRows(userContext, "")) {
+            if (actionId.equals(firstText(action, "actionId", "id"))) {
+                return new LinkedHashMap<>(action);
+            }
+        }
+        return null;
+    }
+
+    private AssistantActionUpsertCommand assistantActionCommand(UserContext userContext, Map<String, Object> action) {
+        AssistantActionUpsertCommand command = new AssistantActionUpsertCommand();
+        command.setUserId(userContext.getUserId());
+        command.setOrgId(userContext.getOrgId());
+        command.setAssistantId(defaultIfBlank(firstText(action, "assistantId"), "default-assistant"));
+        command.setActionId(firstText(action, "actionId", "id"));
+        command.setName(defaultIfBlank(firstText(action, "name", "actionName"), "local_action"));
+        command.setPayload(action);
+        return command;
     }
 
     private Map<String, Object> assistantActionRow(Map<String, Object> request, Map<String, Object> existing) {
@@ -2840,8 +2875,7 @@ public class WanwuFrontendApiController {
         Map<String, Object> row = existing == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<>(existing);
         String actionId = defaultIfBlank(firstText(source, "actionId", "id"), firstText(row, "actionId", "id"));
         if (isBlank(actionId)) {
-            actionId = defaultIfBlank(findAssistantActionId(source),
-                    "assistant-action-" + UUID.randomUUID().toString().replace("-", ""));
+            actionId = "assistant-action-" + UUID.randomUUID().toString().replace("-", "");
         }
         String actionName = defaultIfBlank(firstText(source, "actionName", "name"),
                 defaultIfBlank(firstText(row, "actionName", "name"), "local_action"));
@@ -2886,7 +2920,7 @@ public class WanwuFrontendApiController {
         return booleanValue(existing == null ? null : existing.get("enable"), true);
     }
 
-    private String findAssistantActionId(Map<String, Object> request) {
+    private String findAssistantActionId(UserContext userContext, Map<String, Object> request) {
         if (request == null || request.isEmpty()) {
             return "";
         }
@@ -2901,13 +2935,12 @@ public class WanwuFrontendApiController {
         if (isBlank(assistantId) && isBlank(toolId) && isBlank(toolType) && isBlank(actionName)) {
             return "";
         }
-        for (Map.Entry<String, Map<String, Object>> entry : ASSISTANT_ACTIONS.entrySet()) {
-            Map<String, Object> action = entry.getValue();
+        for (Map<String, Object> action : assistantActionRows(userContext, assistantId)) {
             if (matchesActionField(action, "assistantId", assistantId)
                     && matchesActionField(action, "toolId", toolId)
                     && matchesActionField(action, "toolType", toolType)
                     && matchesActionField(action, "actionName", actionName)) {
-                return entry.getKey();
+                return firstText(action, "actionId", "id");
             }
         }
         return "";

@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 @Mapper
 public interface AssistantActionMapper extends BaseMapper<AssistantActionEntity> {
 
@@ -21,6 +23,18 @@ public interface AssistantActionMapper extends BaseMapper<AssistantActionEntity>
     AssistantActionEntity selectByAction(@Param("userId") String userId,
                                          @Param("orgId") String orgId,
                                          @Param("actionId") String actionId);
+
+    @Select({
+            "SELECT id, created_at, updated_at, user_id, org_id, assistant_id, action_id, name, payload",
+            "FROM assistant_actions",
+            "WHERE user_id = #{userId}",
+            "  AND org_id = #{orgId}",
+            "  AND (#{assistantId} = '' OR assistant_id = #{assistantId})",
+            "ORDER BY id DESC"
+    })
+    List<AssistantActionEntity> selectByAssistant(@Param("userId") String userId,
+                                                  @Param("orgId") String orgId,
+                                                  @Param("assistantId") String assistantId);
 
     @Update({
             "UPDATE assistant_actions",

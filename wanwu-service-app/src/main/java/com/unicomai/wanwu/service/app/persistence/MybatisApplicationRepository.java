@@ -1079,6 +1079,11 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    public List<AssistantActionRecord> listAssistantActions(String userId, String orgId, String assistantId) {
+        return toAssistantActionRecords(assistantActionMapper.selectByAssistant(userId, orgId, assistantId));
+    }
+
+    @Override
     public boolean deleteAssistantAction(String userId, String orgId, String actionId) {
         return assistantActionMapper.deleteByAction(userId, orgId, actionId) > 0;
     }
@@ -1975,6 +1980,14 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setName(entity.getName());
         record.setPayloadJson(entity.getPayload());
         return record;
+    }
+
+    private List<AssistantActionRecord> toAssistantActionRecords(List<AssistantActionEntity> entities) {
+        List<AssistantActionRecord> records = new java.util.ArrayList<>();
+        for (AssistantActionEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
     }
 
     private long value(Long value) {

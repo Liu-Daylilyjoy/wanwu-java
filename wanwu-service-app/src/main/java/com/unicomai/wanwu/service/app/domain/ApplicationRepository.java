@@ -325,6 +325,8 @@ public interface ApplicationRepository {
 
     AssistantActionRecord findAssistantAction(String userId, String orgId, String actionId);
 
+    List<AssistantActionRecord> listAssistantActions(String userId, String orgId, String assistantId);
+
     boolean deleteAssistantAction(String userId, String orgId, String actionId);
 
     boolean deleteAssistantActions(String userId, String orgId, String assistantId);

@@ -3004,6 +3004,24 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(actionList("search"));
         when(appService.listAssistantWorkflowSelect(anyString(), anyString(), anyString()))
                 .thenReturn(listResult(workflowSelect("workflow-001", "Workflow One")));
+        Map<String, Object> persistedAction = map(
+                "actionId", "legacy-action-001",
+                "id", "legacy-action-001",
+                "assistantId", "assistant-action-test",
+                "toolId", "custom-tool-001",
+                "toolType", "custom",
+                "actionName", "lookup_policy",
+                "name", "lookup_policy",
+                "enable", true);
+        Map<String, Object> disabledAction = new LinkedHashMap<>(persistedAction);
+        disabledAction.put("enable", false);
+        when(appService.createLegacyAssistantAction(any())).thenReturn(persistedAction);
+        when(appService.updateLegacyAssistantAction(any())).thenReturn(disabledAction);
+        when(appService.listLegacyAssistantActions(any()))
+                .thenReturn(listResult(persistedAction))
+                .thenReturn(listResult(persistedAction))
+                .thenReturn(listResult(disabledAction))
+                .thenReturn(emptyListResult());
 
         mockMvc.perform(get("/user/api/v1/assistant/select")
                         .header("Authorization", "Bearer dev-token"))
