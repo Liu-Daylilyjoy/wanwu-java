@@ -787,7 +787,6 @@ public class WanwuGeneralAgentApiController {
         result.put("skill", new ArrayList<Map<String, Object>>());
         result.put("assistant", new ArrayList<Map<String, Object>>());
         result.put("knowledge", new ArrayList<Map<String, Object>>());
-        result.put("ontology", new ArrayList<Map<String, Object>>());
         return result;
     }
 
@@ -796,10 +795,11 @@ public class WanwuGeneralAgentApiController {
         if (!body.containsKey(section)) {
             return;
         }
-        List<Map<String, Object>> source = mapList(body.get(section));
         if ("ontology".equals(section)) {
-            source = Collections.emptyList();
+            config.remove(section);
+            return;
         }
+        List<Map<String, Object>> source = mapList(body.get(section));
         config.put(section, normalizeConfigItems(source, section));
     }
 
@@ -827,7 +827,6 @@ public class WanwuGeneralAgentApiController {
         result.add(section("skill", copyList(config.get("skill"))));
         result.add(section("assistant", copyList(config.get("assistant"))));
         result.add(section("knowledge", copyList(config.get("knowledge"))));
-        result.add(section("ontology", Collections.<Map<String, Object>>emptyList()));
         return result;
     }
 

@@ -118,9 +118,10 @@ public class WanwuGeneralAgentApiControllerTest {
 
         mockMvc.perform(get("/service/api/v1/general/agent/config"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(6)))
                 .andExpect(jsonPath("$.data[0].list[0].toolId").value("builtin-weather"))
                 .andExpect(jsonPath("$.data[1].list[0].id").value("mcp-1"))
-                .andExpect(jsonPath("$.data[6].list", hasSize(0)));
+                .andExpect(jsonPath("$.data[?(@.listType=='ontology')]", hasSize(0)));
 
         MvcResult created = mockMvc.perform(post("/service/api/v1/general/agent/conversation")
                         .contentType(MediaType.APPLICATION_JSON)
