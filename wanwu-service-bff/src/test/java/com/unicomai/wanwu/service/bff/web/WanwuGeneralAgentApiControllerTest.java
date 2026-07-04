@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
@@ -57,6 +60,17 @@ public class WanwuGeneralAgentApiControllerTest {
 
         when(appService.listAssistants(any(ApplicationListQuery.class)))
                 .thenReturn(new ApplicationListResult(Collections.singletonList(assistant()), 1));
+        final AtomicReference<Map<String, List<Map<String, Object>>>> generalAgentConfig =
+                new AtomicReference<Map<String, List<Map<String, Object>>>>(
+                        Collections.<String, List<Map<String, Object>>>emptyMap());
+        when(appService.getGeneralAgentConfig(any(GeneralAgentConfigQuery.class)))
+                .thenAnswer(invocation -> generalAgentConfig.get());
+        when(appService.updateGeneralAgentConfig(any(GeneralAgentConfigUpdateCommand.class)))
+                .thenAnswer(invocation -> {
+                    GeneralAgentConfigUpdateCommand command = invocation.getArgument(0);
+                    generalAgentConfig.set(command.getConfig());
+                    return command.getConfig();
+                });
         when(appService.listAssistantWorkflowSelect(anyString(), anyString(), anyString()))
                 .thenReturn(listResult(Collections.singletonList(workflow())));
         when(mcpService.listToolSelect(anyString(), anyString(), anyString()))

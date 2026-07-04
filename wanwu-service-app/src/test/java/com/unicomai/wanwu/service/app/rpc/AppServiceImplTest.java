@@ -70,6 +70,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
@@ -113,6 +115,7 @@ import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -1567,6 +1570,40 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void generalAgentConfigUsesPersistentRepository() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        Map<String, List<Map<String, Object>>> config =
+                new LinkedHashMap<String, List<Map<String, Object>>>();
+        config.put("tool", Collections.singletonList(configItem("toolId", "builtin-weather", "toolType", "builtin")));
+        config.put("mcp", Collections.singletonList(configItem("id", "mcp-1", "type", "mcp")));
+        config.put("ontology", Collections.singletonList(configItem("id", "ontology-1", "type", "ontology")));
+
+        GeneralAgentConfigUpdateCommand update = new GeneralAgentConfigUpdateCommand();
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        update.setConfig(config);
+
+        Map<String, List<Map<String, Object>>> saved = service.updateGeneralAgentConfig(update);
+
+        assertEquals(1, repository.generalAgentConfigs.size());
+        assertEquals("builtin-weather", saved.get("tool").get(0).get("toolId"));
+        assertEquals("mcp-1", saved.get("mcp").get(0).get("id"));
+        assertFalse(saved.containsKey("ontology"));
+
+        GeneralAgentConfigQuery query = new GeneralAgentConfigQuery();
+        query.setUserId("dev-admin");
+        query.setOrgId("default-org");
+        Map<String, List<Map<String, Object>>> loaded = service.getGeneralAgentConfig(query);
+
+        assertEquals("builtin-weather", loaded.get("tool").get(0).get("toolId"));
+        assertEquals("mcp-1", loaded.get("mcp").get(0).get("id"));
+        assertTrue(loaded.get("workflow").isEmpty());
+        assertFalse(loaded.containsKey("ontology"));
+    }
+
+    @Test
     public void draftStreamCreatesConversationAndPersistsMessageDetail() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));
@@ -1812,6 +1849,13 @@ public class AppServiceImplTest {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> mapListValue(Map<String, Object> source, String key) {
         return (List<Map<String, Object>>) source.get(key);
+    }
+
+    private Map<String, Object> configItem(String firstKey, Object firstValue, String secondKey, Object secondValue) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put(firstKey, firstValue);
+        item.put(secondKey, secondValue);
+        return item;
     }
 
     private AssistantCreateCommand command(String name, String desc) {
@@ -2216,6 +2260,7 @@ public class AppServiceImplTest {
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
         private final List<AssistantKnowledgeFileRecord> assistantKnowledgeFiles = new ArrayList<>();
         private final List<AssistantActionRecord> assistantActions = new ArrayList<>();
+        private final List<GeneralAgentConfigRecord> generalAgentConfigs = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -3727,6 +3772,31 @@ public class AppServiceImplTest {
             }
             assistantActions.removeAll(removed);
             return !removed.isEmpty();
+        }
+
+        @Override
+        public GeneralAgentConfigRecord saveGeneralAgentConfig(GeneralAgentConfigRecord record) {
+            GeneralAgentConfigRecord existing = findGeneralAgentConfig(record.getUserId(), record.getOrgId());
+            if (existing != null) {
+                generalAgentConfigs.remove(existing);
+                record.setId(existing.getId());
+                record.setCreatedAt(existing.getCreatedAt());
+            } else {
+                record.setId(ids.incrementAndGet());
+            }
+            generalAgentConfigs.add(record);
+            return record;
+        }
+
+        @Override
+        public GeneralAgentConfigRecord findGeneralAgentConfig(String userId, String orgId) {
+            for (GeneralAgentConfigRecord config : generalAgentConfigs) {
+                if (userId.equals(config.getUserId())
+                        && orgId.equals(config.getOrgId())) {
+                    return config;
+                }
+            }
+            return null;
         }
 
         private ApiKeyUsageAggregateRecord findUsageAggregate(ApiKeyUsageAggregateRecord target) {

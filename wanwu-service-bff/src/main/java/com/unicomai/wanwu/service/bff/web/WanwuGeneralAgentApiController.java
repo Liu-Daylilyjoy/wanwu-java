@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -50,8 +52,6 @@ public class WanwuGeneralAgentApiController {
     private static final AtomicLong SKILL_SEQUENCE = new AtomicLong(1000);
     private static final Map<String, ConversationState> CONVERSATIONS = new ConcurrentHashMap<>();
     private static final Map<String, LinkedList<ConversationState>> CONVERSATIONS_BY_SCOPE = new ConcurrentHashMap<>();
-    private static final Map<String, Map<String, List<Map<String, Object>>>> CONFIGS_BY_SCOPE =
-            new ConcurrentHashMap<>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -282,7 +282,7 @@ public class WanwuGeneralAgentApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
         synchronized (STORE_LOCK) {
-            Map<String, List<Map<String, Object>>> config = configForScope(ctx.scope());
+            Map<String, List<Map<String, Object>>> config = defaultConfig();
             Map<String, Object> body = body(request);
             updateConfigSection(config, body, "tool");
             updateConfigSection(config, body, "mcp");
@@ -291,6 +291,7 @@ public class WanwuGeneralAgentApiController {
             updateConfigSection(config, body, "assistant");
             updateConfigSection(config, body, "knowledge");
             updateConfigSection(config, body, "ontology");
+            saveConfig(ctx, config);
         }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
@@ -301,9 +302,7 @@ public class WanwuGeneralAgentApiController {
             @RequestHeader(value = "x-user-id", required = false) String headerUserId,
             @RequestHeader(value = "x-org-id", required = false) String headerOrgId) {
         UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
-        synchronized (STORE_LOCK) {
-            return FrontendResponse.ok(configResponse(configForScope(ctx.scope())));
-        }
+        return FrontendResponse.ok(configResponse(configForScope(ctx)));
     }
 
     @PostMapping("/conversation")
@@ -770,13 +769,35 @@ public class WanwuGeneralAgentApiController {
         return Math.abs(item.hashCode());
     }
 
-    private Map<String, List<Map<String, Object>>> configForScope(String scope) {
-        Map<String, List<Map<String, Object>>> config = CONFIGS_BY_SCOPE.get(scope);
-        if (config == null) {
-            config = defaultConfig();
-            CONFIGS_BY_SCOPE.put(scope, config);
+    private Map<String, List<Map<String, Object>>> configForScope(UserContext ctx) {
+        Map<String, List<Map<String, Object>>> config = defaultConfig();
+        Map<String, List<Map<String, Object>>> persisted = loadConfig(ctx);
+        for (Map.Entry<String, List<Map<String, Object>>> entry : persisted.entrySet()) {
+            if (config.containsKey(entry.getKey())) {
+                config.put(entry.getKey(), copyList(entry.getValue()));
+            }
         }
         return config;
+    }
+
+    private Map<String, List<Map<String, Object>>> loadConfig(UserContext ctx) {
+        try {
+            GeneralAgentConfigQuery query = new GeneralAgentConfigQuery();
+            query.setUserId(ctx.userId);
+            query.setOrgId(ctx.orgId);
+            Map<String, List<Map<String, Object>>> config = appService.getGeneralAgentConfig(query);
+            return config == null ? Collections.<String, List<Map<String, Object>>>emptyMap() : config;
+        } catch (RuntimeException ex) {
+            return Collections.emptyMap();
+        }
+    }
+
+    private void saveConfig(UserContext ctx, Map<String, List<Map<String, Object>>> config) {
+        GeneralAgentConfigUpdateCommand command = new GeneralAgentConfigUpdateCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setConfig(config);
+        appService.updateGeneralAgentConfig(command);
     }
 
     private Map<String, List<Map<String, Object>>> defaultConfig() {

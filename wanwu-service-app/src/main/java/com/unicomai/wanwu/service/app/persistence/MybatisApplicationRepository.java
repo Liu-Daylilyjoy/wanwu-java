@@ -16,6 +16,7 @@ import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -37,6 +38,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEnt
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantKnowledgeFileEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.GeneralAgentConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
@@ -59,6 +61,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMap
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantKnowledgeFileMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.GeneralAgentConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
@@ -95,6 +98,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
     private final AssistantActionMapper assistantActionMapper;
     private final AssistantKnowledgeFileMapper assistantKnowledgeFileMapper;
+    private final GeneralAgentConfigMapper generalAgentConfigMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
                                         AssistantDraftMapper assistantDraftMapper,
@@ -117,7 +121,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper,
                                         AssistantActionMapper assistantActionMapper,
-                                        AssistantKnowledgeFileMapper assistantKnowledgeFileMapper) {
+                                        AssistantKnowledgeFileMapper assistantKnowledgeFileMapper,
+                                        GeneralAgentConfigMapper generalAgentConfigMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
@@ -140,6 +145,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
         this.assistantActionMapper = assistantActionMapper;
         this.assistantKnowledgeFileMapper = assistantKnowledgeFileMapper;
+        this.generalAgentConfigMapper = generalAgentConfigMapper;
     }
 
     @Override
@@ -1093,6 +1099,27 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         return assistantActionMapper.deleteByAssistant(userId, orgId, assistantId) > 0;
     }
 
+    @Override
+    public GeneralAgentConfigRecord saveGeneralAgentConfig(GeneralAgentConfigRecord record) {
+        GeneralAgentConfigEntity entity = toEntity(record);
+        GeneralAgentConfigEntity existing = generalAgentConfigMapper.selectByScope(
+                record.getUserId(), record.getOrgId());
+        if (existing == null) {
+            generalAgentConfigMapper.insert(entity);
+        } else {
+            entity.setId(existing.getId());
+            entity.setCreatedAt(existing.getCreatedAt());
+            generalAgentConfigMapper.updateByScope(entity);
+        }
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public GeneralAgentConfigRecord findGeneralAgentConfig(String userId, String orgId) {
+        return toRecord(generalAgentConfigMapper.selectByScope(userId, orgId));
+    }
+
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
         AssistantDraftConfigEntity entity = new AssistantDraftConfigEntity();
         entity.setCreatedAt(record.getCreatedAt());
@@ -1988,6 +2015,31 @@ public class MybatisApplicationRepository implements ApplicationRepository {
             records.add(toRecord(entity));
         }
         return records;
+    }
+
+    private GeneralAgentConfigEntity toEntity(GeneralAgentConfigRecord record) {
+        GeneralAgentConfigEntity entity = new GeneralAgentConfigEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setConfigJson(record.getConfigJson());
+        return entity;
+    }
+
+    private GeneralAgentConfigRecord toRecord(GeneralAgentConfigEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        GeneralAgentConfigRecord record = new GeneralAgentConfigRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setConfigJson(entity.getConfigJson());
+        return record;
     }
 
     private long value(Long value) {

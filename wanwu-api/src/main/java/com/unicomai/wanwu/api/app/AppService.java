@@ -71,6 +71,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticQuery;
@@ -254,6 +256,10 @@ public interface AppService {
     Map<String, Object> getLegacyAssistantAction(AssistantActionInfoQuery query);
 
     Map<String, Object> listLegacyAssistantActions(AssistantActionListQuery query);
+
+    Map<String, List<Map<String, Object>>> getGeneralAgentConfig(GeneralAgentConfigQuery query);
+
+    Map<String, List<Map<String, Object>>> updateGeneralAgentConfig(GeneralAgentConfigUpdateCommand command);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

@@ -15,14 +15,14 @@ The Go BFF registers `v1/wga.go` under `/service/api/v1/general/agent`. The fron
 
 ## Java Slice
 
-`WanwuGeneralAgentApiController` reproduces those frontend-visible contracts without requiring frontend changes. Resource selection delegates to the existing Java `AppService`, `McpService`, and `KnowledgeService` where possible. Conversation, Skill preview, and workspace state are held in a deterministic in-memory development model so the current Docker Compose environment can exercise the UI end to end.
+`WanwuGeneralAgentApiController` reproduces those frontend-visible contracts without requiring frontend changes. Resource selection delegates to the existing Java `AppService`, `McpService`, and `KnowledgeService` where possible. Global config is persisted through Java `AppService`/MySQL in `general_agent_configs`; conversation, Skill preview, and workspace state are still held in a deterministic in-memory development model so the current Docker Compose environment can exercise the UI end to end.
 
 The admin IAM account now exposes `wga` and `wga.wanwu_bot`. `wga.openclaw` and ontology permissions are intentionally not exposed.
 
 ## Current Behavior
 
 - `/general/agent/sub/list` returns WanwuBot, General, Data Analysis, and Skill Chat modes, excluding the ontology agent.
-- `/general/agent/config` stores tool/MCP/workflow/skill/assistant/knowledge config per development user/org scope and always strips ontology entries.
+- `/general/agent/config` stores tool/MCP/workflow/skill/assistant/knowledge config per development user/org scope in MySQL and always strips ontology entries. PUT follows the Go route's replace semantics, so missing sections are saved as empty lists.
 - `/general/agent/resource/select` aggregates assistant, MCP, workflow, skill, and knowledge selector lists.
 - `/general/agent/conversation/chat` and `/general/agent/skill/conversation/chat` stream `RUN_STARTED`, `TEXT_MESSAGE_*`, `ACTIVITY_SNAPSHOT`, and `RUN_FINISHED` events that the frontend aggregator can render.
 - workspace preview/download returns a generated `answer.md` artifact for each chat run.
@@ -33,4 +33,5 @@ The admin IAM account now exposes `wga` and `wga.wanwu_bot`. `wga.openclaw` and 
 - Durable workspace files and artifact storage.
 - OpenClaw route exposure and backend implementation.
 - Ontology agent backend and menu exposure.
-- Normalized Go-equivalent WGA persistence model.
+- Durable WGA conversation, run, and workspace persistence.
+- Normalized Go-equivalent WGA runtime persistence model beyond global config.

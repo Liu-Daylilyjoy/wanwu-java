@@ -330,4 +330,8 @@ public interface ApplicationRepository {
     boolean deleteAssistantAction(String userId, String orgId, String actionId);
 
     boolean deleteAssistantActions(String userId, String orgId, String assistantId);
+
+    GeneralAgentConfigRecord saveGeneralAgentConfig(GeneralAgentConfigRecord record);
+
+    GeneralAgentConfigRecord findGeneralAgentConfig(String userId, String orgId);
 }

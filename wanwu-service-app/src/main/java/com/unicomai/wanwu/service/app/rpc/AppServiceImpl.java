@@ -88,6 +88,8 @@ import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticItem;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticOverview;
@@ -141,6 +143,7 @@ import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -157,6 +160,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -192,6 +196,8 @@ public class AppServiceImpl implements AppService {
     private static final String MODEL_USE_CHATLLM_ASSISTANT_ID = "model-use-chatllm";
     private static final String MODEL_USE_KNOWLEDGE_FILE_PREFIX = "model-use-knowledge-file-";
     private static final String MODEL_USE_ACTION_PREFIX = "action-";
+    private static final List<String> GENERAL_AGENT_CONFIG_SECTIONS = Collections.unmodifiableList(Arrays.asList(
+            "tool", "mcp", "workflow", "skill", "assistant", "knowledge"));
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -2246,6 +2252,42 @@ public class AppServiceImpl implements AppService {
         result.put("list", rows);
         result.put("total", rows.size());
         return result;
+    }
+
+    @Override
+    public Map<String, List<Map<String, Object>>> getGeneralAgentConfig(GeneralAgentConfigQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        GeneralAgentConfigRecord record = applicationRepository.findGeneralAgentConfig(userId, orgId);
+        if (record == null) {
+            return new LinkedHashMap<String, List<Map<String, Object>>>();
+        }
+        return generalAgentConfigOrEmpty(record.getConfigJson());
+    }
+
+    @Override
+    public Map<String, List<Map<String, Object>>> updateGeneralAgentConfig(GeneralAgentConfigUpdateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("general agent config command is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        Map<String, List<Map<String, Object>>> config = normalizeGeneralAgentConfig(command.getConfig());
+        long now = clock.millis();
+        GeneralAgentConfigRecord existing = applicationRepository.findGeneralAgentConfig(userId, orgId);
+        GeneralAgentConfigRecord record = new GeneralAgentConfigRecord();
+        if (existing == null) {
+            record.setCreatedAt(now);
+        } else {
+            record.setId(existing.getId());
+            record.setCreatedAt(existing.getCreatedAt());
+        }
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setConfigJson(toJsonOrNull(config));
+        applicationRepository.saveGeneralAgentConfig(record);
+        return generalAgentConfigOrEmpty(record.getConfigJson());
     }
 
     @Override
@@ -5039,6 +5081,46 @@ public class AppServiceImpl implements AppService {
         } catch (Exception ex) {
             throw new IllegalStateException("assistant draft resource config is invalid", ex);
         }
+    }
+
+    private Map<String, List<Map<String, Object>>> generalAgentConfigOrEmpty(String json) {
+        if (isBlank(json)) {
+            return new LinkedHashMap<String, List<Map<String, Object>>>();
+        }
+        return normalizeGeneralAgentConfig(mapOrDefault(json, new LinkedHashMap<String, Object>()));
+    }
+
+    private Map<String, List<Map<String, Object>>> normalizeGeneralAgentConfig(
+            Map<String, ? extends Object> source) {
+        Map<String, List<Map<String, Object>>> result =
+                new LinkedHashMap<String, List<Map<String, Object>>>();
+        if (source == null) {
+            return result;
+        }
+        for (String section : GENERAL_AGENT_CONFIG_SECTIONS) {
+            result.put(section, objectMapList(source.get(section)));
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> objectMapList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        if (!(value instanceof List)) {
+            return result;
+        }
+        for (Object item : (List<?>) value) {
+            if (!(item instanceof Map)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) item).entrySet()) {
+                if (entry.getKey() != null) {
+                    row.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+            result.add(row);
+        }
+        return result;
     }
 
     private String stringValue(Object value) {
