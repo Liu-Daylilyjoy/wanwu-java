@@ -117,6 +117,22 @@ public class ModelServiceImplTest {
 
         RecommendModelResult rerank = service.recommendModels(new RecommendModelQuery("Jina", "rerank"));
         assertEquals("Rerank", rerank.getList().get(0).getTags().get(0).get("text"));
+
+        ModelListResult multiEmbedding = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", "multi-embedding"));
+        assertEquals(1, multiEmbedding.getTotal());
+        assertEquals("multimodal-embedding", multiEmbedding.getList().get(0).getModelType());
+
+        ModelListResult multiRerank = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", "multi-rerank"));
+        assertEquals(1, multiRerank.getTotal());
+        assertEquals("multimodal-rerank", multiRerank.getList().get(0).getModelType());
+
+        ProviderModelTypeResult multiProviders = service.listImportProviders(new ProviderListQuery("", "multi-embedding"));
+        assertTrue(multiProviders.getTotal() >= 1);
+        assertEquals("multimodal-embedding", multiProviders.getList().get(0).getChildren().get(0).getKey());
+
+        RecommendModelResult multiRecommended = service.recommendModels(new RecommendModelQuery("Qwen", "multi-rerank"));
+        assertEquals(1, multiRecommended.getTotal());
+        assertEquals("Multimodal Rerank", multiRecommended.getList().get(0).getTags().get(0).get("text"));
     }
 
     @Test
@@ -125,6 +141,10 @@ public class ModelServiceImplTest {
         assertEquals(1, asr.getTotal());
         assertEquals("sync-asr", asr.getList().get(0).getModelType());
         assertEquals("qwen3-asr-flash", asr.getList().get(0).getModel());
+
+        ModelListResult asrAlias = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", "asr"));
+        assertEquals(1, asrAlias.getTotal());
+        assertEquals("sync-asr", asrAlias.getList().get(0).getModelType());
 
         RecommendModelResult recommended = service.recommendModels(new RecommendModelQuery("Qwen", "sync-asr"));
         assertEquals(1, recommended.getTotal());

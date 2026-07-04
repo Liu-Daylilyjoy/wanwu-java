@@ -72,10 +72,13 @@ public class ModelServiceImpl implements ModelService {
     private static final String MODEL_TYPE_RERANK = "rerank";
     private static final String MODEL_TYPE_MULTI_EMBEDDING = "multimodal-embedding";
     private static final String MODEL_TYPE_MULTI_RERANK = "multimodal-rerank";
+    private static final String MODEL_TYPE_MULTI_EMBEDDING_PATH = "multi-embedding";
+    private static final String MODEL_TYPE_MULTI_RERANK_PATH = "multi-rerank";
     private static final String MODEL_TYPE_OCR = "ocr";
     private static final String MODEL_TYPE_GUI = "gui";
     private static final String MODEL_TYPE_PDF = "pdf-parser";
     private static final String MODEL_TYPE_ASR = "sync-asr";
+    private static final String MODEL_TYPE_ASR_PATH = "asr";
     private static final long CREATED_AT_MILLIS = 1782806400000L;
 
     private final Map<String, ModelInfo> models = new LinkedHashMap<String, ModelInfo>();
@@ -207,12 +210,13 @@ public class ModelServiceImpl implements ModelService {
     @Override
     public synchronized ModelListResult listTypeModels(ModelTypeQuery query) {
         ModelTypeQuery safe = query == null ? new ModelTypeQuery() : query;
+        String requestedType = canonicalModelType(safe.getModelType());
         List<ModelInfo> result = new ArrayList<ModelInfo>();
         for (ModelInfo model : models.values()) {
             if (!Boolean.TRUE.equals(model.getIsActive())) {
                 continue;
             }
-            if (!isBlank(safe.getModelType()) && !safe.getModelType().equals(model.getModelType())) {
+            if (!isBlank(requestedType) && !requestedType.equals(canonicalModelType(model.getModelType()))) {
                 continue;
             }
             result.add(copyForUser(model, safe.getUserId()));
@@ -223,6 +227,7 @@ public class ModelServiceImpl implements ModelService {
     @Override
     public ProviderModelTypeResult listImportProviders(ProviderListQuery query) {
         ProviderListQuery safe = query == null ? new ProviderListQuery() : query;
+        String requestedType = canonicalModelType(safe.getModelType());
         List<ProviderModelTypeInfo> result = new ArrayList<ProviderModelTypeInfo>();
         for (ProviderModelTypeInfo provider : providerModelTypes()) {
             if (!isBlank(safe.getProvider()) && !containsIgnoreCase(provider.getName(), safe.getProvider())
@@ -234,7 +239,7 @@ public class ModelServiceImpl implements ModelService {
             filtered.setName(provider.getName());
             List<ModelTypeInfo> children = new ArrayList<ModelTypeInfo>();
             for (ModelTypeInfo type : provider.getChildren()) {
-                if (isBlank(safe.getModelType()) || safe.getModelType().equals(type.getKey())) {
+                if (isBlank(requestedType) || requestedType.equals(canonicalModelType(type.getKey()))) {
                     children.add(type);
                 }
             }
@@ -250,7 +255,7 @@ public class ModelServiceImpl implements ModelService {
     public RecommendModelResult recommendModels(RecommendModelQuery query) {
         RecommendModelQuery safe = query == null ? new RecommendModelQuery() : query;
         List<RecommendModelInfo> result = new ArrayList<RecommendModelInfo>();
-        for (RecommendModelInfo model : recommendCatalog(safe.getProvider(), safe.getModelType())) {
+        for (RecommendModelInfo model : recommendCatalog(safe.getProvider(), canonicalModelType(safe.getModelType()))) {
             result.add(model);
         }
         return new RecommendModelResult(result, result.size());
@@ -469,6 +474,14 @@ public class ModelServiceImpl implements ModelService {
                 "gui_agent_v1",
                 config("apiKey", "dev-model-key", "inferUrl", "https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1"),
                 SCOPE_PRIVATE);
+        putBuiltIn("8", "Qwen", MODEL_TYPE_MULTI_EMBEDDING, "qwen-vl-multimodal-embedding",
+                "Qwen Multimodal Embedding",
+                config("apiKey", "dev-model-key", "inferUrl", "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"),
+                SCOPE_PRIVATE);
+        putBuiltIn("9", "Qwen", MODEL_TYPE_MULTI_RERANK, "qwen-vl-multimodal-rerank",
+                "Qwen Multimodal Rerank",
+                config("apiKey", "dev-model-key", "inferUrl", "https://dashscope.aliyuncs.com/api/v1"),
+                SCOPE_PRIVATE);
     }
 
     private void putBuiltIn(String id, String provider, String modelType, String model, String displayName,
@@ -499,7 +512,7 @@ public class ModelServiceImpl implements ModelService {
     private ModelInfo fromCommand(ModelUpsertCommand command) {
         ModelInfo info = new ModelInfo();
         info.setProvider(command.getProvider());
-        info.setModelType(command.getModelType());
+        info.setModelType(canonicalModelType(command.getModelType()));
         info.setModel(command.getModel());
         info.setDisplayName(isBlank(command.getDisplayName()) ? command.getModel() : command.getDisplayName());
         info.setAvatar(avatar(command.getAvatarPath()));
@@ -516,7 +529,8 @@ public class ModelServiceImpl implements ModelService {
     }
 
     private boolean matches(ModelListQuery query, ModelInfo model) {
-        if (!isBlank(query.getModelType()) && !query.getModelType().equals(model.getModelType())) {
+        if (!isBlank(query.getModelType())
+                && !canonicalModelType(query.getModelType()).equals(canonicalModelType(model.getModelType()))) {
             return false;
         }
         if (!isBlank(query.getProvider()) && !query.getProvider().equals(model.getProvider())) {
@@ -698,7 +712,7 @@ public class ModelServiceImpl implements ModelService {
 
     private List<RecommendModelInfo> recommendCatalog(String provider, String modelType) {
         String safeProvider = defaultIfBlank(provider, "DeepSeek");
-        String safeModelType = defaultIfBlank(modelType, MODEL_TYPE_LLM);
+        String safeModelType = defaultIfBlank(canonicalModelType(modelType), MODEL_TYPE_LLM);
         if ("DeepSeek".equals(safeProvider) && MODEL_TYPE_LLM.equals(safeModelType)) {
             return Arrays.asList(
                     recommend("deepseek-chat", "DeepSeek Chat", MODEL_TYPE_LLM, "toolCall", "support"),
@@ -710,6 +724,12 @@ public class ModelServiceImpl implements ModelService {
         }
         if (MODEL_TYPE_RERANK.equals(safeModelType)) {
             return Collections.singletonList(recommend("jina-reranker-v2-base-multilingual", "Jina Reranker", MODEL_TYPE_RERANK, "noSupport", "noSupport"));
+        }
+        if (MODEL_TYPE_MULTI_EMBEDDING.equals(safeModelType)) {
+            return Collections.singletonList(recommend("qwen-vl-multimodal-embedding", "Qwen Multimodal Embedding", MODEL_TYPE_MULTI_EMBEDDING, "noSupport", "noSupport"));
+        }
+        if (MODEL_TYPE_MULTI_RERANK.equals(safeModelType)) {
+            return Collections.singletonList(recommend("qwen-vl-multimodal-rerank", "Qwen Multimodal Rerank", MODEL_TYPE_MULTI_RERANK, "noSupport", "noSupport"));
         }
         if (MODEL_TYPE_OCR.equals(safeModelType)) {
             return Collections.singletonList(recommend("unicom-ocr", "YuanJing OCR", MODEL_TYPE_OCR, "noSupport", "noSupport"));
@@ -739,34 +759,49 @@ public class ModelServiceImpl implements ModelService {
     }
 
     private String modelTypeName(String modelType) {
-        if (MODEL_TYPE_LLM.equals(modelType)) {
+        String safeModelType = canonicalModelType(modelType);
+        if (MODEL_TYPE_LLM.equals(safeModelType)) {
             return "Text Generation";
         }
-        if (MODEL_TYPE_EMBEDDING.equals(modelType)) {
+        if (MODEL_TYPE_EMBEDDING.equals(safeModelType)) {
             return "Text Embedding";
         }
-        if (MODEL_TYPE_RERANK.equals(modelType)) {
+        if (MODEL_TYPE_RERANK.equals(safeModelType)) {
             return "Rerank";
         }
-        if (MODEL_TYPE_MULTI_EMBEDDING.equals(modelType)) {
+        if (MODEL_TYPE_MULTI_EMBEDDING.equals(safeModelType)) {
             return "Multimodal Embedding";
         }
-        if (MODEL_TYPE_MULTI_RERANK.equals(modelType)) {
+        if (MODEL_TYPE_MULTI_RERANK.equals(safeModelType)) {
             return "Multimodal Rerank";
         }
-        if (MODEL_TYPE_OCR.equals(modelType)) {
+        if (MODEL_TYPE_OCR.equals(safeModelType)) {
             return "OCR";
         }
-        if (MODEL_TYPE_GUI.equals(modelType)) {
+        if (MODEL_TYPE_GUI.equals(safeModelType)) {
             return "GUI";
         }
-        if (MODEL_TYPE_PDF.equals(modelType)) {
+        if (MODEL_TYPE_PDF.equals(safeModelType)) {
             return "PDF Parser";
         }
-        if (MODEL_TYPE_ASR.equals(modelType)) {
+        if (MODEL_TYPE_ASR.equals(safeModelType)) {
             return "ASR";
         }
         return modelType;
+    }
+
+    private String canonicalModelType(String modelType) {
+        String safeModelType = defaultIfBlank(modelType, "");
+        if (MODEL_TYPE_MULTI_EMBEDDING_PATH.equals(safeModelType)) {
+            return MODEL_TYPE_MULTI_EMBEDDING;
+        }
+        if (MODEL_TYPE_MULTI_RERANK_PATH.equals(safeModelType)) {
+            return MODEL_TYPE_MULTI_RERANK;
+        }
+        if (MODEL_TYPE_ASR_PATH.equals(safeModelType)) {
+            return MODEL_TYPE_ASR;
+        }
+        return safeModelType;
     }
 
     private String scopeName(String scopeType) {

@@ -20,7 +20,7 @@ Date: 2026-06-30
   - `PUT /model/status` equivalent through `changeModelStatus`.
   - `GET /model`, `/model/list`, `/model/select/{type}`.
   - `/appspace/workflow/model/select/{type}` with the same user/org scoped model-type query mapping used by the Go workflow selectors, including `/select/asr` -> `sync-asr`.
-  - `/model/import/providers` and `/model/recommend`, including model-type-correct recommendation tags for LLM, embedding, rerank, sync-ASR, OCR, PDF Parser, and GUI.
+  - `/model/import/providers` and `/model/recommend`, including model-type-correct recommendation tags for LLM, embedding, rerank, multimodal embedding/rerank, sync-ASR, OCR, PDF Parser, and GUI.
   - `/model/experience/dialog`, `/model/experience/dialogs`, `/model/experience/dialog/records`.
   - `/model/experience/llm` as a local OpenAI-compatible SSE echo path that saves user and assistant records.
 - `wanwu-service-bff` maps the original frontend paths under `/user/api/v1`.
@@ -38,6 +38,8 @@ The Java model service uses an in-memory repository seeded with Docker developme
 - OpenAI-compatible embedding: `text-embedding-3-small`
 - Jina rerank: `jina-reranker-v2-base-multilingual`
 - Qwen ASR: `qwen3-asr-flash`
+- Qwen multimodal embedding: `qwen-vl-multimodal-embedding`
+- Qwen multimodal rerank: `qwen-vl-multimodal-rerank`
 - YuanJing OCR: `unicom-ocr`
 - YuanJing PDF Parser: `pdf-parser`
 - YuanJing GUI Agent: `gui_agent_v1`
