@@ -18,6 +18,13 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileInfo;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListResult;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadItem;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadResult;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
@@ -117,6 +124,7 @@ import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantKnowledgeFileRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
@@ -177,6 +185,7 @@ public class AppServiceImpl implements AppService {
     private static final String CONVERSATION_TYPE_CHATFLOW_OPENAPI = "chatflow_openapi";
     private static final String CONVERSATION_TYPE_MODEL_USE_CHATLLM = "model_use_chatllm";
     private static final String MODEL_USE_CHATLLM_ASSISTANT_ID = "model-use-chatllm";
+    private static final String MODEL_USE_KNOWLEDGE_FILE_PREFIX = "model-use-knowledge-file-";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -2129,6 +2138,61 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public AssistantKnowledgeFileUploadResult uploadAssistantKnowledgeFiles(AssistantKnowledgeFileUploadCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("assistant knowledge file upload command is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String assistantId = defaultIfBlank(command.getAssistantId(), "default-assistant");
+        List<String> fileIds = new ArrayList<>();
+        List<AssistantKnowledgeFileInfo> fileList = new ArrayList<>();
+        List<AssistantKnowledgeFileUploadItem> files = command.getFiles() == null
+                ? Collections.<AssistantKnowledgeFileUploadItem>emptyList()
+                : command.getFiles();
+        for (AssistantKnowledgeFileUploadItem file : files) {
+            if (file == null) {
+                continue;
+            }
+            AssistantKnowledgeFileRecord record = newAssistantKnowledgeFileRecord(userId, orgId, assistantId, file);
+            applicationRepository.saveAssistantKnowledgeFile(record);
+            fileIds.add(record.getFileId());
+            fileList.add(toAssistantKnowledgeFileInfo(record));
+        }
+        long total = applicationRepository.countAssistantKnowledgeFiles(userId, orgId, assistantId);
+        return new AssistantKnowledgeFileUploadResult(fileIds, fileList, (int) Math.min(Integer.MAX_VALUE, total));
+    }
+
+    @Override
+    public AssistantKnowledgeFileListResult listAssistantKnowledgeFiles(AssistantKnowledgeFileListQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        String assistantId = defaultIfBlank(query == null ? "" : query.getAssistantId(), "default-assistant");
+        List<AssistantKnowledgeFileInfo> list = new ArrayList<>();
+        for (AssistantKnowledgeFileRecord record : applicationRepository
+                .listAssistantKnowledgeFiles(userId, orgId, assistantId)) {
+            list.add(toAssistantKnowledgeFileInfo(record));
+        }
+        long total = applicationRepository.countAssistantKnowledgeFiles(userId, orgId, assistantId);
+        return new AssistantKnowledgeFileListResult(list, (int) Math.min(Integer.MAX_VALUE, total));
+    }
+
+    @Override
+    public void deleteAssistantKnowledgeFile(AssistantKnowledgeFileDeleteCommand command) {
+        if (command == null || isBlank(command.getFileId())) {
+            return;
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        if (isBlank(command.getAssistantId())) {
+            applicationRepository.deleteAssistantKnowledgeFile(userId, orgId, command.getFileId());
+            return;
+        }
+        applicationRepository.deleteAssistantKnowledgeFile(
+                userId, orgId, command.getAssistantId(), command.getFileId());
+    }
+
+    @Override
     public AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("conversation create command is required");
@@ -2763,6 +2827,44 @@ public class AppServiceImpl implements AppService {
         item.put("subConversationList", listOrDefault(record.getSubConversationListJson()));
         item.put("responseFiles", listOrDefault(record.getResponseFilesJson()));
         return item;
+    }
+
+    private AssistantKnowledgeFileRecord newAssistantKnowledgeFileRecord(String userId,
+                                                                         String orgId,
+                                                                         String assistantId,
+                                                                         AssistantKnowledgeFileUploadItem file) {
+        long now = clock.millis();
+        String fileId = MODEL_USE_KNOWLEDGE_FILE_PREFIX + UUID.randomUUID().toString().replace("-", "");
+        String fileName = defaultIfBlank(file.getFileName(), "knowledge-file");
+        AssistantKnowledgeFileRecord record = new AssistantKnowledgeFileRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAssistantId(assistantId);
+        record.setFileId(fileId);
+        record.setFileName(fileName);
+        record.setFileSize(Math.max(0L, file.getSize()));
+        record.setContentType(defaultIfBlank(file.getContentType(), ""));
+        record.setStatus("success");
+        record.setUrl("/use/model/api/v1/assistant/knowledge/file/" + fileId);
+        return record;
+    }
+
+    private AssistantKnowledgeFileInfo toAssistantKnowledgeFileInfo(AssistantKnowledgeFileRecord record) {
+        AssistantKnowledgeFileInfo info = new AssistantKnowledgeFileInfo();
+        String fileId = defaultIfBlank(record.getFileId(), "");
+        String fileName = defaultIfBlank(record.getFileName(), "knowledge-file");
+        info.setFileId(fileId);
+        info.setId(fileId);
+        info.setFileName(fileName);
+        info.setFileNameAlias(fileName);
+        info.setName(fileName);
+        info.setSize(record.getFileSize() == null ? 0L : record.getFileSize());
+        info.setStatus(defaultIfBlank(record.getStatus(), "success"));
+        info.setUrl(defaultIfBlank(record.getUrl(), "/use/model/api/v1/assistant/knowledge/file/" + fileId));
+        info.setContentType(defaultIfBlank(record.getContentType(), ""));
+        return info;
     }
 
     private AssistantConversationMessageRecord newLegacyChatLlmMessage(AssistantConversationRecord conversation,

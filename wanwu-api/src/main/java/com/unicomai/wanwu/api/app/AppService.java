@@ -14,6 +14,11 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListResult;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadResult;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
@@ -229,6 +234,12 @@ public interface AppService {
     Map<String, Object> listAssistantMcpActions(AssistantResourceCommand command);
 
     Map<String, Object> listAssistantWorkflowSelect(String userId, String orgId, String name);
+
+    AssistantKnowledgeFileUploadResult uploadAssistantKnowledgeFiles(AssistantKnowledgeFileUploadCommand command);
+
+    AssistantKnowledgeFileListResult listAssistantKnowledgeFiles(AssistantKnowledgeFileListQuery query);
+
+    void deleteAssistantKnowledgeFile(AssistantKnowledgeFileDeleteCommand command);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

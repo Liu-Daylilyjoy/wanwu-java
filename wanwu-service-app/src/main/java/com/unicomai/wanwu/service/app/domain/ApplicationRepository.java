@@ -308,4 +308,16 @@ public interface ApplicationRepository {
     boolean deleteConversationMessage(String userId, String orgId, String conversationId, String detailId);
 
     boolean deleteConversationMessages(String userId, String orgId, String conversationId);
+
+    AssistantKnowledgeFileRecord saveAssistantKnowledgeFile(AssistantKnowledgeFileRecord record);
+
+    List<AssistantKnowledgeFileRecord> listAssistantKnowledgeFiles(String userId, String orgId, String assistantId);
+
+    long countAssistantKnowledgeFiles(String userId, String orgId, String assistantId);
+
+    boolean deleteAssistantKnowledgeFile(String userId, String orgId, String assistantId, String fileId);
+
+    boolean deleteAssistantKnowledgeFile(String userId, String orgId, String fileId);
+
+    boolean deleteAssistantKnowledgeFiles(String userId, String orgId, String assistantId);
 }

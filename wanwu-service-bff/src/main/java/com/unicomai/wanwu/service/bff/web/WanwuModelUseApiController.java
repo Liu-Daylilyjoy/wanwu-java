@@ -10,6 +10,10 @@ import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadItem;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.model.ModelService;
@@ -50,8 +54,6 @@ public class WanwuModelUseApiController {
     private static final AtomicLong ACTION_SEQUENCE = new AtomicLong(0);
     private static final Map<String, Map<String, Object>> ACTIONS =
             new ConcurrentHashMap<String, Map<String, Object>>();
-    private static final Map<String, Map<String, Map<String, Object>>> KNOWLEDGE_FILES_BY_ASSISTANT =
-            new ConcurrentHashMap<String, Map<String, Map<String, Object>>>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -205,54 +207,45 @@ public class WanwuModelUseApiController {
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/knowledge/file/upload")
-    public FrontendResponse<Map<String, Object>> uploadAssistantKnowledgeFiles(
+    public FrontendResponse<Object> uploadAssistantKnowledgeFiles(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "assistantId", required = false) String assistantId,
             @RequestParam(value = "appId", required = false) String appId,
             @RequestParam(value = "file", required = false) List<MultipartFile> file,
             @RequestParam(value = "files", required = false) List<MultipartFile> files) {
-        String ownerId = defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant"));
-        List<String> fileIds = new ArrayList<String>();
-        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (MultipartFile uploaded : firstFiles(file, files)) {
-            if (uploaded == null) {
-                continue;
-            }
-            Map<String, Object> row = knowledgeFileRow(uploaded);
-            String fileId = String.valueOf(row.get("fileId"));
-            knowledgeFiles(ownerId).put(fileId, row);
-            fileIds.add(fileId);
-            rows.add(row);
-        }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", fileIds);
-        body.put("fileList", rows);
-        body.put("total", knowledgeFiles(ownerId).size());
-        return FrontendResponse.ok(body);
+        UserContext ctx = userContext(authorization);
+        AssistantKnowledgeFileUploadCommand command = new AssistantKnowledgeFileUploadCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setAssistantId(defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant")));
+        command.setFiles(toKnowledgeFileItems(firstFiles(file, files)));
+        return FrontendResponse.ok(appService.uploadAssistantKnowledgeFiles(command));
     }
 
     @GetMapping(MODEL_PREFIX + "/assistant/knowledge/file/list")
-    public FrontendResponse<Map<String, Object>> listAssistantKnowledgeFiles(
+    public FrontendResponse<Object> listAssistantKnowledgeFiles(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "assistantId", required = false) String assistantId,
             @RequestParam(value = "appId", required = false) String appId) {
-        String ownerId = defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant"));
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", new ArrayList<Map<String, Object>>(knowledgeFiles(ownerId).values()));
-        body.put("total", knowledgeFiles(ownerId).size());
-        return FrontendResponse.ok(body);
+        UserContext ctx = userContext(authorization);
+        AssistantKnowledgeFileListQuery query = new AssistantKnowledgeFileListQuery();
+        query.setUserId(ctx.userId);
+        query.setOrgId(ctx.orgId);
+        query.setAssistantId(defaultIfBlank(assistantId, defaultIfBlank(appId, "default-assistant")));
+        return FrontendResponse.ok(appService.listAssistantKnowledgeFiles(query));
     }
 
     @DeleteMapping(MODEL_PREFIX + "/assistant/knowledge/file/delete")
     public FrontendResponse<Map<String, Object>> deleteAssistantKnowledgeFile(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        String ownerId = defaultIfBlank(firstText(request, "assistantId", "appId"), "");
-        String fileId = fileIdValue(request == null ? null : request.get("fileId"));
-        if (hasText(ownerId)) {
-            knowledgeFiles(ownerId).remove(fileId);
-        } else {
-            for (Map<String, Map<String, Object>> files : KNOWLEDGE_FILES_BY_ASSISTANT.values()) {
-                files.remove(fileId);
-            }
-        }
+        UserContext ctx = userContext(authorization);
+        AssistantKnowledgeFileDeleteCommand command = new AssistantKnowledgeFileDeleteCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setAssistantId(firstText(request, "assistantId", "appId"));
+        command.setFileId(fileIdValue(request == null ? null : request.get("fileId")));
+        appService.deleteAssistantKnowledgeFile(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -505,32 +498,6 @@ public class WanwuModelUseApiController {
         return body;
     }
 
-    private Map<String, Map<String, Object>> knowledgeFiles(String assistantId) {
-        String ownerId = defaultIfBlank(assistantId, "default-assistant");
-        Map<String, Map<String, Object>> files = KNOWLEDGE_FILES_BY_ASSISTANT.get(ownerId);
-        if (files == null) {
-            Map<String, Map<String, Object>> created = new ConcurrentHashMap<String, Map<String, Object>>();
-            Map<String, Map<String, Object>> existing = KNOWLEDGE_FILES_BY_ASSISTANT.putIfAbsent(ownerId, created);
-            files = existing == null ? created : existing;
-        }
-        return files;
-    }
-
-    private Map<String, Object> knowledgeFileRow(MultipartFile file) {
-        Map<String, Object> row = new LinkedHashMap<String, Object>();
-        String fileId = "model-use-knowledge-file-" + UUID.randomUUID().toString().replace("-", "");
-        String fileName = defaultIfBlank(file.getOriginalFilename(), "knowledge-file");
-        row.put("fileId", fileId);
-        row.put("id", fileId);
-        row.put("fileName", fileName);
-        row.put("file_name", fileName);
-        row.put("name", fileName);
-        row.put("size", file.getSize());
-        row.put("status", "success");
-        row.put("url", "/use/model/api/v1/assistant/knowledge/file/" + fileId);
-        return row;
-    }
-
     private String fileIdValue(Object raw) {
         if (raw instanceof Map) {
             Map<?, ?> map = (Map<?, ?>) raw;
@@ -541,6 +508,23 @@ public class WanwuModelUseApiController {
             return value == null ? "" : String.valueOf(value);
         }
         return raw == null ? "" : String.valueOf(raw);
+    }
+
+    private List<AssistantKnowledgeFileUploadItem> toKnowledgeFileItems(List<MultipartFile> files) {
+        List<AssistantKnowledgeFileUploadItem> items = new ArrayList<AssistantKnowledgeFileUploadItem>();
+        if (files == null) {
+            return items;
+        }
+        for (MultipartFile file : files) {
+            if (file == null) {
+                continue;
+            }
+            items.add(new AssistantKnowledgeFileUploadItem(
+                    defaultIfBlank(file.getOriginalFilename(), "knowledge-file"),
+                    file.getSize(),
+                    defaultIfBlank(file.getContentType(), "")));
+        }
+        return items;
     }
 
     private List<MultipartFile> firstFiles(List<MultipartFile> first, List<MultipartFile> second) {
@@ -603,10 +587,6 @@ public class WanwuModelUseApiController {
 
     private String defaultIfBlank(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value;
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
     }
 
     private static class UserContext {

@@ -5,6 +5,9 @@ import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateResult;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationPageResult;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileInfo;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListResult;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadResult;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
@@ -24,9 +27,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -128,6 +131,19 @@ public class WanwuModelUseApiControllerTest {
                 .thenReturn(page(row("conversationId", "conversation-chatllm-001", "name", "hello")));
         when(appService.listLegacyChatLlmConversationDetails(any()))
                 .thenReturn(page(row("detailId", "detail-chatllm-001", "content", "hello")));
+        AssistantKnowledgeFileInfo knowledgeFile = knowledgeFile("model-use-knowledge-file-001", "knowledge.txt");
+        when(appService.uploadAssistantKnowledgeFiles(any()))
+                .thenReturn(new AssistantKnowledgeFileUploadResult(
+                        Collections.singletonList("model-use-knowledge-file-001"),
+                        Collections.singletonList(knowledgeFile),
+                        1));
+        when(appService.listAssistantKnowledgeFiles(any()))
+                .thenReturn(new AssistantKnowledgeFileListResult(
+                        Collections.singletonList(knowledgeFile),
+                        1))
+                .thenReturn(new AssistantKnowledgeFileListResult(
+                        Collections.<AssistantKnowledgeFileInfo>emptyList(),
+                        0));
 
         mockMvc.perform(post("/use/model/api/v1/chatllm/conversation/create")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -159,7 +175,7 @@ public class WanwuModelUseApiControllerTest {
                                 "knowledge".getBytes(StandardCharsets.UTF_8)))
                         .param("assistantId", "assistant-001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[0]", containsString("model-use-knowledge-file-")))
+                .andExpect(jsonPath("$.data.list[0]").value("model-use-knowledge-file-001"))
                 .andExpect(jsonPath("$.data.fileList[0].fileName").value("knowledge.txt"))
                 .andReturn();
         String knowledgeFileId = firstKnowledgeFileId(knowledgeUpload);
@@ -194,6 +210,9 @@ public class WanwuModelUseApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].fileName").value("avatar.png"));
 
         verify(appService).createAssistant(any());
+        verify(appService).uploadAssistantKnowledgeFiles(any());
+        verify(appService, times(2)).listAssistantKnowledgeFiles(any());
+        verify(appService).deleteAssistantKnowledgeFile(any());
     }
 
     @Test
@@ -263,5 +282,18 @@ public class WanwuModelUseApiControllerTest {
         row.put(key1, value1);
         row.put(key2, value2);
         return row;
+    }
+
+    private AssistantKnowledgeFileInfo knowledgeFile(String fileId, String fileName) {
+        AssistantKnowledgeFileInfo info = new AssistantKnowledgeFileInfo();
+        info.setFileId(fileId);
+        info.setId(fileId);
+        info.setFileName(fileName);
+        info.setFileNameAlias(fileName);
+        info.setName(fileName);
+        info.setSize(9L);
+        info.setStatus("success");
+        info.setUrl("/use/model/api/v1/assistant/knowledge/file/" + fileId);
+        return info;
     }
 }

@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.app.persistence;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantKnowledgeFileRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
@@ -32,6 +33,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEn
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AssistantKnowledgeFileEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
@@ -52,6 +54,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMa
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AssistantKnowledgeFileMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
@@ -87,6 +90,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AppHistoryMapper appHistoryMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
+    private final AssistantKnowledgeFileMapper assistantKnowledgeFileMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
                                         AssistantDraftMapper assistantDraftMapper,
@@ -107,7 +111,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AppFavoriteMapper appFavoriteMapper,
                                         AppHistoryMapper appHistoryMapper,
                                         AssistantConversationMapper assistantConversationMapper,
-                                        AssistantConversationMessageMapper assistantConversationMessageMapper) {
+                                        AssistantConversationMessageMapper assistantConversationMessageMapper,
+                                        AssistantKnowledgeFileMapper assistantKnowledgeFileMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
@@ -128,6 +133,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.appHistoryMapper = appHistoryMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
+        this.assistantKnowledgeFileMapper = assistantKnowledgeFileMapper;
     }
 
     @Override
@@ -190,6 +196,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         appUrlMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMessageMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMapper.deleteByAssistant(userId, orgId, assistantId);
+        assistantKnowledgeFileMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantSnapshotMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantDraftConfigMapper.deleteByAssistant(userId, orgId, assistantId);
         int draftDeleted = assistantDraftMapper.deleteDraft(userId, orgId, assistantId);
@@ -1007,6 +1014,42 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         return assistantConversationMessageMapper.deleteByConversation(userId, orgId, conversationId) > 0;
     }
 
+    @Override
+    public AssistantKnowledgeFileRecord saveAssistantKnowledgeFile(AssistantKnowledgeFileRecord record) {
+        AssistantKnowledgeFileEntity entity = toEntity(record);
+        assistantKnowledgeFileMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<AssistantKnowledgeFileRecord> listAssistantKnowledgeFiles(String userId,
+                                                                          String orgId,
+                                                                          String assistantId) {
+        return toAssistantKnowledgeFileRecords(
+                assistantKnowledgeFileMapper.selectByAssistant(userId, orgId, assistantId));
+    }
+
+    @Override
+    public long countAssistantKnowledgeFiles(String userId, String orgId, String assistantId) {
+        return assistantKnowledgeFileMapper.countByAssistant(userId, orgId, assistantId);
+    }
+
+    @Override
+    public boolean deleteAssistantKnowledgeFile(String userId, String orgId, String assistantId, String fileId) {
+        return assistantKnowledgeFileMapper.deleteByAssistantFile(userId, orgId, assistantId, fileId) > 0;
+    }
+
+    @Override
+    public boolean deleteAssistantKnowledgeFile(String userId, String orgId, String fileId) {
+        return assistantKnowledgeFileMapper.deleteByFile(userId, orgId, fileId) > 0;
+    }
+
+    @Override
+    public boolean deleteAssistantKnowledgeFiles(String userId, String orgId, String assistantId) {
+        return assistantKnowledgeFileMapper.deleteByAssistant(userId, orgId, assistantId) > 0;
+    }
+
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
         AssistantDraftConfigEntity entity = new AssistantDraftConfigEntity();
         entity.setCreatedAt(record.getCreatedAt());
@@ -1816,6 +1859,52 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setFileSize(entity.getFileSize());
         record.setFileName(entity.getFileName());
         record.setQaType(entity.getQaType());
+        return record;
+    }
+
+    private AssistantKnowledgeFileEntity toEntity(AssistantKnowledgeFileRecord record) {
+        AssistantKnowledgeFileEntity entity = new AssistantKnowledgeFileEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAssistantId(record.getAssistantId());
+        entity.setFileId(record.getFileId());
+        entity.setFileName(record.getFileName());
+        entity.setFileSize(record.getFileSize());
+        entity.setContentType(record.getContentType());
+        entity.setStatus(record.getStatus());
+        entity.setUrl(record.getUrl());
+        return entity;
+    }
+
+    private List<AssistantKnowledgeFileRecord> toAssistantKnowledgeFileRecords(
+            List<AssistantKnowledgeFileEntity> entities) {
+        List<AssistantKnowledgeFileRecord> records = new java.util.ArrayList<>();
+        for (AssistantKnowledgeFileEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AssistantKnowledgeFileRecord toRecord(AssistantKnowledgeFileEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AssistantKnowledgeFileRecord record = new AssistantKnowledgeFileRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAssistantId(entity.getAssistantId());
+        record.setFileId(entity.getFileId());
+        record.setFileName(entity.getFileName());
+        record.setFileSize(entity.getFileSize());
+        record.setContentType(entity.getContentType());
+        record.setStatus(entity.getStatus());
+        record.setUrl(entity.getUrl());
         return record;
     }
 

@@ -14,6 +14,12 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileListResult;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadItem;
+import com.unicomai.wanwu.api.app.dto.AssistantKnowledgeFileUploadResult;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
@@ -90,6 +96,7 @@ import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantKnowledgeFileRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
@@ -1439,6 +1446,49 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void legacyAssistantKnowledgeFilesUsePersistentRepository() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        AssistantKnowledgeFileUploadCommand upload = new AssistantKnowledgeFileUploadCommand();
+        upload.setUserId("dev-admin");
+        upload.setOrgId("default-org");
+        upload.setAssistantId("assistant-legacy-001");
+        upload.setFiles(Collections.singletonList(
+                new AssistantKnowledgeFileUploadItem("knowledge.txt", 9L, "text/plain")));
+
+        AssistantKnowledgeFileUploadResult uploaded = service.uploadAssistantKnowledgeFiles(upload);
+
+        assertEquals(1, uploaded.getTotal());
+        assertEquals(1, uploaded.getList().size());
+        String fileId = uploaded.getList().get(0);
+        assertTrue(fileId.startsWith("model-use-knowledge-file-"));
+        assertEquals(fileId, uploaded.getFileList().get(0).getFileId());
+        assertEquals("knowledge.txt", uploaded.getFileList().get(0).getFileName());
+        assertEquals("knowledge.txt", uploaded.getFileList().get(0).getFile_name());
+        assertEquals(9L, uploaded.getFileList().get(0).getSize());
+
+        AssistantKnowledgeFileListQuery listQuery = new AssistantKnowledgeFileListQuery();
+        listQuery.setUserId("dev-admin");
+        listQuery.setOrgId("default-org");
+        listQuery.setAssistantId("assistant-legacy-001");
+        AssistantKnowledgeFileListResult list = service.listAssistantKnowledgeFiles(listQuery);
+        assertEquals(1, list.getTotal());
+        assertEquals(fileId, list.getList().get(0).getId());
+        assertEquals("/use/model/api/v1/assistant/knowledge/file/" + fileId, list.getList().get(0).getUrl());
+
+        AssistantKnowledgeFileDeleteCommand delete = new AssistantKnowledgeFileDeleteCommand();
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        delete.setAssistantId("assistant-legacy-001");
+        delete.setFileId(fileId);
+        service.deleteAssistantKnowledgeFile(delete);
+
+        assertEquals(0, service.listAssistantKnowledgeFiles(listQuery).getTotal());
+        assertTrue(repository.assistantKnowledgeFiles.isEmpty());
+    }
+
+    @Test
     public void draftStreamCreatesConversationAndPersistsMessageDetail() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));
@@ -2081,6 +2131,7 @@ public class AppServiceImplTest {
         private final List<AppHistoryRecord> histories = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
+        private final List<AssistantKnowledgeFileRecord> assistantKnowledgeFiles = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -2208,6 +2259,7 @@ public class AppServiceImplTest {
                 }
             }
             messages.removeAll(removedMessages);
+            deleteAssistantKnowledgeFiles(userId, orgId, assistantId);
             return true;
         }
 
@@ -3457,6 +3509,77 @@ public class AppServiceImplTest {
                 }
             }
             messages.removeAll(removed);
+            return !removed.isEmpty();
+        }
+
+        @Override
+        public AssistantKnowledgeFileRecord saveAssistantKnowledgeFile(AssistantKnowledgeFileRecord record) {
+            record.setId(ids.incrementAndGet());
+            assistantKnowledgeFiles.add(record);
+            return record;
+        }
+
+        @Override
+        public List<AssistantKnowledgeFileRecord> listAssistantKnowledgeFiles(String userId,
+                                                                              String orgId,
+                                                                              String assistantId) {
+            List<AssistantKnowledgeFileRecord> matches = new ArrayList<>();
+            for (AssistantKnowledgeFileRecord file : assistantKnowledgeFiles) {
+                if (userId.equals(file.getUserId())
+                        && orgId.equals(file.getOrgId())
+                        && assistantId.equals(file.getAssistantId())) {
+                    matches.add(file);
+                }
+            }
+            matches.sort(Comparator.comparing(AssistantKnowledgeFileRecord::getId).reversed());
+            return matches;
+        }
+
+        @Override
+        public long countAssistantKnowledgeFiles(String userId, String orgId, String assistantId) {
+            return listAssistantKnowledgeFiles(userId, orgId, assistantId).size();
+        }
+
+        @Override
+        public boolean deleteAssistantKnowledgeFile(String userId, String orgId, String assistantId, String fileId) {
+            AssistantKnowledgeFileRecord found = null;
+            for (AssistantKnowledgeFileRecord file : assistantKnowledgeFiles) {
+                if (userId.equals(file.getUserId())
+                        && orgId.equals(file.getOrgId())
+                        && assistantId.equals(file.getAssistantId())
+                        && fileId.equals(file.getFileId())) {
+                    found = file;
+                    break;
+                }
+            }
+            return found != null && assistantKnowledgeFiles.remove(found);
+        }
+
+        @Override
+        public boolean deleteAssistantKnowledgeFile(String userId, String orgId, String fileId) {
+            AssistantKnowledgeFileRecord found = null;
+            for (AssistantKnowledgeFileRecord file : assistantKnowledgeFiles) {
+                if (userId.equals(file.getUserId())
+                        && orgId.equals(file.getOrgId())
+                        && fileId.equals(file.getFileId())) {
+                    found = file;
+                    break;
+                }
+            }
+            return found != null && assistantKnowledgeFiles.remove(found);
+        }
+
+        @Override
+        public boolean deleteAssistantKnowledgeFiles(String userId, String orgId, String assistantId) {
+            List<AssistantKnowledgeFileRecord> removed = new ArrayList<>();
+            for (AssistantKnowledgeFileRecord file : assistantKnowledgeFiles) {
+                if (userId.equals(file.getUserId())
+                        && orgId.equals(file.getOrgId())
+                        && assistantId.equals(file.getAssistantId())) {
+                    removed.add(file);
+                }
+            }
+            assistantKnowledgeFiles.removeAll(removed);
             return !removed.isEmpty();
         }
 

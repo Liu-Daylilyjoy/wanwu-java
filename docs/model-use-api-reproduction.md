@@ -22,6 +22,7 @@ These routes are frontend-visible even though most of the current Java reproduct
 - Assistant conversation create/list/detail/delete delegates to the existing Java assistant conversation shell.
 - Model experience dialog create/list/delete/detail aliases delegate to `ModelService`, so `/use/model/api/v1/model/experience/*` and `/user/api/v1/model/experience/*` share the same development repository.
 - ChatLLM/CUBM conversation create/list/detail/delete now delegates to `AppService`, using the existing `assistant_conversations` and `assistant_conversation_messages` MySQL-backed repository with an internal `model_use_chatllm` conversation type.
+- Assistant knowledge-file upload/list/delete now delegates to `AppService` and persists file binding metadata in the MySQL-backed `assistant_knowledge_files` table while preserving the legacy frontend response fields (`fileId`, `id`, `fileName`, `file_name`, `name`, `size`, `status`, `url`).
 - Assistant action routes still return deterministic local development state.
 - Legacy file routes (`/use/model/api/v1/file/batch/upload`, `/use/model/api/v1/file/confirmPath`, and `/service/api/v1/model/expansion/file/batch/upload`) return frontend-compatible upload/confirmation contracts.
 
@@ -29,9 +30,10 @@ These routes are frontend-visible even though most of the current Java reproduct
 
 - This is a route and data-shape compatibility slice, not a reproduced model-use inference service.
 - ChatLLM/CUBM replies, assistant action execution, auto-create generation, and file extraction are deterministic shells.
-- Assistant, model experience, and ChatLLM/CUBM conversation persistence reuse existing Java development repositories; assistant knowledge files remain BFF-local.
+- Assistant, model experience, ChatLLM/CUBM conversations, and assistant knowledge-file metadata persistence reuse Java development repositories; actual uploaded file content/object-storage lifecycle for legacy model-use knowledge files remains a later MinIO/runtime parity slice.
 
 ## Verification
 
 - `AppServiceImplTest#legacyChatLlmConversationUsesPersistentConversationRepository` covers the persisted ChatLLM/CUBM service loop.
-- `WanwuModelUseApiControllerTest` covers legacy assistant lifecycle, assistant conversations, ChatLLM/CUBM route mapping, model experience aliases, file extraction, file confirmation, and batch upload aliases.
+- `AppServiceImplTest#legacyAssistantKnowledgeFilesUsePersistentRepository` covers the persisted assistant knowledge-file metadata loop.
+- `WanwuModelUseApiControllerTest` covers legacy assistant lifecycle, assistant conversations, assistant knowledge-file route delegation, ChatLLM/CUBM route mapping, model experience aliases, file extraction, file confirmation, and batch upload aliases.
