@@ -8,6 +8,8 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
+import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -21,6 +23,8 @@ import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageAggregateEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageRecordEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppFavoriteEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppHistoryEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppStatisticEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
@@ -39,6 +43,8 @@ import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageAggregateMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageRecordMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppFavoriteMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppHistoryMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppStatisticMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
@@ -77,6 +83,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final ModelStatisticMapper modelStatisticMapper;
     private final AppKeyMapper appKeyMapper;
     private final AppUrlMapper appUrlMapper;
+    private final AppFavoriteMapper appFavoriteMapper;
+    private final AppHistoryMapper appHistoryMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
 
@@ -96,6 +104,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         ModelStatisticMapper modelStatisticMapper,
                                         AppKeyMapper appKeyMapper,
                                         AppUrlMapper appUrlMapper,
+                                        AppFavoriteMapper appFavoriteMapper,
+                                        AppHistoryMapper appHistoryMapper,
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper) {
         this.appMapper = appMapper;
@@ -114,6 +124,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.modelStatisticMapper = modelStatisticMapper;
         this.appKeyMapper = appKeyMapper;
         this.appUrlMapper = appUrlMapper;
+        this.appFavoriteMapper = appFavoriteMapper;
+        this.appHistoryMapper = appHistoryMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
     }
@@ -437,6 +449,69 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     public List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType) {
         return appMapper.selectWorkflowRecords(userId, orgId, name, appType);
+    }
+
+    @Override
+    public List<AppFavoriteRecord> listAppFavorites(String userId, String appType) {
+        List<AppFavoriteEntity> entities = appFavoriteMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppFavoriteEntity>()
+                        .eq("user_id", userId)
+                        .eq(appType != null && !appType.isEmpty(), "app_type", appType)
+                        .orderByDesc("updated_at"));
+        return toAppFavoriteRecords(entities);
+    }
+
+    @Override
+    public void saveAppFavorite(AppFavoriteRecord record) {
+        AppFavoriteEntity existing = appFavoriteMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppFavoriteEntity>()
+                        .eq("user_id", record.getUserId())
+                        .eq("app_id", record.getAppId())
+                        .eq("app_type", record.getAppType())
+                        .last("LIMIT 1"));
+        if (existing == null) {
+            appFavoriteMapper.insert(toEntity(record));
+            return;
+        }
+        existing.setUpdatedAt(record.getUpdatedAt());
+        appFavoriteMapper.updateById(existing);
+    }
+
+    @Override
+    public boolean deleteAppFavorite(String userId, String appId, String appType) {
+        int deleted = appFavoriteMapper.delete(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppFavoriteEntity>()
+                        .eq("user_id", userId)
+                        .eq("app_id", appId)
+                        .eq("app_type", appType));
+        return deleted > 0;
+    }
+
+    @Override
+    public List<AppHistoryRecord> listAppHistories(String userId, String appType, long startUpdatedAt) {
+        List<AppHistoryEntity> entities = appHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppHistoryEntity>()
+                        .eq("user_id", userId)
+                        .eq(appType != null && !appType.isEmpty(), "app_type", appType)
+                        .ge(startUpdatedAt > 0L, "updated_at", startUpdatedAt)
+                        .orderByDesc("updated_at"));
+        return toAppHistoryRecords(entities);
+    }
+
+    @Override
+    public void saveAppHistory(AppHistoryRecord record) {
+        AppHistoryEntity existing = appHistoryMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppHistoryEntity>()
+                        .eq("user_id", record.getUserId())
+                        .eq("app_id", record.getAppId())
+                        .eq("app_type", record.getAppType())
+                        .last("LIMIT 1"));
+        if (existing == null) {
+            appHistoryMapper.insert(toEntity(record));
+            return;
+        }
+        existing.setUpdatedAt(record.getUpdatedAt());
+        appHistoryMapper.updateById(existing);
     }
 
     @Override
@@ -1210,6 +1285,72 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setWorkflowInfoJson(entity.getWorkflowInfoJson());
         record.setWorkflowSchemaJson(entity.getWorkflowSchemaJson());
+        return record;
+    }
+
+    private AppFavoriteEntity toEntity(AppFavoriteRecord record) {
+        AppFavoriteEntity entity = new AppFavoriteEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setAppId(record.getAppId());
+        entity.setAppType(record.getAppType());
+        return entity;
+    }
+
+    private List<AppFavoriteRecord> toAppFavoriteRecords(List<AppFavoriteEntity> entities) {
+        List<AppFavoriteRecord> records = new java.util.ArrayList<>();
+        for (AppFavoriteEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppFavoriteRecord toRecord(AppFavoriteEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AppFavoriteRecord record = new AppFavoriteRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setAppId(entity.getAppId());
+        record.setAppType(entity.getAppType());
+        return record;
+    }
+
+    private AppHistoryEntity toEntity(AppHistoryRecord record) {
+        AppHistoryEntity entity = new AppHistoryEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setAppId(record.getAppId());
+        entity.setAppType(record.getAppType());
+        return entity;
+    }
+
+    private List<AppHistoryRecord> toAppHistoryRecords(List<AppHistoryEntity> entities) {
+        List<AppHistoryRecord> records = new java.util.ArrayList<>();
+        for (AppHistoryEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppHistoryRecord toRecord(AppHistoryEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AppHistoryRecord record = new AppHistoryRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setAppId(entity.getAppId());
+        record.setAppType(entity.getAppType());
         return record;
     }
 

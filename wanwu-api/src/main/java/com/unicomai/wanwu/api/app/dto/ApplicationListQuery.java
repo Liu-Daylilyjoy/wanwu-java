@@ -10,6 +10,7 @@ public class ApplicationListQuery implements Serializable {
     private String name;
     private String userId;
     private String orgId;
+    private String searchType;
 
     public ApplicationListQuery() {
     }
@@ -55,5 +56,13 @@ public class ApplicationListQuery implements Serializable {
 
     public void setOrgId(String orgId) {
         this.orgId = orgId;
+    }
+
+    public String getSearchType() {
+        return searchType;
+    }
+
+    public void setSearchType(String searchType) {
+        this.searchType = searchType;
     }
 }

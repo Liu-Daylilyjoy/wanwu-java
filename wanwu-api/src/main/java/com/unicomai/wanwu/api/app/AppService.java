@@ -55,6 +55,8 @@ import com.unicomai.wanwu.api.app.dto.AppVersionRollbackCommand;
 import com.unicomai.wanwu.api.app.dto.AppVersionUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticQuery;
@@ -114,6 +116,10 @@ public interface AppService {
     ApplicationListResult listAssistants(ApplicationListQuery query);
 
     ApplicationListResult listApplications(ApplicationListQuery query);
+
+    void changeExplorationAppFavorite(ExplorationAppFavoriteCommand command);
+
+    void recordAppHistory(ExplorationAppHistoryCommand command);
 
     Map<String, Object> getAssistantDraft(AssistantDetailQuery query);
 

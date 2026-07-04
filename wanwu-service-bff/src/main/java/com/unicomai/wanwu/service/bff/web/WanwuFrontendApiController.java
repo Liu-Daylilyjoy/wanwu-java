@@ -49,6 +49,7 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.RagConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.RagCopyCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
@@ -1136,8 +1137,7 @@ public class WanwuFrontendApiController {
             query.setUserId(userContext.getUserId());
             query.setOrgId(userContext.getOrgId());
             Map<String, Object> result = appService.listChatflowApplications(query);
-            ExplorationAppHistoryStore.INSTANCE.record(
-                    userContext.getUserId(), CHATFLOW_APP_TYPE, query.getWorkflowId());
+            recordExplorationAppHistory(userContext, CHATFLOW_APP_TYPE, query.getWorkflowId());
             return FrontendResponse.ok(result);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -1245,8 +1245,7 @@ public class WanwuFrontendApiController {
             command.setOrgId(userContext.getOrgId());
             Map<String, Object> result = workflowRunResult(appService.runWorkflow(command));
             recordAppStatistic(userContext, command.getWorkflowId(), WORKFLOW_APP_TYPE, true, false, startedAt, STAT_SOURCE_WEB);
-            ExplorationAppHistoryStore.INSTANCE.record(
-                    userContext.getUserId(), WORKFLOW_APP_TYPE, command.getWorkflowId());
+            recordExplorationAppHistory(userContext, WORKFLOW_APP_TYPE, command.getWorkflowId());
             return FrontendResponse.ok(result);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -3468,8 +3467,7 @@ public class WanwuFrontendApiController {
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getAssistantId(), AGENT_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
-                ExplorationAppHistoryStore.INSTANCE.record(
-                        userContext.getUserId(), AGENT_APP_TYPE, command.getAssistantId());
+                recordExplorationAppHistory(userContext, AGENT_APP_TYPE, command.getAssistantId());
             }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
@@ -3493,8 +3491,7 @@ public class WanwuFrontendApiController {
             RagChatResult result = appService.streamRagChat(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getRagId(), RAG_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
-                ExplorationAppHistoryStore.INSTANCE.record(
-                        userContext.getUserId(), RAG_APP_TYPE, command.getRagId());
+                recordExplorationAppHistory(userContext, RAG_APP_TYPE, command.getRagId());
             }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
@@ -3503,6 +3500,22 @@ public class WanwuFrontendApiController {
             return ResponseEntity.status(400)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
+        }
+    }
+
+    private void recordExplorationAppHistory(UserContext userContext, String appType, String appId) {
+        ExplorationAppHistoryStore.INSTANCE.record(userContext.getUserId(), appType, appId);
+        if (appService == null || isBlank(appId)) {
+            return;
+        }
+        try {
+            ExplorationAppHistoryCommand command = new ExplorationAppHistoryCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            command.setAppId(appId);
+            command.setAppType(appType);
+            appService.recordAppHistory(command);
+        } catch (RuntimeException ignored) {
         }
     }
 

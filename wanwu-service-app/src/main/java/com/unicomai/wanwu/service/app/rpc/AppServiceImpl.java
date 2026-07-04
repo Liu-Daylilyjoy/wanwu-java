@@ -70,6 +70,8 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationInfoQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticItem;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticOverview;
@@ -115,6 +117,8 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
+import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -140,6 +144,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -158,6 +163,10 @@ public class AppServiceImpl implements AppService {
     private static final String PUBLISH_TYPE_PRIVATE = "private";
     private static final String PUBLISH_TYPE_ORGANIZATION = "organization";
     private static final String PUBLISH_TYPE_PUBLIC = "public";
+    private static final String SEARCH_TYPE_ALL = "all";
+    private static final String SEARCH_TYPE_PRIVATE = "private";
+    private static final String SEARCH_TYPE_FAVORITE = "favorite";
+    private static final String SEARCH_TYPE_HISTORY = "history";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String DEV_USER_ID = "dev-admin";
@@ -770,33 +779,103 @@ public class AppServiceImpl implements AppService {
 
     @Override
     public ApplicationListResult listApplications(ApplicationListQuery query) {
-        String appType = query == null ? APP_TYPE_AGENT : normalizeAppType(query.getAppType());
-        if (APP_TYPE_RAG.equals(appType)) {
-            String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
-            String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
-            String name = query == null ? "" : defaultIfBlank(query.getName(), "");
-            List<AppRecord> records = applicationRepository.listRags(userId, orgId, name);
-            List<Map<String, Object>> items = new ArrayList<>(records.size());
-            for (AppRecord record : records) {
-                items.add(toFrontendCard(record));
+        String requestedType = query == null ? "" : defaultIfBlank(query.getAppType(), "");
+        String appType = requestedType.isEmpty() ? "" : normalizeAppType(requestedType);
+        String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        String name = query == null ? "" : defaultIfBlank(query.getName(), "");
+        String searchType = query == null ? SEARCH_TYPE_ALL : defaultIfBlank(query.getSearchType(), SEARCH_TYPE_ALL);
+
+        List<AppFavoriteRecord> favorites = applicationRepository.listAppFavorites(userId, appType);
+        Set<String> favoriteKeys = favoriteKeys(favorites);
+        Map<String, AppHistoryRecord> historiesByKey = new LinkedHashMap<String, AppHistoryRecord>();
+        List<AppRecord> records;
+        if (SEARCH_TYPE_HISTORY.equals(searchType)) {
+            long oneMonthAgo = clock.millis() - 31L * 24L * 60L * 60L * 1000L;
+            List<AppHistoryRecord> histories = applicationRepository.listAppHistories(userId, appType, oneMonthAgo);
+            records = recordsFromHistories(userId, orgId, name, histories);
+            for (AppHistoryRecord history : histories) {
+                historiesByKey.put(appKey(history.getAppType(), history.getAppId()), history);
             }
-            return new ApplicationListResult(items, items.size());
-        }
-        if (isWorkflowLike(appType)) {
-            String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
-            String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
-            String name = query == null ? "" : defaultIfBlank(query.getName(), "");
-            List<AppRecord> records = applicationRepository.listWorkflows(userId, orgId, name, appType);
-            List<Map<String, Object>> items = new ArrayList<>(records.size());
-            for (AppRecord record : records) {
-                items.add(toFrontendCard(record));
+        } else {
+            records = listApplicationRecords(userId, orgId, name, appType);
+            if (SEARCH_TYPE_FAVORITE.equals(searchType)) {
+                records = favoriteRecords(records, favoriteKeys);
+            } else if (SEARCH_TYPE_PRIVATE.equals(searchType)) {
+                records = privateRecords(records);
             }
-            return new ApplicationListResult(items, items.size());
+            records.sort(new java.util.Comparator<AppRecord>() {
+                @Override
+                public int compare(AppRecord left, AppRecord right) {
+                    return Long.valueOf(defaultLong(right.getUpdatedAt())).compareTo(defaultLong(left.getUpdatedAt()));
+                }
+            });
         }
-        if (APP_TYPE_AGENT.equals(appType)) {
-            return listAssistants(query);
+
+        List<Map<String, Object>> items = new ArrayList<>(records.size());
+        for (AppRecord record : records) {
+            Map<String, Object> item = toFrontendCard(record);
+            item.put("isFavorite", favoriteKeys.contains(appKey(record.getAppType(), record.getAppId())));
+            AppHistoryRecord history = historiesByKey.get(appKey(record.getAppType(), record.getAppId()));
+            if (history != null) {
+                item.put("visitedAt", formatMillis(history.getUpdatedAt()));
+                item.put("historyCreatedAt", formatMillis(history.getCreatedAt()));
+            }
+            items.add(item);
         }
-        return new ApplicationListResult(Collections.<Map<String, Object>>emptyList(), 0);
+        return new ApplicationListResult(items, items.size());
+    }
+
+    @Override
+    public void changeExplorationAppFavorite(ExplorationAppFavoriteCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("favorite command is required");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String appType = normalizeAppType(command.getAppType());
+        if (findApp(userId, orgId, command.getAppId(), appType) == null) {
+            throw new IllegalArgumentException("app not found");
+        }
+        if (!command.isFavorite()) {
+            applicationRepository.deleteAppFavorite(userId, command.getAppId(), appType);
+            return;
+        }
+        long now = clock.millis();
+        AppFavoriteRecord record = new AppFavoriteRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setAppId(command.getAppId());
+        record.setAppType(appType);
+        applicationRepository.saveAppFavorite(record);
+    }
+
+    @Override
+    public void recordAppHistory(ExplorationAppHistoryCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("app history command is required");
+        }
+        if (isBlank(command.getAppId())) {
+            throw new IllegalArgumentException("app id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String appType = normalizeAppType(command.getAppType());
+        if (findApp(userId, orgId, command.getAppId(), appType) == null) {
+            throw new IllegalArgumentException("app not found");
+        }
+        long now = clock.millis();
+        AppHistoryRecord record = new AppHistoryRecord();
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setAppId(command.getAppId());
+        record.setAppType(appType);
+        applicationRepository.saveAppHistory(record);
     }
 
     @Override
@@ -3417,6 +3496,97 @@ public class AppServiceImpl implements AppService {
         avatar.put("key", "");
         avatar.put("path", "");
         return avatar;
+    }
+
+    private List<AppRecord> listApplicationRecords(String userId, String orgId, String name, String appType) {
+        List<AppRecord> records = new ArrayList<AppRecord>();
+        if (appType.isEmpty() || APP_TYPE_AGENT.equals(appType)) {
+            records.addAll(applicationRepository.listAssistants(userId, orgId, name));
+        }
+        if (appType.isEmpty() || APP_TYPE_RAG.equals(appType)) {
+            records.addAll(applicationRepository.listRags(userId, orgId, name));
+        }
+        if (appType.isEmpty() || APP_TYPE_WORKFLOW.equals(appType)) {
+            records.addAll(applicationRepository.listWorkflows(userId, orgId, name, APP_TYPE_WORKFLOW));
+        }
+        if (appType.isEmpty() || APP_TYPE_CHATFLOW.equals(appType)) {
+            records.addAll(applicationRepository.listWorkflows(userId, orgId, name, APP_TYPE_CHATFLOW));
+        }
+        return records;
+    }
+
+    private List<AppRecord> favoriteRecords(List<AppRecord> records, Set<String> favoriteKeys) {
+        List<AppRecord> matches = new ArrayList<AppRecord>();
+        for (AppRecord record : records) {
+            if (favoriteKeys.contains(appKey(record.getAppType(), record.getAppId()))) {
+                matches.add(record);
+            }
+        }
+        return matches;
+    }
+
+    private List<AppRecord> privateRecords(List<AppRecord> records) {
+        List<AppRecord> matches = new ArrayList<AppRecord>();
+        for (AppRecord record : records) {
+            if (PUBLISH_TYPE_PRIVATE.equals(record.getPublishType())) {
+                matches.add(record);
+            }
+        }
+        return matches;
+    }
+
+    private List<AppRecord> recordsFromHistories(String userId,
+                                                 String orgId,
+                                                 String name,
+                                                 List<AppHistoryRecord> histories) {
+        List<AppRecord> records = new ArrayList<AppRecord>();
+        for (AppHistoryRecord history : histories) {
+            AppRecord record = findApp(userId, orgId, history.getAppId(), history.getAppType());
+            if (record == null || !matchesName(record, name)) {
+                continue;
+            }
+            records.add(record);
+        }
+        return records;
+    }
+
+    private Set<String> favoriteKeys(List<AppFavoriteRecord> favorites) {
+        Set<String> keys = new java.util.HashSet<String>();
+        for (AppFavoriteRecord favorite : favorites) {
+            keys.add(appKey(favorite.getAppType(), favorite.getAppId()));
+        }
+        return keys;
+    }
+
+    private AppRecord findApp(String userId, String orgId, String appId, String appType) {
+        if (APP_TYPE_RAG.equals(appType)) {
+            return applicationRepository.findRag(userId, orgId, appId);
+        }
+        if (isWorkflowLike(appType)) {
+            return applicationRepository.findWorkflow(userId, orgId, appId, appType);
+        }
+        if (APP_TYPE_AGENT.equals(appType)) {
+            return applicationRepository.findAssistant(userId, orgId, appId);
+        }
+        return null;
+    }
+
+    private boolean matchesName(AppRecord record, String name) {
+        if (isBlank(name)) {
+            return true;
+        }
+        String lower = name.toLowerCase(java.util.Locale.ENGLISH);
+        return defaultIfBlank(record.getName(), "").toLowerCase(java.util.Locale.ENGLISH).contains(lower)
+                || defaultIfBlank(record.getDesc(), "").toLowerCase(java.util.Locale.ENGLISH).contains(lower)
+                || defaultIfBlank(record.getAppId(), "").toLowerCase(java.util.Locale.ENGLISH).contains(lower);
+    }
+
+    private String appKey(String appType, String appId) {
+        return defaultIfBlank(appType, "") + ":" + defaultIfBlank(appId, "");
+    }
+
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private Map<String, Object> toFrontendCard(AppRecord record) {

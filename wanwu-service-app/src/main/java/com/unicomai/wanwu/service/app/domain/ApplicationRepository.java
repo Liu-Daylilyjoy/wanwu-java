@@ -76,6 +76,16 @@ public interface ApplicationRepository {
 
     List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType);
 
+    List<AppFavoriteRecord> listAppFavorites(String userId, String appType);
+
+    void saveAppFavorite(AppFavoriteRecord record);
+
+    boolean deleteAppFavorite(String userId, String appId, String appType);
+
+    List<AppHistoryRecord> listAppHistories(String userId, String appType, long startUpdatedAt);
+
+    void saveAppHistory(AppHistoryRecord record);
+
     AppRecord findWorkflow(String userId, String orgId, String workflowId);
 
     AppRecord findWorkflow(String userId, String orgId, String workflowId, String appType);

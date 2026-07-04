@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.bff.web;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,11 +52,13 @@ public class WanwuExplorationApiController {
             java.util.ArrayList<Map<String, Object>> apps = historyApps(ctx, appType, name);
             return FrontendResponse.ok(new ApplicationListResult(apps, apps.size()));
         }
-        ApplicationListResult source = appService.listApplications(new ApplicationListQuery(
+        ApplicationListQuery query = new ApplicationListQuery(
                 defaultIfBlank(appType, ""),
                 defaultIfBlank(name, ""),
                 ctx.userId,
-                ctx.orgId));
+                ctx.orgId);
+        query.setSearchType(defaultIfBlank(searchType, "all"));
+        ApplicationListResult source = appService.listApplications(query);
 
         java.util.ArrayList<Map<String, Object>> apps = new java.util.ArrayList<>();
         if (source.getList() != null) {
@@ -71,7 +74,9 @@ public class WanwuExplorationApiController {
 
     @PostMapping("/exploration/app/favorite")
     public FrontendResponse<Map<String, Object>> changeFavorite(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
         Map<String, Object> body = body(request);
         String key = appKey(value(body, "appType"), value(body, "appId"));
         if (booleanValue(body, "isFavorite", false)) {
@@ -79,6 +84,7 @@ public class WanwuExplorationApiController {
         } else {
             favoriteApps.remove(key);
         }
+        changeServiceFavorite(ctx, body);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -100,7 +106,7 @@ public class WanwuExplorationApiController {
                 ExplorationAppHistoryStore.INSTANCE.list(ctx.userId, defaultIfBlank(appType, ""));
         java.util.ArrayList<Map<String, Object>> apps = new java.util.ArrayList<>();
         if (entries.isEmpty()) {
-            return apps;
+            return serviceHistoryApps(ctx, appType, name);
         }
         Map<String, Map<String, Object>> sourceByKey = currentAppsByKey(ctx, appType, name);
         for (ExplorationAppHistoryStore.HistoryEntry entry : entries) {
@@ -117,11 +123,13 @@ public class WanwuExplorationApiController {
 
     private Map<String, Map<String, Object>> currentAppsByKey(UserContext ctx, String appType, String name) {
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
-        ApplicationListResult source = appService.listApplications(new ApplicationListQuery(
+        ApplicationListQuery query = new ApplicationListQuery(
                 defaultIfBlank(appType, ""),
                 defaultIfBlank(name, ""),
                 ctx.userId,
-                ctx.orgId));
+                ctx.orgId);
+        query.setSearchType("all");
+        ApplicationListResult source = appService.listApplications(query);
         if (source == null || source.getList() == null) {
             return result;
         }
@@ -130,6 +138,47 @@ public class WanwuExplorationApiController {
             result.put(appKey(value(app, "appType"), value(app, "appId")), app);
         }
         return result;
+    }
+
+    private java.util.ArrayList<Map<String, Object>> serviceHistoryApps(UserContext ctx, String appType, String name) {
+        java.util.ArrayList<Map<String, Object>> apps = new java.util.ArrayList<>();
+        try {
+            ApplicationListQuery query = new ApplicationListQuery(
+                    defaultIfBlank(appType, ""),
+                    defaultIfBlank(name, ""),
+                    ctx.userId,
+                    ctx.orgId);
+            query.setSearchType("history");
+            ApplicationListResult source = appService.listApplications(query);
+            if (source == null || source.getList() == null) {
+                return apps;
+            }
+            for (Map<String, Object> item : source.getList()) {
+                Map<String, Object> app = explorationApp(item);
+                if (!app.containsKey("visitedAt")) {
+                    app.put("visitedAt", value(app, "updatedAt"));
+                }
+                apps.add(app);
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return apps;
+    }
+
+    private void changeServiceFavorite(UserContext ctx, Map<String, Object> body) {
+        if (appService == null) {
+            return;
+        }
+        try {
+            ExplorationAppFavoriteCommand command = new ExplorationAppFavoriteCommand();
+            command.setUserId(ctx.userId);
+            command.setOrgId(ctx.orgId);
+            command.setAppId(value(body, "appId"));
+            command.setAppType(value(body, "appType"));
+            command.setFavorite(booleanValue(body, "isFavorite", false));
+            appService.changeExplorationAppFavorite(command);
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private Map<String, Object> historyPlaceholder(ExplorationAppHistoryStore.HistoryEntry entry) {

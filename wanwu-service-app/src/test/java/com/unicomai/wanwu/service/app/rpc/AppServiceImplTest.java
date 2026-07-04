@@ -53,6 +53,8 @@ import com.unicomai.wanwu.api.app.dto.AppKeyInfo;
 import com.unicomai.wanwu.api.app.dto.AppKeyListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
+import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
@@ -88,6 +90,8 @@ import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyUsageRecord;
 import com.unicomai.wanwu.service.app.domain.AppRecord;
+import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
+import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
@@ -181,6 +185,56 @@ public class AppServiceImplTest {
         assertEquals("public", result.getList().get(0).get("publishType"));
         assertEquals("v1.0.0", result.getList().get(0).get("version"));
         assertNotEquals(first.getAssistantId(), result.getList().get(0).get("appId"));
+    }
+
+    @Test
+    public void explorationFavoriteAndHistoryUseRepositoryRecords() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("SquareAgent", "square desc"));
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getAssistantId());
+        publish.setAppType("agent");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        ExplorationAppFavoriteCommand favorite = new ExplorationAppFavoriteCommand();
+        favorite.setUserId("dev-admin");
+        favorite.setOrgId("default-org");
+        favorite.setAppId(created.getAssistantId());
+        favorite.setAppType("agent");
+        favorite.setFavorite(true);
+        service.changeExplorationAppFavorite(favorite);
+
+        ApplicationListQuery favoriteQuery = new ApplicationListQuery("agent", "", "dev-admin", "default-org");
+        favoriteQuery.setSearchType("favorite");
+        ApplicationListResult favorites = service.listApplications(favoriteQuery);
+        assertEquals(1, favorites.getTotal());
+        assertEquals(created.getAssistantId(), favorites.getList().get(0).get("appId"));
+        assertEquals(true, favorites.getList().get(0).get("isFavorite"));
+
+        ExplorationAppHistoryCommand history = new ExplorationAppHistoryCommand();
+        history.setUserId("dev-admin");
+        history.setOrgId("default-org");
+        history.setAppId(created.getAssistantId());
+        history.setAppType("agent");
+        service.recordAppHistory(history);
+
+        ApplicationListQuery historyQuery = new ApplicationListQuery("agent", "Square", "dev-admin", "default-org");
+        historyQuery.setSearchType("history");
+        ApplicationListResult histories = service.listApplications(historyQuery);
+        assertEquals(1, histories.getTotal());
+        assertEquals(created.getAssistantId(), histories.getList().get(0).get("appId"));
+        assertEquals("2026-06-29 10:00:00", histories.getList().get(0).get("visitedAt"));
+
+        favorite.setFavorite(false);
+        service.changeExplorationAppFavorite(favorite);
+        ApplicationListResult removed = service.listApplications(favoriteQuery);
+        assertEquals(0, removed.getTotal());
     }
 
     @Test
@@ -1906,6 +1960,8 @@ public class AppServiceImplTest {
         private final List<AppStatisticAggregateRecord> appStatisticAggregates = new ArrayList<>();
         private final List<ModelStatisticAggregateRecord> modelStatisticAggregates = new ArrayList<>();
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
+        private final List<AppFavoriteRecord> favorites = new ArrayList<>();
+        private final List<AppHistoryRecord> histories = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
 
@@ -2390,6 +2446,69 @@ public class AppServiceImplTest {
             }
             matches.sort(Comparator.comparing(AppRecord::getId).reversed());
             return matches;
+        }
+
+        @Override
+        public List<AppFavoriteRecord> listAppFavorites(String userId, String appType) {
+            List<AppFavoriteRecord> matches = new ArrayList<>();
+            for (AppFavoriteRecord favorite : favorites) {
+                if (!userId.equals(favorite.getUserId())) {
+                    continue;
+                }
+                if (appType != null && !appType.isEmpty() && !appType.equals(favorite.getAppType())) {
+                    continue;
+                }
+                matches.add(favorite);
+            }
+            matches.sort(Comparator.comparing(AppFavoriteRecord::getUpdatedAt).reversed());
+            return matches;
+        }
+
+        @Override
+        public void saveAppFavorite(AppFavoriteRecord record) {
+            AppFavoriteRecord existing = findFavorite(record.getUserId(), record.getAppId(), record.getAppType());
+            if (existing == null) {
+                record.setId(ids.incrementAndGet());
+                favorites.add(record);
+                return;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
+        }
+
+        @Override
+        public boolean deleteAppFavorite(String userId, String appId, String appType) {
+            AppFavoriteRecord existing = findFavorite(userId, appId, appType);
+            return existing != null && favorites.remove(existing);
+        }
+
+        @Override
+        public List<AppHistoryRecord> listAppHistories(String userId, String appType, long startUpdatedAt) {
+            List<AppHistoryRecord> matches = new ArrayList<>();
+            for (AppHistoryRecord history : histories) {
+                if (!userId.equals(history.getUserId())) {
+                    continue;
+                }
+                if (appType != null && !appType.isEmpty() && !appType.equals(history.getAppType())) {
+                    continue;
+                }
+                if (history.getUpdatedAt() == null || history.getUpdatedAt() < startUpdatedAt) {
+                    continue;
+                }
+                matches.add(history);
+            }
+            matches.sort(Comparator.comparing(AppHistoryRecord::getUpdatedAt).reversed());
+            return matches;
+        }
+
+        @Override
+        public void saveAppHistory(AppHistoryRecord record) {
+            AppHistoryRecord existing = findHistory(record.getUserId(), record.getAppId(), record.getAppType());
+            if (existing == null) {
+                record.setId(ids.incrementAndGet());
+                histories.add(record);
+                return;
+            }
+            existing.setUpdatedAt(record.getUpdatedAt());
         }
 
         @Override
@@ -3321,6 +3440,28 @@ public class AppServiceImplTest {
                         && record.getModelId().equals(target.getModelId())
                         && record.getProvider().equals(target.getProvider())
                         && record.getDate().equals(target.getDate())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        private AppFavoriteRecord findFavorite(String userId, String appId, String appType) {
+            for (AppFavoriteRecord record : favorites) {
+                if (userId.equals(record.getUserId())
+                        && appId.equals(record.getAppId())
+                        && appType.equals(record.getAppType())) {
+                    return record;
+                }
+            }
+            return null;
+        }
+
+        private AppHistoryRecord findHistory(String userId, String appId, String appType) {
+            for (AppHistoryRecord record : histories) {
+                if (userId.equals(record.getUserId())
+                        && appId.equals(record.getAppId())
+                        && appType.equals(record.getAppType())) {
                     return record;
                 }
             }
