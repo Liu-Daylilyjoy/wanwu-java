@@ -37,13 +37,14 @@ The unchanged frontend uses these routes from `web/src/api/user.js` and `web/src
 - `POST /base/login/email` returns the temporary development token for `admin` or `app`; `POST/PUT /user/login` returns the full login-session shape, including organization, language, and the same permission split as the built-in development accounts.
 - Avatar upload stores the image under the BFF local temp directory and returns `key/path` like the Go avatar API.
 - Language select returns `zh` and `en` entries with `zh` as default.
-- Doc Center indexes Markdown files from `wanwu-service-bff/src/main/resources/static/manual` for menu, search, entry, and Markdown content, rewrites relative Markdown images to Go's `../../../user/api/v1/static/manual/...` prefix, serves classpath resources through `/user/api/v1/static/manual/**`, and keeps deterministic local Markdown seeds as a fallback.
+- Doc Center indexes the Go `static/manual` asset tree from `wanwu-service-bff/src/main/resources/static/manual` for menu, search, entry, and Markdown content. It builds Go-style directory menus, rewrites relative Markdown images to Go's `../../../user/api/v1/static/manual/...` prefix, and serves classpath resources through `/user/api/v1/static/manual/**`.
 
 ## Current Boundary
 
 - User profile reads and avatar/language/password-version updates now survive Docker restarts through the IAM JSON compatibility repository. Real password hashing/policy enforcement, email delivery, email-code verification, and avatar object-storage lifecycle are still future IAM/Object Storage slices.
 - The email auth endpoints are development compatibility shells, not a completed reproduction of the Go IAM email RPC flow.
-- The Doc Center uses a lightweight Java classpath Markdown index rather than Go's full `static/manual` asset directory and riot search engine. The static manual route and Markdown image rewriting now exist for images and attachments, but the current repository intentionally includes lightweight Markdown seeds; copying the full 99MB Go manual asset tree remains a separate asset-porting slice.
+- The Java repo now carries 725 Go manual files, including 123 Markdown documents and 92.6MB of static assets, excluding the `10.本体智能体` manual directory because ontology-agent functionality is intentionally removed from this reproduction scope.
+- Search remains a deterministic Java substring scan rather than Go's riot search engine, so ranking/tokenization is not exact Go parity yet.
 - This slice is intended to eliminate frontend `Not Found` errors and provide stable UI navigation while deeper persistence is reproduced.
 
 ## Verification

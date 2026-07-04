@@ -369,23 +369,13 @@ public class WanwuCommonApiController {
         return copy;
     }
 
-    private static Map<String, Object> docMenu(String name, String index, String path) {
-        Map<String, Object> menu = new LinkedHashMap<String, Object>();
-        menu.put("name", name);
-        menu.put("index", index);
-        menu.put("path", path);
-        menu.put("pathRaw", path);
-        menu.put("children", Collections.emptyList());
-        return menu;
-    }
-
     private Map<String, Object> searchResult(String title, String path, String markdown, String keyword) {
         Map<String, Object> item = new LinkedHashMap<String, Object>();
         item.put("title", title);
         Map<String, Object> content = new LinkedHashMap<String, Object>();
         content.put("title", title);
         content.put("content", snippet(markdown, keyword));
-        content.put("url", DOC_CENTER_PAGE_PREFIX + path);
+        content.put("url", DOC_CENTER_PAGE_PREFIX + encodePath(path, false));
         item.put("list", Collections.singletonList(content));
         return item;
     }
@@ -630,27 +620,171 @@ public class WanwuCommonApiController {
                 if (DOC_FIRST_PATH.equals(right)) {
                     return 1;
                 }
-                return left.compareTo(right);
+                return compareDocPaths(left, right);
             }
         });
 
         Map<String, String> orderedDocs = new LinkedHashMap<String, String>();
         Map<String, String> titles = new LinkedHashMap<String, String>();
-        List<Map<String, Object>> menus = new ArrayList<Map<String, Object>>();
-        int index = 1;
         for (String path : paths) {
             orderedDocs.put(path, docs.get(path));
             String title = titleFromPath(path);
             titles.put(path, title);
-            menus.add(docMenu(title, "doc" + index, path));
-            index++;
         }
-        String firstPath = orderedDocs.containsKey(DOC_FIRST_PATH) ? DOC_FIRST_PATH : paths.get(0);
+        List<Map<String, Object>> menus = docMenus(paths);
+        String firstPath = orderedDocs.containsKey(DOC_FIRST_PATH) ? DOC_FIRST_PATH : firstLeafPath(menus);
+        if (firstPath == null) {
+            firstPath = paths.get(0);
+        }
         return new DocIndex(
                 Collections.unmodifiableMap(orderedDocs),
                 Collections.unmodifiableMap(titles),
                 Collections.unmodifiableList(menus),
                 firstPath);
+    }
+
+    private static List<Map<String, Object>> docMenus(List<String> paths) {
+        List<Map<String, Object>> menus = new ArrayList<Map<String, Object>>();
+        for (String path : paths) {
+            addDocMenu(menus, path, path);
+        }
+        sortDocMenus(menus);
+        refreshDocMenuIndexes(menus, "");
+        return menus;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void addDocMenu(List<Map<String, Object>> menus, String rest, String rawPath) {
+        int slash = rest.indexOf('/');
+        String current = slash >= 0 ? rest.substring(0, slash) : rest;
+        boolean leaf = slash < 0;
+        String name = leaf && current.endsWith(".md") ? current.substring(0, current.length() - 3) : current;
+        Map<String, Object> menu = findDocMenu(menus, name);
+        if (menu == null) {
+            menu = new LinkedHashMap<String, Object>();
+            menu.put("name", name);
+            if (leaf) {
+                menu.put("path", encodePath(rawPath, false));
+                menu.put("pathRaw", rawPath);
+            } else {
+                menu.put("children", new ArrayList<Map<String, Object>>());
+            }
+            menus.add(menu);
+        }
+        if (!leaf) {
+            Object children = menu.get("children");
+            if (!(children instanceof List)) {
+                children = new ArrayList<Map<String, Object>>();
+                menu.put("children", children);
+            }
+            addDocMenu((List<Map<String, Object>>) children, rest.substring(slash + 1), rawPath);
+        }
+    }
+
+    private static Map<String, Object> findDocMenu(List<Map<String, Object>> menus, String name) {
+        for (Map<String, Object> menu : menus) {
+            if (name.equals(menu.get("name"))) {
+                return menu;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void sortDocMenus(List<Map<String, Object>> menus) {
+        Collections.sort(menus, new Comparator<Map<String, Object>>() {
+            @Override
+            public int compare(Map<String, Object> left, Map<String, Object> right) {
+                return compareDocNames(defaultStatic((String) left.get("name")),
+                        defaultStatic((String) right.get("name")));
+            }
+        });
+        for (Map<String, Object> menu : menus) {
+            Object children = menu.get("children");
+            if (children instanceof List) {
+                sortDocMenus((List<Map<String, Object>>) children);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void refreshDocMenuIndexes(List<Map<String, Object>> menus, String prefix) {
+        for (int i = 0; i < menus.size(); i++) {
+            Map<String, Object> menu = menus.get(i);
+            String index = prefix.length() == 0 ? "doc" + (i + 1) : prefix + "-" + (i + 1);
+            menu.put("index", index);
+            Object children = menu.get("children");
+            if (children instanceof List) {
+                refreshDocMenuIndexes((List<Map<String, Object>>) children, index);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String firstLeafPath(List<Map<String, Object>> menus) {
+        for (Map<String, Object> menu : menus) {
+            Object pathRaw = menu.get("pathRaw");
+            if (pathRaw != null) {
+                return String.valueOf(pathRaw);
+            }
+            Object children = menu.get("children");
+            if (children instanceof List) {
+                String path = firstLeafPath((List<Map<String, Object>>) children);
+                if (path != null) {
+                    return path;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int compareDocPaths(String left, String right) {
+        String[] leftParts = defaultStatic(left).split("/");
+        String[] rightParts = defaultStatic(right).split("/");
+        int length = Math.min(leftParts.length, rightParts.length);
+        for (int i = 0; i < length; i++) {
+            int compared = compareDocNames(leftParts[i], rightParts[i]);
+            if (compared != 0) {
+                return compared;
+            }
+        }
+        return leftParts.length - rightParts.length;
+    }
+
+    private static int compareDocNames(String left, String right) {
+        Integer leftNumber = leadingNumber(left);
+        Integer rightNumber = leadingNumber(right);
+        if (leftNumber != null && rightNumber != null) {
+            int compared = leftNumber.compareTo(rightNumber);
+            if (compared != 0) {
+                return compared;
+            }
+        } else if (leftNumber != null) {
+            return -1;
+        } else if (rightNumber != null) {
+            return 1;
+        }
+        return left.compareTo(right);
+    }
+
+    private static Integer leadingNumber(String value) {
+        String text = defaultStatic(value);
+        StringBuilder number = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (!Character.isDigit(ch)) {
+                break;
+            }
+            number.append(ch);
+        }
+        if (number.length() == 0) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(number.toString());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private static Map<String, String> readClasspathDocs() {
@@ -812,10 +946,6 @@ public class WanwuCommonApiController {
         }
         if (filename.endsWith(".md")) {
             filename = filename.substring(0, filename.length() - 3);
-        }
-        int dot = filename.indexOf('.');
-        if (dot >= 0 && dot + 1 < filename.length() && Character.isDigit(filename.charAt(0))) {
-            filename = filename.substring(dot + 1);
         }
         filename = filename.replace('-', ' ').replace('_', ' ').trim();
         if (filename.isEmpty()) {

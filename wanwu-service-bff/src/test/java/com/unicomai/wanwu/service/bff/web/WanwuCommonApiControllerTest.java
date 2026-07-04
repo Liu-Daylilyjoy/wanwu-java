@@ -151,23 +151,26 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(jsonPath("$.data.docCenterPath").value("/aibase/docCenter/pages/doc_first"));
         mockMvc.perform(get("/user/api/v1/doc_center/menu"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].name").value("Getting Started"))
-                .andExpect(jsonPath("$.data[0].path").value("getting-started.md"))
-                .andExpect(jsonPath("$.data[0].children").isArray());
+                .andExpect(jsonPath("$.data[0].name").value("0.\u5e73\u53f0\u4ecb\u7ecd"))
+                .andExpect(jsonPath("$.data[0].pathRaw").value("0.\u5e73\u53f0\u4ecb\u7ecd.md"))
+                .andExpect(jsonPath("$.data[0].children").doesNotExist())
+                .andExpect(jsonPath("$.data[2].name").value("2.\u8d44\u6e90\u5e93"))
+                .andExpect(jsonPath("$.data[2].children").isArray());
         mockMvc.perform(get("/user/api/v1/doc_center/markdown")
-                        .param("path", "getting-started.md"))
+                        .param("path", "0.\u5e73\u53f0\u4ecb\u7ecd.md"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", containsString("Wanwu Java")));
+                .andExpect(jsonPath("$.data", containsString("MCP")));
         mockMvc.perform(get("/user/api/v1/doc_center/markdown")
-                        .param("path", "application-development.md"))
+                        .param("path", "1.\u6a21\u578b\u7ba1\u7406.md"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data",
-                        containsString("![](../../../user/api/v1/static/manual/assets/doc-center.svg)")));
+                        containsString("![](../../../user/api/v1/static/manual/assets/image-20250904111744304.png)")));
         mockMvc.perform(get("/user/api/v1/doc_center/search")
-                        .param("content", "workflow"))
+                        .param("content", "License Free"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].title").value("Application Development"))
-                .andExpect(jsonPath("$.data[0].list[0].url").value("/aibase/docCenter/pages/application-development.md"));
+                .andExpect(jsonPath("$.data[0].title").value("0.\u5e73\u53f0\u4ecb\u7ecd"))
+                .andExpect(jsonPath("$.data[0].list[0].url")
+                        .value("/aibase/docCenter/pages/0.%E5%B9%B3%E5%8F%B0%E4%BB%8B%E7%BB%8D.md"));
     }
 
     @Test

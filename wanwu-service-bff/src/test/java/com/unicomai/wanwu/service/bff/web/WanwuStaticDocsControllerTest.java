@@ -43,19 +43,18 @@ public class WanwuStaticDocsControllerTest {
 
     @Test
     public void docCenterManualResourcesAreServedFromClasspath() throws Exception {
-        mockMvc().perform(get("/user/api/v1/static/manual/getting-started.md"))
+        mockMvc().perform(get("/user/api/v1/static/manual/0.\u5e73\u53f0\u4ecb\u7ecd.md"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", containsString("text/markdown")))
                 .andExpect(header().string("Cache-Control", containsString("no-cache")))
                 .andExpect(result -> assertTrue(result.getResponse()
                         .getContentAsString()
-                        .contains("Wanwu Java")));
-        mockMvc().perform(get("/user/api/v1/static/manual/assets/doc-center.svg"))
+                        .contains("MCP")));
+        mockMvc().perform(get("/user/api/v1/static/manual/assets/image-20250904111744304.png"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Content-Type", containsString("image/svg+xml")))
+                .andExpect(header().string("Content-Type", containsString("image/png")))
                 .andExpect(result -> assertTrue(result.getResponse()
-                        .getContentAsString()
-                        .contains("Wanwu Doc Center")));
+                        .getContentAsByteArray().length > 100));
     }
 
     @Test

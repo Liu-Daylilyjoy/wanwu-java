@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120" role="img" aria-label="Wanwu Doc Center">
-  <rect width="320" height="120" fill="#f7f9fb"/>
-  <rect x="24" y="22" width="88" height="76" rx="6" fill="#2f6fed"/>
-  <rect x="128" y="28" width="168" height="12" rx="3" fill="#24324a"/>
-  <rect x="128" y="52" width="140" height="10" rx="3" fill="#70819a"/>
-  <rect x="128" y="74" width="112" height="10" rx="3" fill="#9aa8bb"/>
-  <path d="M44 42h48v8H44zm0 16h48v8H44zm0 16h32v8H44z" fill="#fff"/>
-</svg>
