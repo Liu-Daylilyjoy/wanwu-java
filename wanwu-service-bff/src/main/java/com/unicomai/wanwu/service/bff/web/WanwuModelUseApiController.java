@@ -49,7 +49,6 @@ public class WanwuModelUseApiController {
     private static final String AGENT_APP_TYPE = "agent";
     private static final AtomicLong CHAT_LLM_SEQUENCE = new AtomicLong(0);
     private static final AtomicLong ACTION_SEQUENCE = new AtomicLong(0);
-    private static final AtomicLong AUTO_ASSISTANT_SEQUENCE = new AtomicLong(0);
     private static final Map<String, Map<String, Object>> CHAT_LLM_CONVERSATIONS =
             new ConcurrentHashMap<String, Map<String, Object>>();
     private static final Map<String, Map<String, Object>> ACTIONS =
@@ -281,10 +280,21 @@ public class WanwuModelUseApiController {
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/auto/create")
-    public FrontendResponse<Map<String, Object>> autoCreateAssistant(@RequestBody(required = false) Map<String, Object> request) {
+    public FrontendResponse<Map<String, Object>> autoCreateAssistant(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> bodyRequest = copy(request);
+        String prompt = firstText(request, "prompt", "question", "content");
+        if (!bodyRequest.containsKey("name")) {
+            bodyRequest.put("name", defaultIfBlank(prompt, "Auto Assistant"));
+        }
+        if (!bodyRequest.containsKey("desc") && !bodyRequest.containsKey("description")) {
+            bodyRequest.put("desc", defaultIfBlank(prompt, "Generated from legacy MODEL_API auto-create"));
+        }
+        AssistantCreateResult created = appService.createAssistant(toCreateCommand(userContext(authorization), bodyRequest));
         Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("assistantId", "auto-assistant-" + AUTO_ASSISTANT_SEQUENCE.incrementAndGet());
-        body.put("name", defaultIfBlank(firstText(request, "name", "prompt"), "Auto Assistant"));
+        body.put("assistantId", created.getAssistantId());
+        body.put("name", defaultIfBlank(firstText(bodyRequest, "name", "assistantName"), "Auto Assistant"));
         body.put("status", "created");
         return FrontendResponse.ok(body);
     }

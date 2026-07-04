@@ -116,6 +116,8 @@ public class WanwuModelUseApiControllerTest {
 
     @Test
     public void chatLlmAndFileRoutesReturnDevelopmentContracts() throws Exception {
+        when(appService.createAssistant(any())).thenReturn(new AssistantCreateResult("auto-assistant-001"));
+
         mockMvc.perform(post("/use/model/api/v1/chatllm/conversation/create")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"prompt\":\"hello\"}"))
@@ -134,10 +136,12 @@ public class WanwuModelUseApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
         mockMvc.perform(post("/use/model/api/v1/assistant/auto/create")
+                        .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"prompt\":\"build app\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.assistantId", containsString("auto-assistant-")));
+                .andExpect(jsonPath("$.data.assistantId").value("auto-assistant-001"))
+                .andExpect(jsonPath("$.data.name").value("build app"));
         mockMvc.perform(post("/use/model/api/v1/file/confirmPath")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fileName\":\"demo.txt\"}"))
@@ -153,6 +157,8 @@ public class WanwuModelUseApiControllerTest {
                                 "img".getBytes(StandardCharsets.UTF_8))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].fileName").value("avatar.png"));
+
+        verify(appService).createAssistant(any());
     }
 
     @Test
