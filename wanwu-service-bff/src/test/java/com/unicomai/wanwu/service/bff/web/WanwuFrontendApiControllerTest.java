@@ -1190,8 +1190,10 @@ public class WanwuFrontendApiControllerTest {
         MockMvc workflowApiMvc = MockMvcBuilders
                 .standaloneSetup(new WanwuWorkflowApiController(appService))
                 .build();
+        String workflowSchema = "{\"parameters\":[{\"name\":\"city\",\"type\":\"string\",\"description\":\"City name\",\"required\":true}],"
+                + "\"outputs\":[{\"name\":\"summary\",\"type\":\"string\",\"desc\":\"Summary\"}]}";
         when(appService.exportWorkflow(any(WorkflowExportQuery.class)))
-                .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", "{\"nodes\":[]}"));
+                .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", workflowSchema));
         when(appService.runWorkflow(any(WorkflowRunCommand.class)))
                 .thenReturn(new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok")));
 
@@ -1202,7 +1204,10 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
-                .andExpect(jsonPath("$.data.schema").value("{\"nodes\":[]}"));
+                .andExpect(jsonPath("$.data.schema").value(workflowSchema))
+                .andExpect(jsonPath("$.data.parameters[0].name").value("city"))
+                .andExpect(jsonPath("$.data.parameters[0].required").value(true))
+                .andExpect(jsonPath("$.data.outputs[0].name").value("summary"));
 
         workflowApiMvc.perform(get("/workflow/api/workflow/openapi_schema")
                         .header("x-user-id", "dev-admin")
