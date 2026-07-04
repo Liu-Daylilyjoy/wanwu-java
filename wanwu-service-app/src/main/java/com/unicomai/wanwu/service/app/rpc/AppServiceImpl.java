@@ -146,6 +146,7 @@ import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
 import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.AppTemplateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
@@ -197,6 +198,8 @@ public class AppServiceImpl implements AppService {
     private static final String SEARCH_TYPE_PRIVATE = "private";
     private static final String SEARCH_TYPE_FAVORITE = "favorite";
     private static final String SEARCH_TYPE_HISTORY = "history";
+    private static final String TEMPLATE_TYPE_ASSISTANT = "assistant";
+    private static final String TEMPLATE_TYPE_WORKFLOW = "workflow";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String CONVERSATION_TYPE_CHATFLOW_OPENAPI = "chatflow_openapi";
@@ -861,6 +864,33 @@ public class AppServiceImpl implements AppService {
             items.add(item);
         }
         return new ApplicationListResult(items, items.size());
+    }
+
+    @Override
+    public List<Map<String, Object>> listAppTemplates(String templateType, String category, String name) {
+        String normalizedType = normalizeTemplateType(templateType);
+        List<AppTemplateRecord> records = applicationRepository.listAppTemplates(
+                normalizedType,
+                defaultIfBlank(category, ""),
+                defaultIfBlank(name, ""));
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>(records.size());
+        for (AppTemplateRecord record : records) {
+            items.add(toFrontendTemplate(record));
+        }
+        return items;
+    }
+
+    @Override
+    public Map<String, Object> getAppTemplate(String templateType, String templateId) {
+        String normalizedType = normalizeTemplateType(templateType);
+        if (isBlank(templateId)) {
+            throw new IllegalArgumentException("template id is required");
+        }
+        AppTemplateRecord record = applicationRepository.findAppTemplate(normalizedType, templateId);
+        if (record == null) {
+            throw new IllegalArgumentException("template not found: " + templateId);
+        }
+        return toFrontendTemplate(record);
     }
 
     @Override
@@ -4331,6 +4361,47 @@ public class AppServiceImpl implements AppService {
         return item;
     }
 
+    private Map<String, Object> toFrontendTemplate(AppTemplateRecord record) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        String templateType = normalizeTemplateType(record.getTemplateType());
+        if (TEMPLATE_TYPE_ASSISTANT.equals(templateType)) {
+            item.put("assistantTemplateId", record.getTemplateId());
+            item.put("appType", "agentTemplate");
+            item.put("prologue", defaultIfBlank(record.getPrologue(), ""));
+            item.put("instructions", defaultIfBlank(record.getInstructions(), ""));
+            item.put("recommendQuestion", stringListOrDefault(
+                    record.getRecommendQuestionsJson(),
+                    Collections.<String>emptyList()));
+            item.put("workFlowInstruction", defaultIfBlank(record.getWorkflowInstruction(), ""));
+        } else {
+            item.put("templateId", record.getTemplateId());
+            item.put("author", defaultIfBlank(record.getAuthor(), "Wanwu Java"));
+            item.put("downloadCount", record.getDownloadCount() == null ? 0 : record.getDownloadCount());
+            item.put("note", defaultIfBlank(record.getNote(), ""));
+            item.put("schema", mapOrDefault(record.getSchemaJson(), defaultWorkflowTemplateSchema(record)));
+        }
+        item.put("category", defaultIfBlank(record.getCategory(), ""));
+        item.put("avatar", mapOrDefault(record.getAvatarJson(), emptyAvatar()));
+        item.put("name", defaultIfBlank(record.getName(), ""));
+        item.put("desc", defaultIfBlank(record.getDesc(), ""));
+        item.put("summary", defaultIfBlank(record.getSummary(), record.getDesc()));
+        item.put("feature", defaultIfBlank(record.getFeature(), ""));
+        item.put("scenario", defaultIfBlank(record.getScenario(), ""));
+        item.put("createdAt", formatMillis(record.getCreatedAt()));
+        item.put("updatedAt", formatMillis(record.getUpdatedAt()));
+        return item;
+    }
+
+    private Map<String, Object> defaultWorkflowTemplateSchema(AppTemplateRecord record) {
+        Map<String, Object> schema = new LinkedHashMap<String, Object>();
+        schema.put("id", record.getTemplateId());
+        schema.put("name", defaultIfBlank(record.getName(), ""));
+        schema.put("desc", defaultIfBlank(record.getDesc(), ""));
+        schema.put("nodes", Collections.emptyList());
+        schema.put("edges", Collections.emptyList());
+        return schema;
+    }
+
     private Map<String, Object> toFrontendDraft(AppRecord record, AssistantDraftConfigRecord config) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("assistantId", record.getAppId());
@@ -4766,6 +4837,17 @@ public class AppServiceImpl implements AppService {
 
     private String normalizeAppType(String appType) {
         return normalizeAgentAppType(appType);
+    }
+
+    private String normalizeTemplateType(String templateType) {
+        String normalized = defaultIfBlank(templateType, TEMPLATE_TYPE_ASSISTANT);
+        if ("agentTemplate".equals(normalized) || APP_TYPE_AGENT.equals(normalized) || APP_TYPE_ASSISTANT.equals(normalized)) {
+            return TEMPLATE_TYPE_ASSISTANT;
+        }
+        if (TEMPLATE_TYPE_WORKFLOW.equals(normalized) || APP_TYPE_WORKFLOW.equals(normalized)) {
+            return TEMPLATE_TYPE_WORKFLOW;
+        }
+        throw new IllegalArgumentException("template type is invalid");
     }
 
     private String normalizeAgentAppType(String appType) {

@@ -12,6 +12,7 @@ Date: 2026-07-01
 - RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell with MySQL-persisted chat snapshots, and multipart upload response compatibility.
 - Workflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, MySQL-persisted local run snapshots with schema-aware output, assistant workflow select from real created workflows, workflow tool select/action/tool-box compatibility backed by resource-center tools, `/workflow/api/workflow/parameter`, `/workflow/api/api/workflow/use`, `/workflow/api/workflow/openapi_schema`, and `/api/bot/upload_file` avatar upload compatibility.
 - Chatflow app lifecycle: create/list/copy/import/export/delete, generic app publish/unpublish/version list/version update/rollback, local chatflow application list/detail plus conversation-delete compatibility for `/appspace/chatflow/*` and `/chatflow/*` frontend calls, and OpenAPI Chatflow conversation/message persistence for the public Chatflow route family.
+- Template square compatibility: assistant and Workflow template list/detail/recommend/download data is backed by `app_templates`, with BFF-local seeds kept as a development fallback.
 - Safety guard lifecycle: sensitive word table create/list/detail/update/reply/delete/select, single word upload, uploaded XLSX/CSV file import, list, delete, and Agent/RAG local chat input blocking through `wanwu-service-app` SafetyService-backed configuration.
 - Assistant extension bindings:
   - `POST/DELETE/PUT /assistant/tool/workflow`
@@ -48,6 +49,10 @@ Workflow and Chatflow draft and snapshot state is stored in Workflow-specific ta
 - `workflow_snapshots`
 - `workflow_run_records`
 
+Template square development records are stored in:
+
+- `app_templates`
+
 The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflow/*` for list, create, copy, import, export, and convert-shell compatibility. It also maps `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box` to the Java MCP resource service, returning the Go workflow editor field shapes (`toolId/toolName/actions`, action inputs/outputs, and snake_case tool-box metadata). Workflow run calls now generate a `workflow-run-*` id, return status/timing metadata through the frontend `/workflow/api/api/workflow/use` and `/user/api/v1/workflow/run` envelopes, derive declared `outputs` fields from the saved workflow schema, and persist input/output/status/cost in `workflow_run_records`. Chatflow uses the same storage tables with `apps.app_type=chatflow`, plus `/user/api/v1/appspace/chatflow/*`, `/user/api/v1/chatflow/application/list`, `/user/api/v1/chatflow/application/info`, and `/user/api/v1/chatflow/conversation/delete`. Public Chatflow OpenAPI conversations reuse the existing conversation tables with `conversation_type=chatflow_openapi`, so create/chat/list/message/delete state survives Docker restarts when AppService is available. Generic app publish/version/delete endpoints now accept `appType=workflow` and `appType=chatflow`. The separate frontend Workflow API prefix `/workflow/api` is served by `WanwuWorkflowApiController`, and Docker nginx proxies `/workflow/api/` plus `/api/` to BFF so the zero-change Vue frontend no longer sees gateway-level 404s for Workflow schema/use/avatar-upload calls.
 
 ## Original Go Mapping
@@ -63,5 +68,5 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflo
 - Workflow and Chatflow now have persisted local app lifecycles and frontend-compatible import/export shells. Workflow run snapshots and schema-aware output are persisted for development verification, while the actual visual editor engine, graph execution, Coze-compatible runtime, node validation, and advanced Workflow/Chatflow marketplace/template flows are still missing.
 - Skill marketplace/custom/acquired skill flows are implemented in the resource service slice, not this app-service slice.
 - Safety guard management, local uploaded-file word import, Agent/RAG local chat input/output replacement, and BFF Model Experience global input/output replacement are implemented for Java's local deterministic streams; Go-equivalent provider token-stream Aho-Corasick interception remains later.
-- Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant templates remain a future slice.
+- Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant and Workflow template square rows are persisted as development marketplace seed data; real template publication/ranking/governance remains later.
 - RAG chat currently returns a deterministic local answer after validating draft/published RAG existence and persists the local chat snapshot for Docker restart verification. Real vector/rerank retrieval, reasoning frames, provider token streaming, and model generation remain future slices.

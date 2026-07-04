@@ -117,6 +117,7 @@ import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
 import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.AppTemplateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
@@ -262,6 +263,61 @@ public class AppServiceImplTest {
         service.changeExplorationAppFavorite(favorite);
         ApplicationListResult removed = service.listApplications(favoriteQuery);
         assertEquals(0, removed.getTotal());
+    }
+
+    @Test
+    public void appTemplatesUseRepositoryRecords() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        AppTemplateRecord assistant = new AppTemplateRecord();
+        assistant.setCreatedAt(fixedClock().millis());
+        assistant.setUpdatedAt(fixedClock().millis());
+        assistant.setTemplateType("assistant");
+        assistant.setTemplateId("assistant-template-custom");
+        assistant.setCategory("industry");
+        assistant.setName("Custom Support");
+        assistant.setDesc("Handle support tickets.");
+        assistant.setAvatarJson("{\"key\":\"avatar-key\",\"path\":\"/avatar.png\"}");
+        assistant.setSummary("Support summary");
+        assistant.setFeature("Routing and reply drafts.");
+        assistant.setScenario("Support teams.");
+        assistant.setPrologue("Describe the ticket.");
+        assistant.setInstructions("You are a support assistant.");
+        assistant.setRecommendQuestionsJson("[\"How urgent is it?\"]");
+        assistant.setWorkflowInstruction("Bind workflow later.");
+        repository.saveAppTemplate(assistant);
+
+        AppTemplateRecord workflow = new AppTemplateRecord();
+        workflow.setCreatedAt(fixedClock().millis());
+        workflow.setUpdatedAt(fixedClock().millis());
+        workflow.setTemplateType("workflow");
+        workflow.setTemplateId("workflow-template-custom");
+        workflow.setCategory("office");
+        workflow.setName("Custom Workflow");
+        workflow.setDesc("Run a custom workflow.");
+        workflow.setAvatarJson("{\"key\":\"\",\"path\":\"\"}");
+        workflow.setAuthor("Wanwu Java");
+        workflow.setDownloadCount(7);
+        workflow.setSummary("Workflow summary");
+        workflow.setFeature("Schema-backed draft.");
+        workflow.setScenario("Office automation.");
+        workflow.setNote("Local runtime shell.");
+        workflow.setSchemaJson("{\"id\":\"workflow-template-custom\",\"nodes\":[],\"edges\":[]}");
+        repository.saveAppTemplate(workflow);
+
+        List<Map<String, Object>> assistants = service.listAppTemplates("agentTemplate", "industry", "Support");
+        assertEquals(1, assistants.size());
+        assertEquals("assistant-template-custom", assistants.get(0).get("assistantTemplateId"));
+        assertEquals("agentTemplate", assistants.get(0).get("appType"));
+        assertEquals("Describe the ticket.", assistants.get(0).get("prologue"));
+        assertEquals("How urgent is it?", ((List<?>) assistants.get(0).get("recommendQuestion")).get(0));
+        assertEquals("/avatar.png", ((Map<?, ?>) assistants.get(0).get("avatar")).get("path"));
+
+        Map<String, Object> workflowDetail = service.getAppTemplate("workflow", "workflow-template-custom");
+        assertEquals("workflow-template-custom", workflowDetail.get("templateId"));
+        assertEquals(7, workflowDetail.get("downloadCount"));
+        assertEquals("workflow-template-custom", ((Map<?, ?>) workflowDetail.get("schema")).get("id"));
     }
 
     @Test
@@ -2344,6 +2400,7 @@ public class AppServiceImplTest {
         private final List<AppKeyRecord> appKeys = new ArrayList<>();
         private final List<AppFavoriteRecord> favorites = new ArrayList<>();
         private final List<AppHistoryRecord> histories = new ArrayList<>();
+        private final List<AppTemplateRecord> templates = new ArrayList<>();
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
         private final List<AssistantKnowledgeFileRecord> assistantKnowledgeFiles = new ArrayList<>();
@@ -2863,6 +2920,44 @@ public class AppServiceImplTest {
             }
             matches.sort(Comparator.comparing(AppRecord::getId).reversed());
             return matches;
+        }
+
+        @Override
+        public AppTemplateRecord saveAppTemplate(AppTemplateRecord record) {
+            record.setId(ids.incrementAndGet());
+            templates.add(record);
+            return record;
+        }
+
+        @Override
+        public List<AppTemplateRecord> listAppTemplates(String templateType, String category, String name) {
+            List<AppTemplateRecord> matches = new ArrayList<>();
+            for (AppTemplateRecord record : templates) {
+                if (!templateType.equals(record.getTemplateType())) {
+                    continue;
+                }
+                if (category != null && !category.isEmpty() && !"all".equals(category)
+                        && !category.equals(record.getCategory())) {
+                    continue;
+                }
+                if (name != null && !name.isEmpty()
+                        && (record.getName() == null
+                        || !record.getName().toLowerCase().contains(name.toLowerCase()))) {
+                    continue;
+                }
+                matches.add(record);
+            }
+            return matches;
+        }
+
+        @Override
+        public AppTemplateRecord findAppTemplate(String templateType, String templateId) {
+            for (AppTemplateRecord record : templates) {
+                if (templateType.equals(record.getTemplateType()) && templateId.equals(record.getTemplateId())) {
+                    return record;
+                }
+            }
+            return null;
         }
 
         @Override

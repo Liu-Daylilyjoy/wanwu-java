@@ -80,6 +80,12 @@ public interface ApplicationRepository {
 
     List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType);
 
+    AppTemplateRecord saveAppTemplate(AppTemplateRecord record);
+
+    List<AppTemplateRecord> listAppTemplates(String templateType, String category, String name);
+
+    AppTemplateRecord findAppTemplate(String templateType, String templateId);
+
     List<AppFavoriteRecord> listAppFavorites(String userId, String appType);
 
     void saveAppFavorite(AppFavoriteRecord record);

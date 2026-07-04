@@ -53,7 +53,7 @@ public class WanwuTemplateApiController {
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "name", required = false) String name) {
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> item : assistantTemplates()) {
+        for (Map<String, Object> item : assistantTemplateRows(category, name)) {
             if (!matches(item, category, name)) {
                 continue;
             }
@@ -65,7 +65,7 @@ public class WanwuTemplateApiController {
     @GetMapping("/assistant/template")
     public FrontendResponse<Map<String, Object>> getAssistantTemplate(
             @RequestParam("assistantTemplateId") String assistantTemplateId) {
-        return FrontendResponse.ok(copy(assistantTemplate(assistantTemplateId)));
+        return FrontendResponse.ok(copy(assistantTemplateDetail(assistantTemplateId)));
     }
 
     @PostMapping("/assistant/template")
@@ -75,7 +75,7 @@ public class WanwuTemplateApiController {
         try {
             UserContext ctx = userContext(authorization);
             Map<String, Object> body = body(request);
-            Map<String, Object> template = assistantTemplate(text(body, "assistantTemplateId"));
+            Map<String, Object> template = assistantTemplateDetail(text(body, "assistantTemplateId"));
             AssistantCreateCommand command = new AssistantCreateCommand();
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
@@ -98,7 +98,7 @@ public class WanwuTemplateApiController {
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "name", required = false) String name) {
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> item : workflowTemplates()) {
+        for (Map<String, Object> item : workflowTemplateRows(category, name)) {
             if (!matches(item, category, name)) {
                 continue;
             }
@@ -112,14 +112,14 @@ public class WanwuTemplateApiController {
     @GetMapping("/workflow/template/detail")
     public FrontendResponse<Map<String, Object>> getWorkflowTemplate(
             @RequestParam("templateId") String templateId) {
-        return FrontendResponse.ok(copy(workflowTemplate(templateId)));
+        return FrontendResponse.ok(copy(workflowTemplateDetail(templateId)));
     }
 
     @GetMapping("/workflow/template/recommend")
     public FrontendResponse<Map<String, Object>> recommendWorkflowTemplates(
             @RequestParam(value = "templateId", required = false) String templateId) {
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> item : workflowTemplates()) {
+        for (Map<String, Object> item : workflowTemplateRows("", "")) {
             if (!text(item, "templateId").equals(templateId)) {
                 rows.add(workflowListItem(item));
             }
@@ -134,7 +134,7 @@ public class WanwuTemplateApiController {
 
     @GetMapping("/workflow/template/download")
     public ResponseEntity<byte[]> downloadWorkflowTemplate(@RequestParam("templateId") String templateId) {
-        Map<String, Object> template = workflowTemplate(templateId);
+        Map<String, Object> template = workflowTemplateDetail(templateId);
         String payload;
         try {
             payload = JSON.writeValueAsString(template.get("schema"));
@@ -155,7 +155,7 @@ public class WanwuTemplateApiController {
         try {
             UserContext ctx = userContext(authorization);
             Map<String, Object> body = body(request);
-            Map<String, Object> template = workflowTemplate(text(body, "templateId"));
+            Map<String, Object> template = workflowTemplateDetail(text(body, "templateId"));
             WorkflowCreateCommand command = new WorkflowCreateCommand();
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
@@ -191,6 +191,75 @@ public class WanwuTemplateApiController {
         body.put("workflow_id", workflowId);
         body.put("workflowId", workflowId);
         return body;
+    }
+
+    private List<Map<String, Object>> assistantTemplateRows(String category, String name) {
+        return templateRows("assistant", category, name, assistantTemplates());
+    }
+
+    private Map<String, Object> assistantTemplateDetail(String assistantTemplateId) {
+        return templateDetail("assistant", assistantTemplateId, "assistantTemplateId", assistantTemplates());
+    }
+
+    private List<Map<String, Object>> workflowTemplateRows(String category, String name) {
+        return templateRows("workflow", category, name, workflowTemplates());
+    }
+
+    private Map<String, Object> workflowTemplateDetail(String templateId) {
+        return templateDetail("workflow", templateId, "templateId", workflowTemplates());
+    }
+
+    private List<Map<String, Object>> templateRows(String templateType,
+                                                   String category,
+                                                   String name,
+                                                   List<Map<String, Object>> fallback) {
+        if (appService != null) {
+            try {
+                List<Map<String, Object>> rows = appService.listAppTemplates(templateType, category, name);
+                if (rows != null && !rows.isEmpty()) {
+                    return copyRows(rows);
+                }
+            } catch (RuntimeException ignored) {
+                // Keep the template square usable while AppService is still booting in development.
+            }
+        }
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> item : fallback) {
+            if (matches(item, category, name)) {
+                rows.add(copy(item));
+            }
+        }
+        return rows;
+    }
+
+    private Map<String, Object> templateDetail(String templateType,
+                                               String templateId,
+                                               String idKey,
+                                               List<Map<String, Object>> fallback) {
+        if (appService != null) {
+            try {
+                Map<String, Object> template = appService.getAppTemplate(templateType, templateId);
+                if (template != null && !template.isEmpty()) {
+                    return copy(template);
+                }
+            } catch (RuntimeException ignored) {
+                // Fall back to local seeds for the zero-change frontend compatibility path.
+            }
+        }
+        for (Map<String, Object> item : fallback) {
+            if (text(item, idKey).equals(templateId)) {
+                return copy(item);
+            }
+        }
+        throw new IllegalArgumentException(templateType + " template not found: " + templateId);
+    }
+
+    private List<Map<String, Object>> copyRows(List<Map<String, Object>> source) {
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> item : source) {
+            rows.add(copy(item));
+        }
+        return rows;
     }
 
     private List<Map<String, Object>> assistantTemplates() {

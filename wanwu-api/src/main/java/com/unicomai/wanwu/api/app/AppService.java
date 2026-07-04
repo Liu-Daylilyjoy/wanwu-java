@@ -137,6 +137,10 @@ public interface AppService {
 
     ApplicationListResult listApplications(ApplicationListQuery query);
 
+    List<Map<String, Object>> listAppTemplates(String templateType, String category, String name);
+
+    Map<String, Object> getAppTemplate(String templateType, String templateId);
+
     void changeExplorationAppFavorite(ExplorationAppFavoriteCommand command);
 
     void recordAppHistory(ExplorationAppHistoryCommand command);

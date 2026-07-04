@@ -25,7 +25,7 @@ Date: 2026-06-30
 - Favorite state is persisted through `AppService.changeExplorationAppFavorite` into `app_favorites`, with BFF memory kept as an immediate fallback.
 - History state is persisted through `AppService.recordAppHistory` into `app_histories` when the zero-change frontend runs published Agent, RAG, Workflow, or Chatflow application routes, matching the Go BFF `AppHistoryRecord` router behavior; BFF memory remains a fallback for local development.
 - `ApplicationListQuery.searchType` now supports `all`, `favorite`, `private`, and `history` in the Java AppService compatibility layer.
-- Existing resource controllers already expose MCP square, prompt template square, and Skill square routes.
+- Existing resource controllers already expose MCP square, prompt template square, and Skill square routes. Assistant and Workflow template square routes now read AppService/MySQL-backed `app_templates` records with local BFF fallback.
 - The admin development account now exposes `exploration`, `exploration.app`, `exploration.mcp`, `exploration.template`, and `exploration.skill`.
 
 ## Verification
@@ -54,5 +54,5 @@ It does not yet implement:
 - Cross-user public/organization marketplace visibility beyond the current Java app repository scope.
 - Real marketplace ranking and recommendation.
 - Chatflow marketplace routes.
-- Full public template workflow square routes.
+- Template publication/governance beyond the Flyway-seeded development records.
 - Deeper published app runtime beyond the Agent/RAG/Workflow shells already reproduced in earlier slices.

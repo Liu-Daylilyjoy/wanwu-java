@@ -14,6 +14,7 @@ import com.unicomai.wanwu.service.app.domain.AppFavoriteRecord;
 import com.unicomai.wanwu.service.app.domain.AppHistoryRecord;
 import com.unicomai.wanwu.service.app.domain.AppKeyRecord;
 import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
+import com.unicomai.wanwu.service.app.domain.AppTemplateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
@@ -33,6 +34,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AppFavoriteEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppHistoryEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppStatisticEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AppTemplateEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
@@ -59,6 +61,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AppFavoriteMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppHistoryMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppStatisticMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AppTemplateMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
@@ -105,6 +108,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AppUrlMapper appUrlMapper;
     private final AppFavoriteMapper appFavoriteMapper;
     private final AppHistoryMapper appHistoryMapper;
+    private final AppTemplateMapper appTemplateMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
     private final AssistantActionMapper assistantActionMapper;
@@ -132,6 +136,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AppUrlMapper appUrlMapper,
                                         AppFavoriteMapper appFavoriteMapper,
                                         AppHistoryMapper appHistoryMapper,
+                                        AppTemplateMapper appTemplateMapper,
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper,
                                         AssistantActionMapper assistantActionMapper,
@@ -158,6 +163,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.appUrlMapper = appUrlMapper;
         this.appFavoriteMapper = appFavoriteMapper;
         this.appHistoryMapper = appHistoryMapper;
+        this.appTemplateMapper = appTemplateMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
         this.assistantActionMapper = assistantActionMapper;
@@ -502,6 +508,24 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     public List<AppRecord> listWorkflows(String userId, String orgId, String name, String appType) {
         return appMapper.selectWorkflowRecords(userId, orgId, name, appType);
+    }
+
+    @Override
+    public AppTemplateRecord saveAppTemplate(AppTemplateRecord record) {
+        AppTemplateEntity entity = toEntity(record);
+        appTemplateMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<AppTemplateRecord> listAppTemplates(String templateType, String category, String name) {
+        return toAppTemplateRecords(appTemplateMapper.selectByType(templateType, category, name));
+    }
+
+    @Override
+    public AppTemplateRecord findAppTemplate(String templateType, String templateId) {
+        return toRecord(appTemplateMapper.selectByTemplateId(templateType, templateId));
     }
 
     @Override
@@ -1459,6 +1483,67 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setFileInfoJson(entity.getFileInfoJson());
         record.setSearchListJson(entity.getSearchListJson());
         record.setQaSearchListJson(entity.getQaSearchListJson());
+        return record;
+    }
+
+    private AppTemplateEntity toEntity(AppTemplateRecord record) {
+        AppTemplateEntity entity = new AppTemplateEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setTemplateType(record.getTemplateType());
+        entity.setTemplateId(record.getTemplateId());
+        entity.setCategory(record.getCategory());
+        entity.setName(record.getName());
+        entity.setDescription(record.getDesc());
+        entity.setAvatarJson(record.getAvatarJson());
+        entity.setAuthor(record.getAuthor());
+        entity.setDownloadCount(record.getDownloadCount());
+        entity.setSummary(record.getSummary());
+        entity.setFeature(record.getFeature());
+        entity.setScenario(record.getScenario());
+        entity.setNote(record.getNote());
+        entity.setPrologue(record.getPrologue());
+        entity.setInstructions(record.getInstructions());
+        entity.setRecommendQuestionsJson(record.getRecommendQuestionsJson());
+        entity.setWorkflowInstruction(record.getWorkflowInstruction());
+        entity.setSchemaJson(record.getSchemaJson());
+        return entity;
+    }
+
+    private List<AppTemplateRecord> toAppTemplateRecords(List<AppTemplateEntity> entities) {
+        List<AppTemplateRecord> records = new java.util.ArrayList<>();
+        for (AppTemplateEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private AppTemplateRecord toRecord(AppTemplateEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AppTemplateRecord record = new AppTemplateRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setTemplateType(entity.getTemplateType());
+        record.setTemplateId(entity.getTemplateId());
+        record.setCategory(entity.getCategory());
+        record.setName(entity.getName());
+        record.setDesc(entity.getDescription());
+        record.setAvatarJson(entity.getAvatarJson());
+        record.setAuthor(entity.getAuthor());
+        record.setDownloadCount(entity.getDownloadCount());
+        record.setSummary(entity.getSummary());
+        record.setFeature(entity.getFeature());
+        record.setScenario(entity.getScenario());
+        record.setNote(entity.getNote());
+        record.setPrologue(entity.getPrologue());
+        record.setInstructions(entity.getInstructions());
+        record.setRecommendQuestionsJson(entity.getRecommendQuestionsJson());
+        record.setWorkflowInstruction(entity.getWorkflowInstruction());
+        record.setSchemaJson(entity.getSchemaJson());
         return record;
     }
 
