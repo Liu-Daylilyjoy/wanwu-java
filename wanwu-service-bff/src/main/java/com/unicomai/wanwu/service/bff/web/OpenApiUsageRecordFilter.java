@@ -3,14 +3,12 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
-import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingRequestWrapper;
@@ -22,7 +20,6 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 
 @Component
@@ -30,11 +27,6 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenApiUsageRecordFilter.class);
     private static final String PREFIX = "/service/api/openapi/v1";
-    private static final String DEV_ADMIN_TOKEN = "dev-token";
-    private static final String DEV_APP_TOKEN = "dev-token-app";
-    private static final String DEV_ADMIN_ID = "dev-admin";
-    private static final String DEV_APP_ID = "dev-app";
-    private static final String DEV_ORG_ID = "default-org";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final OpenApiUsageMeter usageMeter;
@@ -158,22 +150,10 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
     }
 
     private UsageContext usageContext(HttpServletRequest request) {
-        String token = apiToken(request);
-        if (DEV_APP_TOKEN.equals(token)) {
-            return new UsageContext(DEV_APP_ID, DEV_ORG_ID, "dev-app-key");
-        }
-        if (DEV_ADMIN_TOKEN.equals(token) || isBlank(token)) {
-            return new UsageContext(DEV_ADMIN_ID, DEV_ORG_ID, "dev-admin-key");
-        }
         try {
-            ApiKeyInfo apiKey = appService == null ? null : appService.getApiKeyByKey(token);
-            if (apiKey == null || Boolean.FALSE.equals(apiKey.getStatus())) {
-                return null;
-            }
-            return new UsageContext(
-                    defaultIfBlank(apiKey.getUserId(), DEV_ADMIN_ID),
-                    defaultIfBlank(apiKey.getOrgId(), DEV_ORG_ID),
-                    defaultIfBlank(apiKey.getKeyId(), token));
+            OpenApiAuthSupport.AuthResult auth = OpenApiAuthSupport.resolve(
+                    appService, OpenApiAuthSupport.extractToken(request));
+            return new UsageContext(auth.userId, auth.orgId, auth.apiKeyId);
         } catch (RuntimeException ex) {
             return null;
         }
@@ -213,33 +193,6 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
         } catch (IOException ex) {
             return false;
         }
-    }
-
-    private String apiToken(HttpServletRequest request) {
-        String value = firstHeader(request, "X-API-Key");
-        if (isBlank(value)) {
-            value = firstHeader(request, "Api-Key");
-        }
-        if (isBlank(value)) {
-            value = firstHeader(request, HttpHeaders.AUTHORIZATION);
-        }
-        if (value == null) {
-            return "";
-        }
-        String trimmed = value.trim();
-        if (trimmed.toLowerCase().startsWith("bearer ")) {
-            return trimmed.substring("bearer ".length()).trim();
-        }
-        return trimmed;
-    }
-
-    private String firstHeader(HttpServletRequest request, String name) {
-        List<String> values = request == null ? null : java.util.Collections.list(request.getHeaders(name));
-        return values == null || values.isEmpty() ? "" : values.get(0);
-    }
-
-    private String defaultIfBlank(String value, String fallback) {
-        return isBlank(value) ? fallback : value;
     }
 
     private boolean isBlank(String value) {

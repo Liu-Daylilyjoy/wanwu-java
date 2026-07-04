@@ -3,7 +3,6 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
-import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
@@ -42,6 +41,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -68,11 +68,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/service/api/openapi/v1")
 public class WanwuOpenApiController {
 
-    private static final String DEV_ADMIN_TOKEN = "dev-token";
-    private static final String DEV_APP_TOKEN = "dev-token-app";
-    private static final String DEV_ADMIN_ID = "dev-admin";
-    private static final String DEV_APP_ID = "dev-app";
-    private static final String DEV_ORG_ID = "default-org";
+    private static final String DEV_ADMIN_TOKEN = OpenApiAuthSupport.DEV_ADMIN_TOKEN;
+    private static final String DEV_APP_TOKEN = OpenApiAuthSupport.DEV_APP_TOKEN;
+    private static final String DEV_ADMIN_ID = OpenApiAuthSupport.DEV_ADMIN_ID;
+    private static final String DEV_APP_ID = OpenApiAuthSupport.DEV_APP_ID;
+    private static final String DEV_ORG_ID = OpenApiAuthSupport.DEV_ORG_ID;
     private static final String AGENT_APP_TYPE = "agent";
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
@@ -134,6 +134,12 @@ public class WanwuOpenApiController {
         this.iamService = iamService;
         this.operateService = operateService;
         this.chatflowSessionStore = chatflowSessionStore == null ? new OpenApiChatflowSessionStore() : chatflowSessionStore;
+    }
+
+    @ExceptionHandler(OpenApiAuthException.class)
+    public ResponseEntity<Map<String, Object>> openApiAuthError(OpenApiAuthException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(errorBody(defaultIfBlank(ex.getMessage(), "invalid api key")));
     }
 
     @PostMapping("/agent")
@@ -846,7 +852,7 @@ public class WanwuOpenApiController {
 
     @GetMapping("/oauth/userinfo")
     public ResponseEntity<Map<String, Object>> oauthUserInfo(@RequestHeader HttpHeaders headers) {
-        String token = apiToken(headers);
+        String token = OpenApiAuthSupport.extractToken(headers);
         OAuthJwtSupport.AccessTokenClaims payload;
         try {
             payload = OAUTH_JWT.parseAccessToken(defaultIfBlank(token, ""));
@@ -880,47 +886,9 @@ public class WanwuOpenApiController {
     }
 
     private OpenApiContext context(HttpHeaders headers) {
-        String token = apiToken(headers);
-        if (DEV_APP_TOKEN.equals(token)) {
-            return new OpenApiContext(DEV_APP_ID, DEV_ORG_ID, "dev-app-key");
-        }
-        if (DEV_ADMIN_TOKEN.equals(token) || isBlank(token)) {
-            return new OpenApiContext(DEV_ADMIN_ID, DEV_ORG_ID, "dev-admin-key");
-        }
-        ApiKeyInfo apiKey = appService.getApiKeyByKey(token);
-        if (apiKey == null || Boolean.FALSE.equals(apiKey.getStatus())) {
-            throw new IllegalArgumentException("invalid api key");
-        }
-        return new OpenApiContext(
-                defaultIfBlank(apiKey.getUserId(), DEV_ADMIN_ID),
-                defaultIfBlank(apiKey.getOrgId(), DEV_ORG_ID),
-                defaultIfBlank(apiKey.getKeyId(), token));
-    }
-
-    private String apiToken(HttpHeaders headers) {
-        String value = firstHeader(headers, "X-API-Key");
-        if (isBlank(value)) {
-            value = firstHeader(headers, "Api-Key");
-        }
-        if (isBlank(value)) {
-            value = firstHeader(headers, "Authorization");
-        }
-        if (value == null) {
-            return "";
-        }
-        String trimmed = value.trim();
-        if (trimmed.toLowerCase().startsWith("bearer ")) {
-            return trimmed.substring("bearer ".length()).trim();
-        }
-        return trimmed;
-    }
-
-    private String firstHeader(HttpHeaders headers, String name) {
-        if (headers == null) {
-            return "";
-        }
-        List<String> values = headers.get(name);
-        return values == null || values.isEmpty() ? "" : values.get(0);
+        OpenApiAuthSupport.AuthResult auth = OpenApiAuthSupport.resolve(
+                appService, OpenApiAuthSupport.extractToken(headers));
+        return new OpenApiContext(auth.userId, auth.orgId, auth.apiKeyId);
     }
 
     private Map<String, Object> serviceCreateChatflowConversation(OpenApiContext ctx, Map<String, Object> body) {

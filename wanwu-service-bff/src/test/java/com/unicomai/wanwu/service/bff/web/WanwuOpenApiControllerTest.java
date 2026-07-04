@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.jayway.jsonpath.JsonPath;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.ApiKeyInfo;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
@@ -115,6 +116,51 @@ public class WanwuOpenApiControllerTest {
         verify(appService).createAssistantConversation(conversationCaptor.capture());
         assertEquals("assistant-openapi-001", conversationCaptor.getValue().getAssistantId());
         assertEquals("published", conversationCaptor.getValue().getConversationType());
+    }
+
+    @Test
+    public void openApiRoutesRejectMissingApiKey() throws Exception {
+        mockMvc.perform(get("/service/api/openapi/v1/agent/list")
+                        .param("name", "OpenAPI"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("token is nil"));
+    }
+
+    @Test
+    public void openApiRoutesUseResolvedApiKeyContext() throws Exception {
+        when(appService.getApiKeyByKey("wanwu-real-key"))
+                .thenReturn(apiKey("api-key-9", "user-real", "org-real", true, "2099-01-01"));
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(appRow()), 1));
+
+        mockMvc.perform(get("/service/api/openapi/v1/agent/list")
+                        .header("Authorization", "Bearer wanwu-real-key")
+                        .param("name", "OpenAPI"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        ArgumentCaptor<ApplicationListQuery> queryCaptor = forClass(ApplicationListQuery.class);
+        verify(appService).listApplications(queryCaptor.capture());
+        assertEquals("user-real", queryCaptor.getValue().getUserId());
+        assertEquals("org-real", queryCaptor.getValue().getOrgId());
+    }
+
+    @Test
+    public void openApiRoutesRejectDisabledAndExpiredApiKeys() throws Exception {
+        when(appService.getApiKeyByKey("disabled-key"))
+                .thenReturn(apiKey("api-key-disabled", "user-real", "org-real", false, "2099-01-01"));
+        when(appService.getApiKeyByKey("expired-key"))
+                .thenReturn(apiKey("api-key-expired", "user-real", "org-real", true, "2000-01-01"));
+
+        mockMvc.perform(get("/service/api/openapi/v1/agent/list")
+                        .header("Authorization", "Bearer disabled-key"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("api key disabled"));
+
+        mockMvc.perform(get("/service/api/openapi/v1/agent/list")
+                        .header("Authorization", "Bearer expired-key"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("api key expired"));
     }
 
     @Test
@@ -528,6 +574,18 @@ public class WanwuOpenApiControllerTest {
         row.put("name", "OpenAPI Agent");
         row.put("desc", "from api");
         return row;
+    }
+
+    private ApiKeyInfo apiKey(String keyId, String userId, String orgId, boolean status, String expiredAt) {
+        ApiKeyInfo info = new ApiKeyInfo();
+        info.setKeyId(keyId);
+        info.setKey("wanwu-real-key");
+        info.setUserId(userId);
+        info.setOrgId(orgId);
+        info.setName("Real Key");
+        info.setStatus(status);
+        info.setExpiredAt(expiredAt);
+        return info;
     }
 
     private Map<String, Object> oauthPage() {
