@@ -158,6 +158,11 @@ public class WanwuCommonApiControllerTest {
                         .param("path", "getting-started.md"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", containsString("Wanwu Java")));
+        mockMvc.perform(get("/user/api/v1/doc_center/markdown")
+                        .param("path", "application-development.md"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data",
+                        containsString("![](../../../user/api/v1/static/manual/assets/doc-center.svg)")));
         mockMvc.perform(get("/user/api/v1/doc_center/search")
                         .param("content", "workflow"))
                 .andExpect(status().isOk())

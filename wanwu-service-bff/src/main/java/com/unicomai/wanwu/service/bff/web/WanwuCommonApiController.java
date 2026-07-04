@@ -24,6 +24,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +38,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/user/api/v1")
@@ -49,6 +52,9 @@ public class WanwuCommonApiController {
     private static final String DEV_ORG_ID = "default-org";
     private static final String DOC_FIRST_PATH = "getting-started.md";
     private static final String DOC_CENTER_PAGE_PREFIX = "/aibase/docCenter/pages/";
+    private static final String DOC_CENTER_STATIC_API_PREFIX = "../../../user/api/v1/static/manual";
+    private static final Pattern MD_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
+    private static final Pattern MD_LINK_PATTERN = Pattern.compile("(^|[^!])\\[([^\\]]*)\\]\\(([^)]+\\.md)\\)");
     private static final DocIndex DOC_INDEX = loadDocIndex();
 
     private final Path avatarRoot;
@@ -613,6 +619,7 @@ public class WanwuCommonApiController {
         if (docs.isEmpty()) {
             docs = fallbackDocs();
         }
+        docs = convertMarkdownDocs(docs);
         List<String> paths = new ArrayList<String>(docs.keySet());
         Collections.sort(paths, new Comparator<String>() {
             @Override
@@ -662,6 +669,105 @@ public class WanwuCommonApiController {
             return Collections.emptyMap();
         }
         return docs;
+    }
+
+    private static Map<String, String> convertMarkdownDocs(Map<String, String> source) {
+        Map<String, String> docs = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : source.entrySet()) {
+            docs.put(entry.getKey(), convertMarkdown(entry.getKey(), entry.getValue()));
+        }
+        return docs;
+    }
+
+    private static String convertMarkdown(String refFilePath, String markdown) {
+        String withLinks = convertMarkdownLinks(refFilePath, markdown == null ? "" : markdown);
+        Matcher matcher = MD_IMAGE_PATTERN.matcher(withLinks);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String target = matcher.group(1);
+            if (externalReference(target)) {
+                matcher.appendReplacement(buffer, Matcher.quoteReplacement(matcher.group(0)));
+                continue;
+            }
+            String path = resolveMarkdownReference(refFilePath, target);
+            String url = encodePath(DOC_CENTER_STATIC_API_PREFIX + "/" + path, true);
+            matcher.appendReplacement(buffer, Matcher.quoteReplacement("![](" + url + ")"));
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private static String convertMarkdownLinks(String refFilePath, String markdown) {
+        Matcher matcher = MD_LINK_PATTERN.matcher(markdown);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String prefix = matcher.group(1);
+            String text = matcher.group(2);
+            String target = matcher.group(3);
+            if (externalReference(target)) {
+                matcher.appendReplacement(buffer, Matcher.quoteReplacement(matcher.group(0)));
+                continue;
+            }
+            String path = resolveMarkdownReference(refFilePath, target);
+            matcher.appendReplacement(buffer,
+                    Matcher.quoteReplacement(prefix + "[" + text + "](" + encodePath(path, false) + ")"));
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private static String resolveMarkdownReference(String refFilePath, String target) {
+        String ref = defaultStatic(refFilePath).replace('\\', '/');
+        String rel = defaultStatic(target).replace('\\', '/');
+        int slash = ref.lastIndexOf('/');
+        String base = slash >= 0 ? ref.substring(0, slash + 1) : "";
+        String[] parts = (base + rel).split("/");
+        List<String> clean = new ArrayList<String>();
+        for (String part : parts) {
+            if (part.length() == 0 || ".".equals(part)) {
+                continue;
+            }
+            if ("..".equals(part)) {
+                if (!clean.isEmpty()) {
+                    clean.remove(clean.size() - 1);
+                }
+                continue;
+            }
+            clean.add(part);
+        }
+        StringBuilder path = new StringBuilder();
+        for (String part : clean) {
+            if (path.length() > 0) {
+                path.append('/');
+            }
+            path.append(part);
+        }
+        return path.toString();
+    }
+
+    private static boolean externalReference(String target) {
+        String value = defaultStatic(target).trim().toLowerCase(Locale.ROOT);
+        return value.length() == 0
+                || value.startsWith("http://")
+                || value.startsWith("https://")
+                || value.startsWith("data:")
+                || value.startsWith("mailto:")
+                || value.startsWith("#")
+                || value.startsWith("/")
+                || value.contains("user/api/v1/static/manual");
+    }
+
+    private static String encodePath(String value, boolean keepSlash) {
+        try {
+            String encoded = URLEncoder.encode(value, "UTF-8").replace("+", "%20");
+            return keepSlash ? encoded.replace("%2F", "/") : encoded;
+        } catch (Exception ex) {
+            return value;
+        }
+    }
+
+    private static String defaultStatic(String value) {
+        return value == null ? "" : value;
     }
 
     private static String resourcePath(Resource resource) throws IOException {

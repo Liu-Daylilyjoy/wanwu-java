@@ -50,6 +50,12 @@ public class WanwuStaticDocsControllerTest {
                 .andExpect(result -> assertTrue(result.getResponse()
                         .getContentAsString()
                         .contains("Wanwu Java")));
+        mockMvc().perform(get("/user/api/v1/static/manual/assets/doc-center.svg"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("image/svg+xml")))
+                .andExpect(result -> assertTrue(result.getResponse()
+                        .getContentAsString()
+                        .contains("Wanwu Doc Center")));
     }
 
     @Test
