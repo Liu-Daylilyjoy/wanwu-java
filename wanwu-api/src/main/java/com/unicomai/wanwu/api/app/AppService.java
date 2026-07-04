@@ -246,6 +246,14 @@ public interface AppService {
 
     AssistantConversationStreamResult streamAssistantConversation(AssistantConversationStreamCommand command);
 
+    Map<String, Object> createLegacyChatLlmConversation(AssistantConversationCreateCommand command);
+
+    AssistantConversationPageResult listLegacyChatLlmConversations(AssistantConversationListQuery query);
+
+    AssistantConversationPageResult listLegacyChatLlmConversationDetails(AssistantConversationDetailQuery query);
+
+    void deleteLegacyChatLlmConversation(AssistantConversationDeleteCommand command);
+
     ApiKeyInfo createApiKey(ApiKeyCreateCommand command);
 
     void updateApiKey(ApiKeyUpdateCommand command);

@@ -121,22 +121,30 @@ public class WanwuModelUseApiControllerTest {
     @Test
     public void chatLlmAndFileRoutesReturnDevelopmentContracts() throws Exception {
         when(appService.createAssistant(any())).thenReturn(new AssistantCreateResult("auto-assistant-001"));
+        Map<String, Object> chat = row("conversationId", "conversation-chatllm-001", "name", "hello");
+        chat.put("details", Collections.singletonList(row("detailId", "detail-chatllm-001", "content", "hello")));
+        when(appService.createLegacyChatLlmConversation(any())).thenReturn(chat);
+        when(appService.listLegacyChatLlmConversations(any()))
+                .thenReturn(page(row("conversationId", "conversation-chatllm-001", "name", "hello")));
+        when(appService.listLegacyChatLlmConversationDetails(any()))
+                .thenReturn(page(row("detailId", "detail-chatllm-001", "content", "hello")));
 
         mockMvc.perform(post("/use/model/api/v1/chatllm/conversation/create")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"prompt\":\"hello\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.conversationId", containsString("chatllm-")));
+                .andExpect(jsonPath("$.data.conversationId").value("conversation-chatllm-001"))
+                .andExpect(jsonPath("$.data.details[0].content").value("hello"));
         mockMvc.perform(get("/use/model/api/v1/chatllm/conversation/list"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[0].conversationId", containsString("chatllm-")));
+                .andExpect(jsonPath("$.data.list[0].conversationId").value("conversation-chatllm-001"));
         mockMvc.perform(get("/use/model/api/v1/chatllm/conversation/detail")
-                        .param("conversationId", "chatllm-1"))
+                        .param("conversationId", "conversation-chatllm-001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list").isArray());
+                .andExpect(jsonPath("$.data.list[0].content").value("hello"));
         mockMvc.perform(delete("/use/model/api/v1/chatllm/conversation/delete")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"conversationId\":\"chatllm-1\"}"))
+                        .content("{\"conversationId\":\"conversation-chatllm-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
         mockMvc.perform(post("/use/model/api/v1/assistant/auto/create")

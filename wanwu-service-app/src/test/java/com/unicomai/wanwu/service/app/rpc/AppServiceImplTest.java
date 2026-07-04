@@ -1398,6 +1398,47 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void legacyChatLlmConversationUsesPersistentConversationRepository() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantConversationCreateCommand create = new AssistantConversationCreateCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setPrompt("legacy question");
+
+        Map<String, Object> created = service.createLegacyChatLlmConversation(create);
+
+        String conversationId = String.valueOf(created.get("conversationId"));
+        assertTrue(conversationId.startsWith("conversation-"));
+        assertEquals("legacy question", created.get("name"));
+        assertEquals("legacy question", ((Map<?, ?>) ((List<?>) created.get("details")).get(0)).get("content"));
+
+        AssistantConversationListQuery listQuery = new AssistantConversationListQuery();
+        listQuery.setUserId("dev-admin");
+        listQuery.setOrgId("default-org");
+        AssistantConversationPageResult list = service.listLegacyChatLlmConversations(listQuery);
+        assertEquals(1, list.getTotal());
+        assertEquals(conversationId, list.getList().get(0).get("conversationId"));
+        assertEquals("legacy question", list.getList().get(0).get("title"));
+
+        AssistantConversationDetailQuery detailQuery = new AssistantConversationDetailQuery();
+        detailQuery.setUserId("dev-admin");
+        detailQuery.setOrgId("default-org");
+        detailQuery.setConversationId(conversationId);
+        AssistantConversationPageResult details = service.listLegacyChatLlmConversationDetails(detailQuery);
+        assertEquals(1, details.getTotal());
+        assertEquals("assistant", details.getList().get(0).get("role"));
+        assertEquals("legacy question", details.getList().get(0).get("content"));
+
+        AssistantConversationDeleteCommand delete = new AssistantConversationDeleteCommand();
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        delete.setConversationId(conversationId);
+        service.deleteLegacyChatLlmConversation(delete);
+
+        assertEquals(0, service.listLegacyChatLlmConversations(listQuery).getTotal());
+    }
+
+    @Test
     public void draftStreamCreatesConversationAndPersistsMessageDetail() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));

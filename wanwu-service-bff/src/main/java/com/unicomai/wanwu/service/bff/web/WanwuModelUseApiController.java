@@ -47,10 +47,7 @@ public class WanwuModelUseApiController {
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
     private static final String AGENT_APP_TYPE = "agent";
-    private static final AtomicLong CHAT_LLM_SEQUENCE = new AtomicLong(0);
     private static final AtomicLong ACTION_SEQUENCE = new AtomicLong(0);
-    private static final Map<String, Map<String, Object>> CHAT_LLM_CONVERSATIONS =
-            new ConcurrentHashMap<String, Map<String, Object>>();
     private static final Map<String, Map<String, Object>> ACTIONS =
             new ConcurrentHashMap<String, Map<String, Object>>();
     private static final Map<String, Map<String, Map<String, Object>>> KNOWLEDGE_FILES_BY_ASSISTANT =
@@ -334,43 +331,57 @@ public class WanwuModelUseApiController {
     }
 
     @PostMapping(MODEL_PREFIX + "/chatllm/conversation/create")
-    public FrontendResponse<Map<String, Object>> createChatLlmConversation(@RequestBody(required = false) Map<String, Object> request) {
-        String id = "chatllm-" + CHAT_LLM_SEQUENCE.incrementAndGet();
-        Map<String, Object> conversation = new LinkedHashMap<String, Object>();
-        conversation.put("conversationId", id);
-        conversation.put("name", defaultIfBlank(firstText(request, "name", "prompt", "question"), "New Chat"));
-        conversation.put("details", Collections.singletonList(message("detail-" + id, firstText(request, "prompt", "question", "content"))));
-        CHAT_LLM_CONVERSATIONS.put(id, conversation);
-        return FrontendResponse.ok(conversation);
+    public FrontendResponse<Map<String, Object>> createChatLlmConversation(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        AssistantConversationCreateCommand command = new AssistantConversationCreateCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setPrompt(defaultIfBlank(firstText(request, "prompt", "question", "content", "name"), "New Chat"));
+        return FrontendResponse.ok(appService.createLegacyChatLlmConversation(command));
     }
 
     @GetMapping(MODEL_PREFIX + "/chatllm/conversation/list")
-    public FrontendResponse<Map<String, Object>> listChatLlmConversations() {
-        if (CHAT_LLM_CONVERSATIONS.isEmpty()) {
-            createChatLlmConversation(Collections.singletonMap("prompt", "Hello"));
-        }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", new ArrayList<Map<String, Object>>(CHAT_LLM_CONVERSATIONS.values()));
-        body.put("total", CHAT_LLM_CONVERSATIONS.size());
-        body.put("pageNo", 1);
-        body.put("pageSize", 10);
-        return FrontendResponse.ok(body);
+    public FrontendResponse<Object> listChatLlmConversations(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext ctx = userContext(authorization);
+        AssistantConversationListQuery query = new AssistantConversationListQuery();
+        query.setUserId(ctx.userId);
+        query.setOrgId(ctx.orgId);
+        query.setPageNo(pageNo);
+        query.setPageSize(pageSize);
+        return FrontendResponse.ok(appService.listLegacyChatLlmConversations(query));
     }
 
     @GetMapping(MODEL_PREFIX + "/chatllm/conversation/detail")
-    public FrontendResponse<Map<String, Object>> chatLlmConversationDetail(
-            @RequestParam(value = "conversationId", required = false) String conversationId) {
-        Map<String, Object> conversation = CHAT_LLM_CONVERSATIONS.get(defaultIfBlank(conversationId, ""));
-        Object details = conversation == null ? Collections.emptyList() : conversation.get("details");
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", details);
-        body.put("total", details instanceof List ? ((List<?>) details).size() : 0);
-        return FrontendResponse.ok(body);
+    public FrontendResponse<Object> chatLlmConversationDetail(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "conversationId", required = false) String conversationId,
+            @RequestParam(value = "pageNo", required = false, defaultValue = "1") int pageNo,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        UserContext ctx = userContext(authorization);
+        AssistantConversationDetailQuery query = new AssistantConversationDetailQuery();
+        query.setUserId(ctx.userId);
+        query.setOrgId(ctx.orgId);
+        query.setConversationId(defaultIfBlank(conversationId, ""));
+        query.setPageNo(pageNo);
+        query.setPageSize(pageSize);
+        return FrontendResponse.ok(appService.listLegacyChatLlmConversationDetails(query));
     }
 
     @DeleteMapping(MODEL_PREFIX + "/chatllm/conversation/delete")
-    public FrontendResponse<Map<String, Object>> deleteChatLlmConversation(@RequestBody(required = false) Map<String, Object> request) {
-        CHAT_LLM_CONVERSATIONS.remove(firstText(request, "conversationId"));
+    public FrontendResponse<Map<String, Object>> deleteChatLlmConversation(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        AssistantConversationDeleteCommand command = new AssistantConversationDeleteCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setConversationId(firstText(request, "conversationId"));
+        appService.deleteLegacyChatLlmConversation(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
@@ -540,14 +551,6 @@ public class WanwuModelUseApiController {
             return second;
         }
         return Collections.emptyList();
-    }
-
-    private Map<String, Object> message(String detailId, String content) {
-        Map<String, Object> message = new LinkedHashMap<String, Object>();
-        message.put("detailId", detailId);
-        message.put("role", "assistant");
-        message.put("content", defaultIfBlank(content, "Hello from Wanwu Java"));
-        return message;
     }
 
     private UserContext userContext(String authorization) {

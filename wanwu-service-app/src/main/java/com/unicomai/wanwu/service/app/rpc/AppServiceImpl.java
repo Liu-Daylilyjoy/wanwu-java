@@ -175,6 +175,8 @@ public class AppServiceImpl implements AppService {
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String CONVERSATION_TYPE_CHATFLOW_OPENAPI = "chatflow_openapi";
+    private static final String CONVERSATION_TYPE_MODEL_USE_CHATLLM = "model_use_chatllm";
+    private static final String MODEL_USE_CHATLLM_ASSISTANT_ID = "model-use-chatllm";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -2324,6 +2326,85 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public Map<String, Object> createLegacyChatLlmConversation(AssistantConversationCreateCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("legacy chatllm conversation create command is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String prompt = defaultIfBlank(command.getPrompt(), "Hello from Wanwu Java");
+        AssistantConversationRecord conversation = newConversation(
+                userId, orgId, MODEL_USE_CHATLLM_ASSISTANT_ID, CONVERSATION_TYPE_MODEL_USE_CHATLLM, prompt);
+        applicationRepository.saveConversation(conversation);
+
+        AssistantConversationMessageRecord message = newLegacyChatLlmMessage(conversation, prompt);
+        applicationRepository.saveConversationMessage(message);
+        applicationRepository.touchConversation(userId, orgId, conversation.getConversationId(), message.getUpdatedAt());
+
+        Map<String, Object> item = toLegacyChatLlmConversationItem(conversation);
+        item.put("details", Collections.singletonList(toLegacyChatLlmDetailItem(message)));
+        return item;
+    }
+
+    @Override
+    public AssistantConversationPageResult listLegacyChatLlmConversations(AssistantConversationListQuery query) {
+        String userId = query == null ? DEV_USER_ID : defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = query == null ? DEV_ORG_ID : defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        int pageNo = normalizePageNo(query == null ? 0 : query.getPageNo());
+        int pageSize = normalizePageSize(query == null ? 0 : query.getPageSize());
+        int offset = offset(pageNo, pageSize);
+        List<AssistantConversationRecord> records = applicationRepository.listConversations(
+                userId, orgId, MODEL_USE_CHATLLM_ASSISTANT_ID, CONVERSATION_TYPE_MODEL_USE_CHATLLM, offset, pageSize);
+        long total = applicationRepository.countConversations(
+                userId, orgId, MODEL_USE_CHATLLM_ASSISTANT_ID, CONVERSATION_TYPE_MODEL_USE_CHATLLM);
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>(records.size());
+        for (AssistantConversationRecord record : records) {
+            items.add(toLegacyChatLlmConversationItem(record));
+        }
+        return new AssistantConversationPageResult(items, total, pageNo, pageSize);
+    }
+
+    @Override
+    public AssistantConversationPageResult listLegacyChatLlmConversationDetails(AssistantConversationDetailQuery query) {
+        if (query == null) {
+            throw new IllegalArgumentException("legacy chatllm conversation detail query is required");
+        }
+        if (isBlank(query.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query.getOrgId(), DEV_ORG_ID);
+        ensureLegacyChatLlmConversation(userId, orgId, query.getConversationId());
+        int pageNo = normalizePageNo(query.getPageNo());
+        int pageSize = normalizePageSize(query.getPageSize());
+        int offset = offset(pageNo, pageSize);
+        List<AssistantConversationMessageRecord> records = applicationRepository.listConversationMessages(
+                userId, orgId, query.getConversationId(), offset, pageSize);
+        long total = applicationRepository.countConversationMessages(userId, orgId, query.getConversationId());
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>(records.size());
+        for (AssistantConversationMessageRecord record : records) {
+            items.add(toLegacyChatLlmDetailItem(record));
+        }
+        return new AssistantConversationPageResult(items, total, pageNo, pageSize);
+    }
+
+    @Override
+    public void deleteLegacyChatLlmConversation(AssistantConversationDeleteCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("legacy chatllm conversation delete command is required");
+        }
+        if (isBlank(command.getConversationId())) {
+            throw new IllegalArgumentException("conversation id is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        AssistantConversationRecord conversation = ensureLegacyChatLlmConversation(
+                userId, orgId, command.getConversationId());
+        applicationRepository.deleteConversationMessages(userId, orgId, conversation.getConversationId());
+        applicationRepository.deleteConversation(userId, orgId, conversation.getConversationId());
+    }
+
+    @Override
     public void createAppUrl(AppUrlCreateCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("app url create command is required");
@@ -2681,6 +2762,71 @@ public class AppServiceImpl implements AppService {
         item.put("fileName", defaultIfBlank(record.getFileName(), ""));
         item.put("subConversationList", listOrDefault(record.getSubConversationListJson()));
         item.put("responseFiles", listOrDefault(record.getResponseFilesJson()));
+        return item;
+    }
+
+    private AssistantConversationMessageRecord newLegacyChatLlmMessage(AssistantConversationRecord conversation,
+                                                                       String prompt) {
+        long now = clock.millis();
+        AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
+        message.setCreatedAt(now);
+        message.setUpdatedAt(now);
+        message.setUserId(conversation.getUserId());
+        message.setOrgId(conversation.getOrgId());
+        message.setAssistantId(conversation.getAssistantId());
+        message.setConversationId(conversation.getConversationId());
+        message.setDetailId(newDetailId());
+        message.setPrompt(prompt);
+        message.setSysPrompt("");
+        message.setResponse(prompt);
+        message.setResponseListJson(toJsonOrNull(Collections.emptyList()));
+        message.setSearchListJson(toJsonOrNull(Collections.emptyList()));
+        message.setRequestFilesJson(toJsonOrNull(Collections.emptyList()));
+        message.setResponseFilesJson(toJsonOrNull(Collections.emptyList()));
+        message.setSubConversationListJson(toJsonOrNull(Collections.emptyList()));
+        message.setFileSize(0L);
+        message.setFileName("");
+        message.setQaType(0);
+        return message;
+    }
+
+    private AssistantConversationRecord ensureLegacyChatLlmConversation(String userId,
+                                                                        String orgId,
+                                                                        String conversationId) {
+        AssistantConversationRecord conversation = applicationRepository.findConversation(userId, orgId, conversationId);
+        if (conversation == null
+                || !MODEL_USE_CHATLLM_ASSISTANT_ID.equals(conversation.getAssistantId())
+                || !CONVERSATION_TYPE_MODEL_USE_CHATLLM.equals(conversation.getConversationType())) {
+            throw new IllegalArgumentException("legacy chatllm conversation not found");
+        }
+        return conversation;
+    }
+
+    private Map<String, Object> toLegacyChatLlmConversationItem(AssistantConversationRecord record) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        String title = defaultIfBlank(record.getTitle(), "New Chat");
+        item.put("conversationId", record.getConversationId());
+        item.put("id", record.getConversationId());
+        item.put("assistantId", record.getAssistantId());
+        item.put("name", title);
+        item.put("title", title);
+        item.put("createdAt", formatMillis(record.getCreatedAt()));
+        item.put("updatedAt", formatMillis(record.getUpdatedAt()));
+        return item;
+    }
+
+    private Map<String, Object> toLegacyChatLlmDetailItem(AssistantConversationMessageRecord record) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        String response = defaultIfBlank(record.getResponse(), defaultIfBlank(record.getPrompt(), "Hello from Wanwu Java"));
+        item.put("detailId", record.getDetailId());
+        item.put("id", record.getDetailId());
+        item.put("conversationId", record.getConversationId());
+        item.put("role", "assistant");
+        item.put("content", response);
+        item.put("prompt", defaultIfBlank(record.getPrompt(), ""));
+        item.put("response", response);
+        item.put("createdAt", record.getCreatedAt() == null ? 0L : record.getCreatedAt());
+        item.put("updatedAt", record.getUpdatedAt() == null ? 0L : record.getUpdatedAt());
         return item;
     }
 
