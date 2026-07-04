@@ -65,6 +65,23 @@ public class OperateServiceImplTest {
         assertEquals(1.0f, listAt(lines.get(2), "items").get(0).get("value"));
     }
 
+    @Test
+    public void oauthRuntimeRecordsAreConsumedOnce() {
+        OperateServiceImpl service = new OperateServiceImpl();
+
+        service.saveOAuthCode("code-1", map("clientId", "oauth-client-1", "userId", "dev-admin", "expiresAt", 123L));
+        Map<String, Object> code = service.consumeOAuthCode("code-1");
+        assertEquals("oauth-client-1", code.get("clientId"));
+        assertEquals("dev-admin", code.get("userId"));
+        assertEquals(null, service.consumeOAuthCode("code-1"));
+
+        service.saveOAuthRefreshToken("refresh-1", map("clientId", "oauth-client-1", "userId", "dev-admin", "expiresAt", 456L));
+        Map<String, Object> refresh = service.consumeOAuthRefreshToken("refresh-1");
+        assertEquals("oauth-client-1", refresh.get("clientId"));
+        assertEquals(456L, refresh.get("expiresAt"));
+        assertEquals(null, service.consumeOAuthRefreshToken("refresh-1"));
+    }
+
     private Map<String, Object> avatar(String path) {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("path", path);

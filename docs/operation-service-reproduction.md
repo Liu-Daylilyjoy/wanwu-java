@@ -1,6 +1,6 @@
 # Operation Management Reproduction
 
-Date: 2026-07-03
+Date: 2026-07-04
 
 ## Original Go Mapping
 
@@ -16,6 +16,10 @@ Date: 2026-07-03
   - `internal\bff-service\service\oauth.go`
   - `internal\bff-service\model\request\oauth.go`
   - `internal\bff-service\model\response\oauth.go`
+- Go OpenAPI OAuth runtime state:
+  - `internal\bff-service\pkg\oauth2-util\code.go`
+  - `internal\bff-service\pkg\oauth2-util\refresh_token.go`
+  - The Go implementation stores authorization codes and refresh tokens in Redis and consumes them on exchange/rotation.
 - Go IAM proto boundary: `proto\iam-service\iam-service.proto` OAuth RPCs.
 - Go statistic client handler/service/response:
   - `internal\bff-service\server\http\handler\v1\statistic_client.go`
@@ -37,6 +41,7 @@ Date: 2026-07-03
 - `wanwu-service-bff` exposes `GET /user/api/v1/statistic/client` with the frontend-required `overview` and `trend` response shape. The Java development slice now prefers `OperateService.getClientStatistic` for cumulative/new/active client data and merges the BFF-local browse counter as a frontend compatibility field.
 - `wanwu-service-operate` is now a real Docker service in the `full` profile and provides the OperateService custom system configuration RPCs used by the platform setting page.
 - `wanwu-service-operate` also implements `addClientRecord` and `getClientStatistic` with `operate_service.operate_records` snapshot persistence. OpenAPI OAuth login/authorize/token/refresh/userinfo visits synchronously record the managed OAuth client into OperateService, with a BFF-local fallback when the provider is unavailable.
+- `wanwu-service-operate` persists OpenAPI OAuth authorization codes and refresh tokens into `operate_service.operate_records`. The Java BFF consumes those records once through OperateService, keeps the Go-style short authorization-code window and 7-day refresh-token window, and falls back to local memory only if the provider is unavailable.
 - `wanwu-service-bff` exposes a development OAuth authorization-code runtime under `/service/api/openapi/v1/oauth/*`:
   - `/oauth/login` redirects to the zero-change frontend OAuth confirmation route.
   - `/oauth/code/authorize` validates the managed OAuth app, development user token, redirect URI, and emits a one-time code through a 302 callback.
@@ -71,7 +76,7 @@ Frontend-entry smoke target:
 
 - `http://localhost:3000/user/api/v1/base/login` returns operation permissions for `admin`.
 - OAuth app create/list/update/status/delete works through `/oauth/app*`.
-- OAuth authorize/code/token/refresh/userinfo works through `/service/api/openapi/v1/oauth/*` using the managed app credentials.
+- OAuth authorize/code/token/refresh/userinfo works through `/service/api/openapi/v1/oauth/*` using the managed app credentials, with code and refresh-token state surviving BFF restarts when OperateService/MySQL is available.
 - `/statistic/client` returns `overview.cumulativeClient`, `overview.additionClient`, `overview.activeClient`, `overview.browse`, and `trend.client`/`trend.browse`; the client values are non-zero when OAuth clients have visited the development OAuth runtime, and browse remains non-zero when local OAuth visits exist in the requested date range.
 
 ## Current Boundary
@@ -80,7 +85,7 @@ This slice is a frontend-compatible Operation Management loop. It prevents the z
 
 It does not yet implement:
 
-- Redis-backed code/refresh-token storage.
+- Exact Go Redis implementation parity for code/refresh-token storage; Java development state is persisted in `operate_service.operate_records` instead.
 - PEM-backed OAuth key configuration instead of the generated development RSA key.
 - Exact Go `client_records` / `client_daily_records` normalized table parity and Redis-backed daily aggregation jobs.
 - Redis-backed global browse statistics beyond the BFF-local OAuth visit counter.

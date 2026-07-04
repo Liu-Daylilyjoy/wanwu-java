@@ -79,6 +79,9 @@ public class WanwuOpenApiController {
     private static final String CHATFLOW_APP_TYPE = "chatflow";
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
+    private static final long OAUTH_CODE_SECONDS = 600L;
+    private static final long OAUTH_ACCESS_TOKEN_SECONDS = 86400L;
+    private static final long OAUTH_REFRESH_TOKEN_SECONDS = 7L * 24L * 60L * 60L;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final OAuthJwtSupport OAUTH_JWT = new OAuthJwtSupport("wanwu-java", "wanwu-java-oauth-secret");
 
@@ -747,7 +750,8 @@ public class WanwuOpenApiController {
             Map<String, Object> app = validateOauthApp(clientId, null, redirectUri);
             recordOauthVisit(text(app, "clientId"));
             String code = "wanwu-oauth-code-" + compactId();
-            oauthCodes.put(code, new OAuthCode(text(app, "clientId"), userId, stringList(scope), Instant.now().plusSeconds(600).toEpochMilli()));
+            saveOAuthCode(code, new OAuthCode(
+                    text(app, "clientId"), userId, stringList(scope), Instant.now().plusSeconds(OAUTH_CODE_SECONDS).toEpochMilli()));
             String callback = appendQuery(text(app, "redirectUri"), "code", code, "state", defaultIfBlank(state, ""));
             return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(callback)).build();
         } catch (IllegalArgumentException ex) {
@@ -770,7 +774,7 @@ public class WanwuOpenApiController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("client_secret is required"));
             }
             Map<String, Object> app = validateOauthApp(clientId, clientSecret, redirectUri);
-            OAuthCode payload = oauthCodes.remove(defaultIfBlank(code, ""));
+            OAuthCode payload = consumeOAuthCode(defaultIfBlank(code, ""));
             if (payload == null || !payload.clientId.equals(text(app, "clientId")) || payload.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid authorization code"));
             }
@@ -792,7 +796,7 @@ public class WanwuOpenApiController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("client_secret is required"));
             }
             Map<String, Object> app = validateOauthApp(text(body, "client_id"), text(body, "client_secret"), "");
-            OAuthToken oldRefresh = oauthRefreshTokens.remove(text(body, "refresh_token"));
+            OAuthToken oldRefresh = consumeOAuthRefreshToken(text(body, "refresh_token"));
             if (oldRefresh == null || !oldRefresh.clientId.equals(text(app, "clientId"))
                     || oldRefresh.expiresAt < Instant.now().toEpochMilli()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody("invalid refresh token"));
@@ -802,7 +806,7 @@ public class WanwuOpenApiController {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("access_token", data.get("access_token"));
             response.put("refresh_token", data.get("refresh_token"));
-            response.put("expires_at", String.valueOf(Instant.now().plusSeconds(3600).toEpochMilli()));
+            response.put("expires_at", String.valueOf(Instant.now().plusSeconds(OAUTH_ACCESS_TOKEN_SECONDS).toEpochMilli()));
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(ex.getMessage()));
@@ -811,13 +815,14 @@ public class WanwuOpenApiController {
 
     private Map<String, Object> oauthTokenResponse(String userId, String clientId, List<String> scopes) {
         long now = Instant.now().getEpochSecond();
-        String accessToken = OAUTH_JWT.accessToken(userId, clientId, scopes, now + 86400);
+        String accessToken = OAUTH_JWT.accessToken(userId, clientId, scopes, now + OAUTH_ACCESS_TOKEN_SECONDS);
         String refreshToken = "wanwu-oauth-refresh-" + compactId();
-        OAuthToken refresh = new OAuthToken(userId, clientId, scopes, Instant.now().plusSeconds(86400).toEpochMilli());
-        oauthRefreshTokens.put(refreshToken, refresh);
+        OAuthToken refresh = new OAuthToken(
+                userId, clientId, scopes, Instant.now().plusSeconds(OAUTH_REFRESH_TOKEN_SECONDS).toEpochMilli());
+        saveOAuthRefreshToken(refreshToken, refresh);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("access_token", accessToken);
-        data.put("expires_in", 86400);
+        data.put("expires_in", OAUTH_ACCESS_TOKEN_SECONDS);
         data.put("id_token", OAUTH_JWT.idToken(userId, oauthUserName(userId), clientId, now + 43200));
         data.put("token_type", "Bearer");
         data.put("refresh_token", refreshToken);
@@ -1337,6 +1342,54 @@ public class WanwuOpenApiController {
         return isBlank(value) ? fallback : value;
     }
 
+    private void saveOAuthCode(String code, OAuthCode payload) {
+        if (operateService != null) {
+            try {
+                operateService.saveOAuthCode(code, payload.toMap());
+                return;
+            } catch (RuntimeException ignored) {
+            }
+        }
+        oauthCodes.put(code, payload);
+    }
+
+    private OAuthCode consumeOAuthCode(String code) {
+        if (operateService != null) {
+            try {
+                Map<String, Object> payload = operateService.consumeOAuthCode(code);
+                if (payload != null) {
+                    return OAuthCode.from(payload);
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return oauthCodes.remove(code);
+    }
+
+    private void saveOAuthRefreshToken(String refreshToken, OAuthToken payload) {
+        if (operateService != null) {
+            try {
+                operateService.saveOAuthRefreshToken(refreshToken, payload.toMap());
+                return;
+            } catch (RuntimeException ignored) {
+            }
+        }
+        oauthRefreshTokens.put(refreshToken, payload);
+    }
+
+    private OAuthToken consumeOAuthRefreshToken(String refreshToken) {
+        if (operateService != null) {
+            try {
+                Map<String, Object> payload = operateService.consumeOAuthRefreshToken(refreshToken);
+                if (payload != null) {
+                    return OAuthToken.from(payload);
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return oauthRefreshTokens.remove(refreshToken);
+    }
+
     private ResponseEntity<Map<String, Object>> oauthError(String message) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(message));
     }
@@ -1426,6 +1479,43 @@ public class WanwuOpenApiController {
         }
     }
 
+    private static String payloadText(Map<String, Object> payload, String key) {
+        if (payload == null || key == null) {
+            return "";
+        }
+        Object value = payload.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static long payloadLong(Map<String, Object> payload, String key) {
+        Object value = payload == null ? null : payload.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value != null) {
+            try {
+                return Long.parseLong(String.valueOf(value));
+            } catch (NumberFormatException ignored) {
+                return 0L;
+            }
+        }
+        return 0L;
+    }
+
+    private static List<String> payloadScopes(Object value) {
+        if (!(value instanceof List)) {
+            return Collections.emptyList();
+        }
+        List<?> source = (List<?>) value;
+        List<String> scopes = new ArrayList<>();
+        for (Object item : source) {
+            if (item != null) {
+                scopes.add(String.valueOf(item));
+            }
+        }
+        return scopes;
+    }
+
     private static class OAuthCode {
         private final String clientId;
         private final String userId;
@@ -1437,6 +1527,23 @@ public class WanwuOpenApiController {
             this.userId = userId;
             this.scopes = scopes == null ? Collections.<String>emptyList() : new ArrayList<>(scopes);
             this.expiresAt = expiresAt;
+        }
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("clientId", clientId);
+            payload.put("userId", userId);
+            payload.put("scopes", scopes);
+            payload.put("expiresAt", expiresAt);
+            return payload;
+        }
+
+        private static OAuthCode from(Map<String, Object> payload) {
+            return new OAuthCode(
+                    payloadText(payload, "clientId"),
+                    payloadText(payload, "userId"),
+                    payloadScopes(payload == null ? null : payload.get("scopes")),
+                    payloadLong(payload, "expiresAt"));
         }
     }
 
@@ -1451,6 +1558,23 @@ public class WanwuOpenApiController {
             this.clientId = clientId;
             this.scopes = scopes == null ? Collections.<String>emptyList() : new ArrayList<>(scopes);
             this.expiresAt = expiresAt;
+        }
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("userId", userId);
+            payload.put("clientId", clientId);
+            payload.put("scopes", scopes);
+            payload.put("expiresAt", expiresAt);
+            return payload;
+        }
+
+        private static OAuthToken from(Map<String, Object> payload) {
+            return new OAuthToken(
+                    payloadText(payload, "userId"),
+                    payloadText(payload, "clientId"),
+                    payloadScopes(payload == null ? null : payload.get("scopes")),
+                    payloadLong(payload, "expiresAt"));
         }
     }
 

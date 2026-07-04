@@ -47,6 +47,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -437,6 +438,24 @@ public class WanwuOpenApiControllerTest {
     public void oauthAuthorizationCodeFlowUsesManagedOauthApp() throws Exception {
         when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(oauthPage());
+        final Map<String, Map<String, Object>> oauthCodes = new LinkedHashMap<>();
+        final Map<String, Map<String, Object>> refreshTokens = new LinkedHashMap<>();
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            Map<String, Object> payload = invocation.getArgument(1);
+            oauthCodes.put(key, new LinkedHashMap<>(payload));
+            return null;
+        }).when(operateService).saveOAuthCode(anyString(), any());
+        when(operateService.consumeOAuthCode(anyString())).thenAnswer(invocation ->
+                oauthCodes.remove(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            Map<String, Object> payload = invocation.getArgument(1);
+            refreshTokens.put(key, new LinkedHashMap<>(payload));
+            return null;
+        }).when(operateService).saveOAuthRefreshToken(anyString(), any());
+        when(operateService.consumeOAuthRefreshToken(anyString())).thenAnswer(invocation ->
+                refreshTokens.remove(invocation.getArgument(0)));
 
         MvcResult authorized = mockMvc.perform(get("/service/api/openapi/v1/oauth/code/authorize")
                         .param("client_id", "oauth-client-1")
@@ -497,6 +516,10 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(jsonPath("$.message").value("invalid authorization code"));
 
         verify(operateService, times(4)).addClientRecord("oauth-client-1");
+        verify(operateService).saveOAuthCode(eq(code), any());
+        verify(operateService, times(2)).consumeOAuthCode(eq(code));
+        verify(operateService, times(2)).saveOAuthRefreshToken(anyString(), any());
+        verify(operateService).consumeOAuthRefreshToken(eq(refreshToken));
     }
 
     private Map<String, Object> appRow() {

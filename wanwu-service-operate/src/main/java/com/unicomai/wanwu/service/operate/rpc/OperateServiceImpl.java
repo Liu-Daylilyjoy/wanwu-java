@@ -36,11 +36,15 @@ public class OperateServiceImpl implements OperateService {
     private static final String TYPE_CUSTOM_LOGIN = "system_custom_login";
     private static final String TYPE_CUSTOM_HOME = "system_custom_home";
     private static final String TYPE_CLIENT_RECORD = "client_record";
+    private static final String TYPE_OAUTH_CODE = "oauth_code";
+    private static final String TYPE_OAUTH_REFRESH_TOKEN = "oauth_refresh_token";
 
     private final Map<String, Map<String, Object>> customTabs = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> customLogins = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> customHomes = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> clientRecords = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> oauthCodes = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> oauthRefreshTokens = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private OperateRecordMapper operateRecordMapper;
@@ -62,6 +66,8 @@ public class OperateServiceImpl implements OperateService {
         loadRecords(TYPE_CUSTOM_LOGIN, customLogins);
         loadRecords(TYPE_CUSTOM_HOME, customHomes);
         loadRecords(TYPE_CLIENT_RECORD, clientRecords);
+        loadRecords(TYPE_OAUTH_CODE, oauthCodes);
+        loadRecords(TYPE_OAUTH_REFRESH_TOKEN, oauthRefreshTokens);
     }
 
     @Override
@@ -181,6 +187,26 @@ public class OperateServiceImpl implements OperateService {
         return result;
     }
 
+    @Override
+    public synchronized void saveOAuthCode(String code, Map<String, Object> payload) {
+        saveRuntimeRecord(TYPE_OAUTH_CODE, oauthCodes, code, payload);
+    }
+
+    @Override
+    public synchronized Map<String, Object> consumeOAuthCode(String code) {
+        return consumeRuntimeRecord(TYPE_OAUTH_CODE, oauthCodes, code);
+    }
+
+    @Override
+    public synchronized void saveOAuthRefreshToken(String refreshToken, Map<String, Object> payload) {
+        saveRuntimeRecord(TYPE_OAUTH_REFRESH_TOKEN, oauthRefreshTokens, refreshToken, payload);
+    }
+
+    @Override
+    public synchronized Map<String, Object> consumeOAuthRefreshToken(String refreshToken) {
+        return consumeRuntimeRecord(TYPE_OAUTH_REFRESH_TOKEN, oauthRefreshTokens, refreshToken);
+    }
+
     public static ServiceDescriptor descriptor() {
         return ServiceDescriptor.of(ServiceNames.OPERATE, "Operate Service", "operate");
     }
@@ -217,6 +243,42 @@ public class OperateServiceImpl implements OperateService {
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to save Operate record " + recordType + "/" + recordId, ex);
         }
+    }
+
+    private void deleteRecord(String recordType, String recordId) {
+        if (operateRecordMapper == null || !Strings.hasText(recordId)) {
+            return;
+        }
+        try {
+            operateRecordMapper.deleteRecord(recordType, recordId);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to delete Operate record " + recordType + "/" + recordId, ex);
+        }
+    }
+
+    private void saveRuntimeRecord(String recordType,
+                                   Map<String, Map<String, Object>> target,
+                                   String recordId,
+                                   Map<String, Object> payload) {
+        if (!Strings.hasText(recordId)) {
+            return;
+        }
+        String id = recordId.trim();
+        Map<String, Object> copy = copy(payload);
+        target.put(id, copy);
+        saveRecord(recordType, id, copy);
+    }
+
+    private Map<String, Object> consumeRuntimeRecord(String recordType,
+                                                     Map<String, Map<String, Object>> target,
+                                                     String recordId) {
+        if (!Strings.hasText(recordId)) {
+            return null;
+        }
+        String id = recordId.trim();
+        Map<String, Object> payload = target.remove(id);
+        deleteRecord(recordType, id);
+        return payload == null ? null : copy(payload);
     }
 
     private String normalizeMode(String mode, Map<String, Object> request) {

@@ -1,6 +1,6 @@
 # OpenAPI Reproduction Notes
 
-Date: 2026-07-01
+Date: 2026-07-04
 
 ## Go Source Baseline
 
@@ -29,11 +29,11 @@ Implemented in `WanwuOpenApiController` under `/service/api/openapi/v1`:
 - Model list via `ModelService`.
 - Knowledge management/doc/export/hit routes proxy to `KnowledgeService`.
 - MCP SSE/message/streamable compatibility shells.
-- OAuth login, authorize, token, refresh, discovery, and userinfo development flow backed by managed IAM OAuth apps. The flow validates `clientId`, `clientSecret`, `redirectUri`, one-time authorization codes, refresh tokens, and Bearer access tokens.
-- OAuth login, authorize, token, refresh, and userinfo visits are recorded into the BFF-local Operation client statistic counter so the zero-change Operation statistics page can show active-client/browse data during development.
+- OAuth login, authorize, token, refresh, discovery, and userinfo development flow backed by managed IAM OAuth apps. The flow validates `clientId`, `clientSecret`, `redirectUri`, one-time authorization codes, refresh tokens, and Bearer access tokens; code and refresh-token state persists through `OperateService` into `operate_service.operate_records` with a BFF-local fallback.
+- OAuth login, authorize, token, refresh, and userinfo visits are recorded into OperateService client statistics, with BFF-local browse compatibility, so the zero-change Operation statistics page can show active-client/browse data during development.
 - API-key-style OpenAPI routes are recorded by `OpenApiUsageRecordFilter`, persisted through `AppService` into MySQL, and surfaced in the App Observability API Key statistics page with a BFF-local fallback.
 
-This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Agent config/publish now reaches the Java app-service draft/version loop, Chatflow OpenAPI now persists development conversation/message state through AppService/MySQL with a BFF-local fallback, Knowledge OpenAPI now reaches the same Docker MySQL-backed Java knowledge compatibility service used by the frontend, OAuth authorization-code runtime is stateful for development use with HS256 access tokens, RS256 ID tokens, JWKS, and Operation client-statistic visit recording, and API Key statistics now reflect persisted OpenAPI calls. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, Redis-backed OAuth code/refresh-token storage, PEM-backed OAuth key configuration, Redis daily statistic synchronization, and exact API-key authorization behavior.
+This slice prevents public OpenAPI routes from returning 404 and gives API Key pages a runnable local target. Agent config/publish now reaches the Java app-service draft/version loop, Chatflow OpenAPI now persists development conversation/message state through AppService/MySQL with a BFF-local fallback, Knowledge OpenAPI now reaches the same Docker MySQL-backed Java knowledge compatibility service used by the frontend, OAuth authorization-code runtime is stateful for development use with HS256 access tokens, RS256 ID tokens, JWKS, OperateService/MySQL-persisted code and refresh-token records, and Operation client-statistic visit recording, and API Key statistics now reflect persisted OpenAPI calls. Deep parity remains for true model inference, workflow engine execution, knowledge indexing, MCP protocol runtime, exact Go Redis implementation parity for OAuth runtime state, PEM-backed OAuth key configuration, Redis daily statistic synchronization, and exact API-key authorization behavior.
 
 ## Verification
 

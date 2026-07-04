@@ -19,4 +19,12 @@ public interface OperateService {
     void addClientRecord(String clientId);
 
     Map<String, Object> getClientStatistic(String startDate, String endDate);
+
+    void saveOAuthCode(String code, Map<String, Object> payload);
+
+    Map<String, Object> consumeOAuthCode(String code);
+
+    void saveOAuthRefreshToken(String refreshToken, Map<String, Object> payload);
+
+    Map<String, Object> consumeOAuthRefreshToken(String refreshToken);
 }
