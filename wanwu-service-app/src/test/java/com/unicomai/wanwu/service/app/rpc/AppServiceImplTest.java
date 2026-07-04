@@ -1,6 +1,9 @@
 package com.unicomai.wanwu.service.app.rpc;
 
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
@@ -93,6 +96,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
+import com.unicomai.wanwu.service.app.domain.AssistantActionRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
@@ -1489,6 +1493,71 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void legacyAssistantActionsUsePersistentRepository() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("assistantId", "assistant-legacy-001");
+        payload.put("name", "Weather Action");
+        payload.put("schema", Collections.singletonMap("type", "object"));
+        payload.put("x-legacy", "keep");
+        AssistantActionUpsertCommand create = new AssistantActionUpsertCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setAssistantId("assistant-legacy-001");
+        create.setPayload(payload);
+
+        Map<String, Object> created = service.createLegacyAssistantAction(create);
+
+        String actionId = String.valueOf(created.get("actionId"));
+        assertTrue(actionId.startsWith("action-"));
+        assertEquals(actionId, created.get("id"));
+        assertEquals("Weather Action", created.get("name"));
+        assertEquals("keep", created.get("x-legacy"));
+        assertEquals(1, repository.assistantActions.size());
+
+        AssistantActionInfoQuery infoQuery = new AssistantActionInfoQuery();
+        infoQuery.setUserId("dev-admin");
+        infoQuery.setOrgId("default-org");
+        infoQuery.setActionId(actionId);
+        Map<String, Object> info = service.getLegacyAssistantAction(infoQuery);
+        assertEquals(actionId, info.get("actionId"));
+        assertEquals("Weather Action", info.get("name"));
+
+        Map<String, Object> updatePayload = new LinkedHashMap<String, Object>();
+        updatePayload.put("assistantId", "assistant-legacy-001");
+        updatePayload.put("actionId", actionId);
+        updatePayload.put("actionName", "Weather Action V2");
+        updatePayload.put("enabled", Boolean.FALSE);
+        AssistantActionUpsertCommand update = new AssistantActionUpsertCommand();
+        update.setUserId("dev-admin");
+        update.setOrgId("default-org");
+        update.setAssistantId("assistant-legacy-001");
+        update.setActionId(actionId);
+        update.setPayload(updatePayload);
+
+        Map<String, Object> updated = service.updateLegacyAssistantAction(update);
+
+        assertEquals(actionId, updated.get("actionId"));
+        assertEquals("Weather Action V2", updated.get("name"));
+        assertEquals(Boolean.FALSE, updated.get("enabled"));
+        assertEquals(1, repository.assistantActions.size());
+        assertEquals("Weather Action V2", repository.assistantActions.get(0).getName());
+
+        AssistantActionDeleteCommand delete = new AssistantActionDeleteCommand();
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        delete.setActionId(actionId);
+        service.deleteLegacyAssistantAction(delete);
+
+        assertTrue(repository.assistantActions.isEmpty());
+        Map<String, Object> fallback = service.getLegacyAssistantAction(infoQuery);
+        assertEquals(actionId, fallback.get("actionId"));
+        assertEquals("Local Action", fallback.get("name"));
+    }
+
+    @Test
     public void draftStreamCreatesConversationAndPersistsMessageDetail() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));
@@ -2132,6 +2201,7 @@ public class AppServiceImplTest {
         private final List<AssistantConversationRecord> conversations = new ArrayList<>();
         private final List<AssistantConversationMessageRecord> messages = new ArrayList<>();
         private final List<AssistantKnowledgeFileRecord> assistantKnowledgeFiles = new ArrayList<>();
+        private final List<AssistantActionRecord> assistantActions = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -2259,6 +2329,7 @@ public class AppServiceImplTest {
                 }
             }
             messages.removeAll(removedMessages);
+            deleteAssistantActions(userId, orgId, assistantId);
             deleteAssistantKnowledgeFiles(userId, orgId, assistantId);
             return true;
         }
@@ -3580,6 +3651,52 @@ public class AppServiceImplTest {
                 }
             }
             assistantKnowledgeFiles.removeAll(removed);
+            return !removed.isEmpty();
+        }
+
+        @Override
+        public AssistantActionRecord saveAssistantAction(AssistantActionRecord record) {
+            AssistantActionRecord existing = findAssistantAction(record.getUserId(), record.getOrgId(), record.getActionId());
+            if (existing != null) {
+                assistantActions.remove(existing);
+                record.setId(existing.getId());
+                record.setCreatedAt(existing.getCreatedAt());
+            } else {
+                record.setId(ids.incrementAndGet());
+            }
+            assistantActions.add(record);
+            return record;
+        }
+
+        @Override
+        public AssistantActionRecord findAssistantAction(String userId, String orgId, String actionId) {
+            for (AssistantActionRecord action : assistantActions) {
+                if (userId.equals(action.getUserId())
+                        && orgId.equals(action.getOrgId())
+                        && actionId.equals(action.getActionId())) {
+                    return action;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public boolean deleteAssistantAction(String userId, String orgId, String actionId) {
+            AssistantActionRecord found = findAssistantAction(userId, orgId, actionId);
+            return found != null && assistantActions.remove(found);
+        }
+
+        @Override
+        public boolean deleteAssistantActions(String userId, String orgId, String assistantId) {
+            List<AssistantActionRecord> removed = new ArrayList<>();
+            for (AssistantActionRecord action : assistantActions) {
+                if (userId.equals(action.getUserId())
+                        && orgId.equals(action.getOrgId())
+                        && assistantId.equals(action.getAssistantId())) {
+                    removed.add(action);
+                }
+            }
+            assistantActions.removeAll(removed);
             return !removed.isEmpty();
         }
 

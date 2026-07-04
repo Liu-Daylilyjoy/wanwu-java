@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.app.persistence;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
+import com.unicomai.wanwu.service.app.domain.AssistantActionRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantKnowledgeFileRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.ApiKeyRecord;
@@ -31,6 +32,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AppStatisticEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AppUrlEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantConversationMessageEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.AssistantActionEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantKnowledgeFileEntity;
@@ -52,6 +54,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AppStatisticMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AppUrlMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantConversationMessageMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.AssistantActionMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantKnowledgeFileMapper;
@@ -90,6 +93,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AppHistoryMapper appHistoryMapper;
     private final AssistantConversationMapper assistantConversationMapper;
     private final AssistantConversationMessageMapper assistantConversationMessageMapper;
+    private final AssistantActionMapper assistantActionMapper;
     private final AssistantKnowledgeFileMapper assistantKnowledgeFileMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
@@ -112,6 +116,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AppHistoryMapper appHistoryMapper,
                                         AssistantConversationMapper assistantConversationMapper,
                                         AssistantConversationMessageMapper assistantConversationMessageMapper,
+                                        AssistantActionMapper assistantActionMapper,
                                         AssistantKnowledgeFileMapper assistantKnowledgeFileMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
@@ -133,6 +138,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.appHistoryMapper = appHistoryMapper;
         this.assistantConversationMapper = assistantConversationMapper;
         this.assistantConversationMessageMapper = assistantConversationMessageMapper;
+        this.assistantActionMapper = assistantActionMapper;
         this.assistantKnowledgeFileMapper = assistantKnowledgeFileMapper;
     }
 
@@ -196,6 +202,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         appUrlMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMessageMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantConversationMapper.deleteByAssistant(userId, orgId, assistantId);
+        assistantActionMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantKnowledgeFileMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantSnapshotMapper.deleteByAssistant(userId, orgId, assistantId);
         assistantDraftConfigMapper.deleteByAssistant(userId, orgId, assistantId);
@@ -1048,6 +1055,37 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Override
     public boolean deleteAssistantKnowledgeFiles(String userId, String orgId, String assistantId) {
         return assistantKnowledgeFileMapper.deleteByAssistant(userId, orgId, assistantId) > 0;
+    }
+
+    @Override
+    public AssistantActionRecord saveAssistantAction(AssistantActionRecord record) {
+        AssistantActionEntity entity = toEntity(record);
+        AssistantActionEntity existing = assistantActionMapper.selectByAction(
+                record.getUserId(), record.getOrgId(), record.getActionId());
+        if (existing == null) {
+            assistantActionMapper.insert(entity);
+        } else {
+            entity.setId(existing.getId());
+            entity.setCreatedAt(existing.getCreatedAt());
+            assistantActionMapper.updateByAction(entity);
+        }
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public AssistantActionRecord findAssistantAction(String userId, String orgId, String actionId) {
+        return toRecord(assistantActionMapper.selectByAction(userId, orgId, actionId));
+    }
+
+    @Override
+    public boolean deleteAssistantAction(String userId, String orgId, String actionId) {
+        return assistantActionMapper.deleteByAction(userId, orgId, actionId) > 0;
+    }
+
+    @Override
+    public boolean deleteAssistantActions(String userId, String orgId, String assistantId) {
+        return assistantActionMapper.deleteByAssistant(userId, orgId, assistantId) > 0;
     }
 
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
@@ -1905,6 +1943,37 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setContentType(entity.getContentType());
         record.setStatus(entity.getStatus());
         record.setUrl(entity.getUrl());
+        return record;
+    }
+
+    private AssistantActionEntity toEntity(AssistantActionRecord record) {
+        AssistantActionEntity entity = new AssistantActionEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setAssistantId(record.getAssistantId());
+        entity.setActionId(record.getActionId());
+        entity.setName(record.getName());
+        entity.setPayload(record.getPayloadJson());
+        return entity;
+    }
+
+    private AssistantActionRecord toRecord(AssistantActionEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AssistantActionRecord record = new AssistantActionRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setAssistantId(entity.getAssistantId());
+        record.setActionId(entity.getActionId());
+        record.setName(entity.getName());
+        record.setPayloadJson(entity.getPayload());
         return record;
     }
 

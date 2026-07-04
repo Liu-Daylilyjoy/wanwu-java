@@ -1,6 +1,9 @@
 package com.unicomai.wanwu.service.bff.web;
 
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AppPublishCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationDeleteCommand;
@@ -40,8 +43,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 public class WanwuModelUseApiController {
@@ -51,9 +52,6 @@ public class WanwuModelUseApiController {
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
     private static final String AGENT_APP_TYPE = "agent";
-    private static final AtomicLong ACTION_SEQUENCE = new AtomicLong(0);
-    private static final Map<String, Map<String, Object>> ACTIONS =
-            new ConcurrentHashMap<String, Map<String, Object>>();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
@@ -268,39 +266,45 @@ public class WanwuModelUseApiController {
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/action/create")
-    public FrontendResponse<Map<String, Object>> createAction(@RequestBody(required = false) Map<String, Object> request) {
-        String id = "action-" + ACTION_SEQUENCE.incrementAndGet();
-        Map<String, Object> action = copy(request);
-        action.put("actionId", id);
-        ACTIONS.put(id, action);
-        return FrontendResponse.ok(action);
+    public FrontendResponse<Map<String, Object>> createAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(appService.createLegacyAssistantAction(
+                toActionUpsertCommand(userContext(authorization), request)));
     }
 
     @PutMapping(MODEL_PREFIX + "/assistant/action/update")
-    public FrontendResponse<Map<String, Object>> updateAction(@RequestBody(required = false) Map<String, Object> request) {
-        String id = defaultIfBlank(firstText(request, "actionId", "id"), "action-" + ACTION_SEQUENCE.incrementAndGet());
-        Map<String, Object> action = copy(request);
-        action.put("actionId", id);
-        ACTIONS.put(id, action);
-        return FrontendResponse.ok(action);
+    public FrontendResponse<Map<String, Object>> updateAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(appService.updateLegacyAssistantAction(
+                toActionUpsertCommand(userContext(authorization), request)));
     }
 
     @DeleteMapping(MODEL_PREFIX + "/assistant/action/delete")
-    public FrontendResponse<Map<String, Object>> deleteAction(@RequestBody(required = false) Map<String, Object> request) {
-        ACTIONS.remove(firstText(request, "actionId", "id"));
+    public FrontendResponse<Map<String, Object>> deleteAction(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization);
+        AssistantActionDeleteCommand command = new AssistantActionDeleteCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setAssistantId(firstText(request, "assistantId", "appId"));
+        command.setActionId(firstText(request, "actionId", "id"));
+        appService.deleteLegacyAssistantAction(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
 
     @GetMapping(MODEL_PREFIX + "/assistant/action/info")
-    public FrontendResponse<Map<String, Object>> actionInfo(@RequestParam(value = "actionId", required = false) String actionId) {
-        Map<String, Object> action = ACTIONS.get(defaultIfBlank(actionId, ""));
-        if (action == null) {
-            action = new LinkedHashMap<String, Object>();
-            action.put("actionId", defaultIfBlank(actionId, "action-local"));
-            action.put("name", "Local Action");
-            action.put("schema", Collections.emptyMap());
-        }
-        return FrontendResponse.ok(action);
+    public FrontendResponse<Map<String, Object>> actionInfo(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "actionId", required = false) String actionId) {
+        UserContext ctx = userContext(authorization);
+        AssistantActionInfoQuery query = new AssistantActionInfoQuery();
+        query.setUserId(ctx.userId);
+        query.setOrgId(ctx.orgId);
+        query.setActionId(defaultIfBlank(actionId, ""));
+        return FrontendResponse.ok(appService.getLegacyAssistantAction(query));
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/auto/create")
@@ -471,6 +475,17 @@ public class WanwuModelUseApiController {
         command.setCategory(intValue(request, "category", 0));
         command.setAvatarKey(firstText(nested(request, "avatar"), "key"));
         command.setAvatarPath(firstText(nested(request, "avatar"), "path"));
+        return command;
+    }
+
+    private AssistantActionUpsertCommand toActionUpsertCommand(UserContext ctx, Map<String, Object> request) {
+        AssistantActionUpsertCommand command = new AssistantActionUpsertCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setAssistantId(defaultIfBlank(firstText(request, "assistantId", "appId"), "default-assistant"));
+        command.setActionId(firstText(request, "actionId", "id"));
+        command.setName(defaultIfBlank(firstText(request, "name", "actionName"), "Local Action"));
+        command.setPayload(copy(request));
         return command;
     }
 

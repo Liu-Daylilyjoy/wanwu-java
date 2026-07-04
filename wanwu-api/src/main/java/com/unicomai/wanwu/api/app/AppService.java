@@ -1,6 +1,9 @@
 package com.unicomai.wanwu.api.app;
 
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
@@ -240,6 +243,14 @@ public interface AppService {
     AssistantKnowledgeFileListResult listAssistantKnowledgeFiles(AssistantKnowledgeFileListQuery query);
 
     void deleteAssistantKnowledgeFile(AssistantKnowledgeFileDeleteCommand command);
+
+    Map<String, Object> createLegacyAssistantAction(AssistantActionUpsertCommand command);
+
+    Map<String, Object> updateLegacyAssistantAction(AssistantActionUpsertCommand command);
+
+    void deleteLegacyAssistantAction(AssistantActionDeleteCommand command);
+
+    Map<String, Object> getLegacyAssistantAction(AssistantActionInfoQuery query);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

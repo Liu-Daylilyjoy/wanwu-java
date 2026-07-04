@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
+import com.unicomai.wanwu.api.app.dto.AssistantActionUpsertCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCopyCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
@@ -121,6 +124,7 @@ import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
+import com.unicomai.wanwu.service.app.domain.AssistantActionRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationMessageRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantConversationRecord;
 import com.unicomai.wanwu.service.app.domain.AssistantDraftConfigRecord;
@@ -186,6 +190,7 @@ public class AppServiceImpl implements AppService {
     private static final String CONVERSATION_TYPE_MODEL_USE_CHATLLM = "model_use_chatllm";
     private static final String MODEL_USE_CHATLLM_ASSISTANT_ID = "model-use-chatllm";
     private static final String MODEL_USE_KNOWLEDGE_FILE_PREFIX = "model-use-knowledge-file-";
+    private static final String MODEL_USE_ACTION_PREFIX = "action-";
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
@@ -2193,6 +2198,40 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public Map<String, Object> createLegacyAssistantAction(AssistantActionUpsertCommand command) {
+        return saveLegacyAssistantAction(command);
+    }
+
+    @Override
+    public Map<String, Object> updateLegacyAssistantAction(AssistantActionUpsertCommand command) {
+        return saveLegacyAssistantAction(command);
+    }
+
+    @Override
+    public void deleteLegacyAssistantAction(AssistantActionDeleteCommand command) {
+        if (command == null || isBlank(command.getActionId())) {
+            return;
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        applicationRepository.deleteAssistantAction(userId, orgId, command.getActionId());
+    }
+
+    @Override
+    public Map<String, Object> getLegacyAssistantAction(AssistantActionInfoQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        String actionId = defaultIfBlank(query == null ? "" : query.getActionId(), "");
+        AssistantActionRecord record = isBlank(actionId)
+                ? null
+                : applicationRepository.findAssistantAction(userId, orgId, actionId);
+        if (record == null) {
+            return fallbackLegacyAssistantAction(actionId);
+        }
+        return toLegacyAssistantAction(record);
+    }
+
+    @Override
     public AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("conversation create command is required");
@@ -2865,6 +2904,73 @@ public class AppServiceImpl implements AppService {
         info.setUrl(defaultIfBlank(record.getUrl(), "/use/model/api/v1/assistant/knowledge/file/" + fileId));
         info.setContentType(defaultIfBlank(record.getContentType(), ""));
         return info;
+    }
+
+    private Map<String, Object> saveLegacyAssistantAction(AssistantActionUpsertCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("legacy assistant action command is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        String assistantId = defaultIfBlank(command.getAssistantId(), "default-assistant");
+        Map<String, Object> payload = command.getPayload() == null
+                ? new LinkedHashMap<String, Object>()
+                : new LinkedHashMap<String, Object>(command.getPayload());
+        String actionId = defaultIfBlank(command.getActionId(),
+                defaultIfBlank(stringValue(payload.get("actionId")), stringValue(payload.get("id"))));
+        if (isBlank(actionId)) {
+            actionId = MODEL_USE_ACTION_PREFIX + UUID.randomUUID().toString().replace("-", "");
+        }
+        String name = defaultIfBlank(command.getName(),
+                defaultIfBlank(stringValue(payload.get("name")),
+                        defaultIfBlank(stringValue(payload.get("actionName")), "Local Action")));
+        payload.put("actionId", actionId);
+        if (!payload.containsKey("id")) {
+            payload.put("id", actionId);
+        }
+        if (!payload.containsKey("name")) {
+            payload.put("name", name);
+        }
+
+        long now = clock.millis();
+        AssistantActionRecord existing = applicationRepository.findAssistantAction(userId, orgId, actionId);
+        AssistantActionRecord record = new AssistantActionRecord();
+        if (existing == null) {
+            record.setCreatedAt(now);
+        } else {
+            record.setId(existing.getId());
+            record.setCreatedAt(existing.getCreatedAt());
+        }
+        record.setUpdatedAt(now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setAssistantId(assistantId);
+        record.setActionId(actionId);
+        record.setName(name);
+        record.setPayloadJson(toJsonOrNull(payload));
+        applicationRepository.saveAssistantAction(record);
+        return toLegacyAssistantAction(record);
+    }
+
+    private Map<String, Object> toLegacyAssistantAction(AssistantActionRecord record) {
+        Map<String, Object> payload = mapOrDefault(record.getPayloadJson(), new LinkedHashMap<String, Object>());
+        String actionId = defaultIfBlank(record.getActionId(), "");
+        payload.put("actionId", actionId);
+        if (!payload.containsKey("id")) {
+            payload.put("id", actionId);
+        }
+        if (!payload.containsKey("name")) {
+            payload.put("name", defaultIfBlank(record.getName(), "Local Action"));
+        }
+        return payload;
+    }
+
+    private Map<String, Object> fallbackLegacyAssistantAction(String actionId) {
+        Map<String, Object> action = new LinkedHashMap<String, Object>();
+        action.put("actionId", defaultIfBlank(actionId, "action-local"));
+        action.put("name", "Local Action");
+        action.put("schema", Collections.emptyMap());
+        return action;
     }
 
     private AssistantConversationMessageRecord newLegacyChatLlmMessage(AssistantConversationRecord conversation,

@@ -320,4 +320,12 @@ public interface ApplicationRepository {
     boolean deleteAssistantKnowledgeFile(String userId, String orgId, String fileId);
 
     boolean deleteAssistantKnowledgeFiles(String userId, String orgId, String assistantId);
+
+    AssistantActionRecord saveAssistantAction(AssistantActionRecord record);
+
+    AssistantActionRecord findAssistantAction(String userId, String orgId, String actionId);
+
+    boolean deleteAssistantAction(String userId, String orgId, String actionId);
+
+    boolean deleteAssistantActions(String userId, String orgId, String assistantId);
 }

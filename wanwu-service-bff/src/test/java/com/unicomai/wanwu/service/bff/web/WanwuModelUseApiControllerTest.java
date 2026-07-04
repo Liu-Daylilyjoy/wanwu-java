@@ -216,6 +216,53 @@ public class WanwuModelUseApiControllerTest {
     }
 
     @Test
+    public void legacyAssistantActionRoutesDelegateToAppService() throws Exception {
+        Map<String, Object> created = new LinkedHashMap<String, Object>();
+        created.put("assistantId", "assistant-001");
+        created.put("actionId", "action-001");
+        created.put("id", "action-001");
+        created.put("name", "Weather Action");
+        created.put("schema", Collections.singletonMap("type", "object"));
+        Map<String, Object> updated = new LinkedHashMap<String, Object>(created);
+        updated.put("name", "Weather Action V2");
+        updated.put("enabled", Boolean.FALSE);
+        when(appService.createLegacyAssistantAction(any())).thenReturn(created);
+        when(appService.updateLegacyAssistantAction(any())).thenReturn(updated);
+        when(appService.getLegacyAssistantAction(any())).thenReturn(updated);
+
+        mockMvc.perform(post("/use/model/api/v1/assistant/action/create")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"name\":\"Weather Action\",\"schema\":{\"type\":\"object\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actionId").value("action-001"))
+                .andExpect(jsonPath("$.data.name").value("Weather Action"));
+        mockMvc.perform(put("/use/model/api/v1/assistant/action/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"actionId\":\"action-001\",\"name\":\"Weather Action V2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("Weather Action V2"))
+                .andExpect(jsonPath("$.data.enabled").value(false));
+        mockMvc.perform(get("/use/model/api/v1/assistant/action/info")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("actionId", "action-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actionId").value("action-001"));
+        mockMvc.perform(delete("/use/model/api/v1/assistant/action/delete")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"actionId\":\"action-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(appService).createLegacyAssistantAction(any());
+        verify(appService).updateLegacyAssistantAction(any());
+        verify(appService).getLegacyAssistantAction(any());
+        verify(appService).deleteLegacyAssistantAction(any());
+    }
+
+    @Test
     public void modelExperienceLegacyAliasesDelegateToModelService() throws Exception {
         ModelExperienceDialogInfo dialog = new ModelExperienceDialogInfo();
         dialog.setId("exp-001");
