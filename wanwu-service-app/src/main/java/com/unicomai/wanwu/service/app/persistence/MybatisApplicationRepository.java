@@ -17,6 +17,7 @@ import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -39,6 +40,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AssistantDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantKnowledgeFileEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.AssistantSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.GeneralAgentConfigEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.GeneralAgentConversationEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftConfigEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
@@ -62,6 +64,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.AssistantDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantKnowledgeFileMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.AssistantSnapshotMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.GeneralAgentConfigMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.GeneralAgentConversationMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftConfigMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
@@ -99,6 +102,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final AssistantActionMapper assistantActionMapper;
     private final AssistantKnowledgeFileMapper assistantKnowledgeFileMapper;
     private final GeneralAgentConfigMapper generalAgentConfigMapper;
+    private final GeneralAgentConversationMapper generalAgentConversationMapper;
 
     public MybatisApplicationRepository(AppMapper appMapper,
                                         AssistantDraftMapper assistantDraftMapper,
@@ -122,7 +126,8 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         AssistantConversationMessageMapper assistantConversationMessageMapper,
                                         AssistantActionMapper assistantActionMapper,
                                         AssistantKnowledgeFileMapper assistantKnowledgeFileMapper,
-                                        GeneralAgentConfigMapper generalAgentConfigMapper) {
+                                        GeneralAgentConfigMapper generalAgentConfigMapper,
+                                        GeneralAgentConversationMapper generalAgentConversationMapper) {
         this.appMapper = appMapper;
         this.assistantDraftMapper = assistantDraftMapper;
         this.assistantDraftConfigMapper = assistantDraftConfigMapper;
@@ -146,6 +151,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.assistantActionMapper = assistantActionMapper;
         this.assistantKnowledgeFileMapper = assistantKnowledgeFileMapper;
         this.generalAgentConfigMapper = generalAgentConfigMapper;
+        this.generalAgentConversationMapper = generalAgentConversationMapper;
     }
 
     @Override
@@ -1120,6 +1126,44 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         return toRecord(generalAgentConfigMapper.selectByScope(userId, orgId));
     }
 
+    @Override
+    public GeneralAgentConversationRecord saveGeneralAgentConversation(GeneralAgentConversationRecord record) {
+        GeneralAgentConversationEntity entity = toEntity(record);
+        GeneralAgentConversationEntity existing = generalAgentConversationMapper.selectByThread(
+                record.getUserId(), record.getOrgId(), record.getThreadId());
+        if (existing == null) {
+            generalAgentConversationMapper.insert(entity);
+        } else {
+            entity.setId(existing.getId());
+            entity.setCreatedAt(existing.getCreatedAt());
+            generalAgentConversationMapper.updateByThread(entity);
+        }
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public GeneralAgentConversationRecord findGeneralAgentConversation(String userId, String orgId, String threadId) {
+        return toRecord(generalAgentConversationMapper.selectByThread(userId, orgId, threadId));
+    }
+
+    @Override
+    public GeneralAgentConversationRecord findGeneralAgentConversationByPreview(String userId,
+                                                                               String orgId,
+                                                                               String previewId) {
+        return toRecord(generalAgentConversationMapper.selectByPreview(userId, orgId, previewId));
+    }
+
+    @Override
+    public List<GeneralAgentConversationRecord> listGeneralAgentConversations(String userId, String orgId) {
+        return toGeneralAgentConversationRecords(generalAgentConversationMapper.selectByScope(userId, orgId));
+    }
+
+    @Override
+    public boolean deleteGeneralAgentConversation(String userId, String orgId, String threadId) {
+        return generalAgentConversationMapper.deleteByThread(userId, orgId, threadId) > 0;
+    }
+
     private AssistantDraftConfigEntity newDefaultConfig(AppRecord record) {
         AssistantDraftConfigEntity entity = new AssistantDraftConfigEntity();
         entity.setCreatedAt(record.getCreatedAt());
@@ -2040,6 +2084,52 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setOrgId(entity.getOrgId());
         record.setConfigJson(entity.getConfigJson());
         return record;
+    }
+
+    private GeneralAgentConversationEntity toEntity(GeneralAgentConversationRecord record) {
+        GeneralAgentConversationEntity entity = new GeneralAgentConversationEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setThreadId(record.getThreadId());
+        entity.setTitle(record.getTitle());
+        entity.setSkillConversation(record.getSkillConversation());
+        entity.setSkillId(record.getSkillId());
+        entity.setPreviewId(record.getPreviewId());
+        entity.setModelConfigJson(record.getModelConfigJson());
+        entity.setRunsJson(record.getRunsJson());
+        return entity;
+    }
+
+    private GeneralAgentConversationRecord toRecord(GeneralAgentConversationEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        GeneralAgentConversationRecord record = new GeneralAgentConversationRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setThreadId(entity.getThreadId());
+        record.setTitle(entity.getTitle());
+        record.setSkillConversation(entity.getSkillConversation());
+        record.setSkillId(entity.getSkillId());
+        record.setPreviewId(entity.getPreviewId());
+        record.setModelConfigJson(entity.getModelConfigJson());
+        record.setRunsJson(entity.getRunsJson());
+        return record;
+    }
+
+    private List<GeneralAgentConversationRecord> toGeneralAgentConversationRecords(
+            List<GeneralAgentConversationEntity> entities) {
+        List<GeneralAgentConversationRecord> records = new java.util.ArrayList<>();
+        for (GeneralAgentConversationEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
     }
 
     private long value(Long value) {

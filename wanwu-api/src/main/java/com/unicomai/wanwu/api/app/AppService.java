@@ -73,6 +73,10 @@ import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticQuery;
@@ -260,6 +264,14 @@ public interface AppService {
     Map<String, List<Map<String, Object>>> getGeneralAgentConfig(GeneralAgentConfigQuery query);
 
     Map<String, List<Map<String, Object>>> updateGeneralAgentConfig(GeneralAgentConfigUpdateCommand command);
+
+    Map<String, Object> saveGeneralAgentConversationState(GeneralAgentConversationStateCommand command);
+
+    Map<String, Object> getGeneralAgentConversationState(GeneralAgentConversationQuery query);
+
+    List<Map<String, Object>> listGeneralAgentConversationStates(GeneralAgentConversationListQuery query);
+
+    void deleteGeneralAgentConversationState(GeneralAgentConversationDeleteCommand command);
 
     AssistantConversationCreateResult createAssistantConversation(AssistantConversationCreateCommand command);
 

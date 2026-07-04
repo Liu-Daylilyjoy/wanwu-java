@@ -6,6 +6,10 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -71,6 +76,54 @@ public class WanwuGeneralAgentApiControllerTest {
                     generalAgentConfig.set(command.getConfig());
                     return command.getConfig();
                 });
+        final AtomicReference<List<Map<String, Object>>> generalAgentConversations =
+                new AtomicReference<List<Map<String, Object>>>(new ArrayList<Map<String, Object>>());
+        when(appService.saveGeneralAgentConversationState(any(GeneralAgentConversationStateCommand.class)))
+                .thenAnswer(invocation -> {
+                    GeneralAgentConversationStateCommand command = invocation.getArgument(0);
+                    Map<String, Object> state = generalAgentConversationState(command);
+                    List<Map<String, Object>> states = new ArrayList<Map<String, Object>>();
+                    boolean replaced = false;
+                    for (Map<String, Object> item : generalAgentConversations.get()) {
+                        if (command.getThreadId().equals(item.get("threadId"))) {
+                            states.add(state);
+                            replaced = true;
+                        } else {
+                            states.add(item);
+                        }
+                    }
+                    if (!replaced) {
+                        states.add(0, state);
+                    }
+                    generalAgentConversations.set(states);
+                    return state;
+                });
+        when(appService.getGeneralAgentConversationState(any(GeneralAgentConversationQuery.class)))
+                .thenAnswer(invocation -> {
+                    GeneralAgentConversationQuery query = invocation.getArgument(0);
+                    for (Map<String, Object> state : generalAgentConversations.get()) {
+                        if (query.getThreadId() != null && query.getThreadId().equals(state.get("threadId"))) {
+                            return state;
+                        }
+                        if (query.getPreviewId() != null && query.getPreviewId().equals(state.get("previewId"))) {
+                            return state;
+                        }
+                    }
+                    return Collections.<String, Object>emptyMap();
+                });
+        when(appService.listGeneralAgentConversationStates(any(GeneralAgentConversationListQuery.class)))
+                .thenAnswer(invocation -> generalAgentConversations.get());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            GeneralAgentConversationDeleteCommand command = invocation.getArgument(0);
+            List<Map<String, Object>> states = new ArrayList<Map<String, Object>>();
+            for (Map<String, Object> item : generalAgentConversations.get()) {
+                if (!command.getThreadId().equals(item.get("threadId"))) {
+                    states.add(item);
+                }
+            }
+            generalAgentConversations.set(states);
+            return null;
+        }).when(appService).deleteGeneralAgentConversationState(any(GeneralAgentConversationDeleteCommand.class));
         when(appService.listAssistantWorkflowSelect(anyString(), anyString(), anyString()))
                 .thenReturn(listResult(Collections.singletonList(workflow())));
         when(mcpService.listToolSelect(anyString(), anyString(), anyString()))
@@ -262,6 +315,20 @@ public class WanwuGeneralAgentApiControllerTest {
             }
         }
         throw new IllegalStateException("RUN_STARTED event not found");
+    }
+
+    private Map<String, Object> generalAgentConversationState(GeneralAgentConversationStateCommand command) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("threadId", command.getThreadId());
+        state.put("title", command.getTitle());
+        state.put("createdAt", command.getCreatedAt());
+        state.put("updatedAt", command.getUpdatedAt());
+        state.put("isSkillConversation", command.isSkillConversation());
+        state.put("skillId", command.getSkillId());
+        state.put("previewId", command.getPreviewId());
+        state.put("modelConfig", command.getModelConfig());
+        state.put("runs", command.getRuns());
+        return state;
     }
 
     private Map<String, Object> assistant() {

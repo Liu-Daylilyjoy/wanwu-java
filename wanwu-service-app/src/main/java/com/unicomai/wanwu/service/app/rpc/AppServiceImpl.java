@@ -90,6 +90,10 @@ import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticItem;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticOverview;
@@ -144,6 +148,7 @@ import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -2288,6 +2293,76 @@ public class AppServiceImpl implements AppService {
         record.setConfigJson(toJsonOrNull(config));
         applicationRepository.saveGeneralAgentConfig(record);
         return generalAgentConfigOrEmpty(record.getConfigJson());
+    }
+
+    @Override
+    public Map<String, Object> saveGeneralAgentConversationState(GeneralAgentConversationStateCommand command) {
+        if (command == null || isBlank(command.getThreadId())) {
+            throw new IllegalArgumentException("general agent conversation threadId is required");
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        long now = clock.millis();
+        GeneralAgentConversationRecord existing = applicationRepository.findGeneralAgentConversation(
+                userId, orgId, command.getThreadId());
+        GeneralAgentConversationRecord record = new GeneralAgentConversationRecord();
+        if (existing == null) {
+            record.setCreatedAt(command.getCreatedAt() > 0 ? command.getCreatedAt() : now);
+        } else {
+            record.setId(existing.getId());
+            record.setCreatedAt(existing.getCreatedAt());
+        }
+        record.setUpdatedAt(command.getUpdatedAt() > 0 ? command.getUpdatedAt() : now);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setThreadId(command.getThreadId());
+        record.setTitle(defaultIfBlank(command.getTitle(), "New Conversation"));
+        record.setSkillConversation(command.isSkillConversation());
+        record.setSkillId(defaultIfBlank(command.getSkillId(), ""));
+        record.setPreviewId(defaultIfBlank(command.getPreviewId(), ""));
+        record.setModelConfigJson(toJsonOrNull(command.getModelConfig() == null
+                ? new LinkedHashMap<String, Object>()
+                : new LinkedHashMap<String, Object>(command.getModelConfig())));
+        record.setRunsJson(toJsonOrNull(objectMapList(command.getRuns())));
+        applicationRepository.saveGeneralAgentConversation(record);
+        return toGeneralAgentConversationState(record);
+    }
+
+    @Override
+    public Map<String, Object> getGeneralAgentConversationState(GeneralAgentConversationQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        String threadId = defaultIfBlank(query == null ? "" : query.getThreadId(), "");
+        String previewId = defaultIfBlank(query == null ? "" : query.getPreviewId(), "");
+        GeneralAgentConversationRecord record = isBlank(threadId)
+                ? null
+                : applicationRepository.findGeneralAgentConversation(userId, orgId, threadId);
+        if (record == null && !isBlank(previewId)) {
+            record = applicationRepository.findGeneralAgentConversationByPreview(userId, orgId, previewId);
+        }
+        return record == null ? new LinkedHashMap<String, Object>() : toGeneralAgentConversationState(record);
+    }
+
+    @Override
+    public List<Map<String, Object>> listGeneralAgentConversationStates(GeneralAgentConversationListQuery query) {
+        String userId = defaultIfBlank(query == null ? "" : query.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(query == null ? "" : query.getOrgId(), DEV_ORG_ID);
+        List<GeneralAgentConversationRecord> records = applicationRepository.listGeneralAgentConversations(userId, orgId);
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>(records.size());
+        for (GeneralAgentConversationRecord record : records) {
+            rows.add(toGeneralAgentConversationState(record));
+        }
+        return rows;
+    }
+
+    @Override
+    public void deleteGeneralAgentConversationState(GeneralAgentConversationDeleteCommand command) {
+        if (command == null || isBlank(command.getThreadId())) {
+            return;
+        }
+        String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
+        String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
+        applicationRepository.deleteGeneralAgentConversation(userId, orgId, command.getThreadId());
     }
 
     @Override
@@ -5121,6 +5196,20 @@ public class AppServiceImpl implements AppService {
             result.add(row);
         }
         return result;
+    }
+
+    private Map<String, Object> toGeneralAgentConversationState(GeneralAgentConversationRecord record) {
+        Map<String, Object> state = new LinkedHashMap<String, Object>();
+        state.put("threadId", defaultIfBlank(record.getThreadId(), ""));
+        state.put("title", defaultIfBlank(record.getTitle(), "New Conversation"));
+        state.put("createdAt", record.getCreatedAt() == null ? 0L : record.getCreatedAt());
+        state.put("updatedAt", record.getUpdatedAt() == null ? 0L : record.getUpdatedAt());
+        state.put("isSkillConversation", Boolean.TRUE.equals(record.getSkillConversation()));
+        state.put("skillId", defaultIfBlank(record.getSkillId(), ""));
+        state.put("previewId", defaultIfBlank(record.getPreviewId(), ""));
+        state.put("modelConfig", mapOrDefault(record.getModelConfigJson(), new LinkedHashMap<String, Object>()));
+        state.put("runs", listMapOrDefault(record.getRunsJson()));
+        return state;
     }
 
     private String stringValue(Object value) {

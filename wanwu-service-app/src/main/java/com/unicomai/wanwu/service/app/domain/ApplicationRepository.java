@@ -334,4 +334,14 @@ public interface ApplicationRepository {
     GeneralAgentConfigRecord saveGeneralAgentConfig(GeneralAgentConfigRecord record);
 
     GeneralAgentConfigRecord findGeneralAgentConfig(String userId, String orgId);
+
+    GeneralAgentConversationRecord saveGeneralAgentConversation(GeneralAgentConversationRecord record);
+
+    GeneralAgentConversationRecord findGeneralAgentConversation(String userId, String orgId, String threadId);
+
+    GeneralAgentConversationRecord findGeneralAgentConversationByPreview(String userId, String orgId, String previewId);
+
+    List<GeneralAgentConversationRecord> listGeneralAgentConversations(String userId, String orgId);
+
+    boolean deleteGeneralAgentConversation(String userId, String orgId, String threadId);
 }

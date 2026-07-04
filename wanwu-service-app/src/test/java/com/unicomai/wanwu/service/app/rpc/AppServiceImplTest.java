@@ -72,6 +72,10 @@ import com.unicomai.wanwu.api.app.dto.ExplorationAppFavoriteCommand;
 import com.unicomai.wanwu.api.app.dto.ExplorationAppHistoryCommand;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticListResult;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticPageQuery;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
@@ -116,6 +120,7 @@ import com.unicomai.wanwu.service.app.domain.AppStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.AppUrlRecord;
 import com.unicomai.wanwu.service.app.domain.ApplicationRepository;
 import com.unicomai.wanwu.service.app.domain.GeneralAgentConfigRecord;
+import com.unicomai.wanwu.service.app.domain.GeneralAgentConversationRecord;
 import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
@@ -1604,6 +1609,62 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void generalAgentConversationStateUsesPersistentRepository() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        Map<String, Object> run = new LinkedHashMap<String, Object>();
+        run.put("threadId", "wga-thread-1");
+        run.put("runId", "wga-run-1");
+        run.put("createdAt", 1720000000000L);
+        run.put("answer", "hello from WGA");
+        run.put("events", Collections.singletonList(
+                configItem("type", "RUN_FINISHED", "runId", "wga-run-1")));
+
+        GeneralAgentConversationStateCommand command = new GeneralAgentConversationStateCommand();
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        command.setThreadId("wga-thread-1");
+        command.setTitle("WGA Smoke");
+        command.setCreatedAt(1720000000000L);
+        command.setUpdatedAt(1720000001000L);
+        command.setSkillConversation(true);
+        command.setSkillId("custom-skill-1");
+        command.setPreviewId("wga-preview-1");
+        command.setModelConfig(Collections.<String, Object>singletonMap("modelId", "model-1"));
+        command.setRuns(Collections.singletonList(run));
+
+        Map<String, Object> saved = service.saveGeneralAgentConversationState(command);
+
+        assertEquals(1, repository.generalAgentConversations.size());
+        assertEquals("wga-thread-1", saved.get("threadId"));
+        assertEquals(Boolean.TRUE, saved.get("isSkillConversation"));
+
+        GeneralAgentConversationQuery query = new GeneralAgentConversationQuery();
+        query.setUserId("dev-admin");
+        query.setOrgId("default-org");
+        query.setPreviewId("wga-preview-1");
+        Map<String, Object> loaded = service.getGeneralAgentConversationState(query);
+
+        assertEquals("WGA Smoke", loaded.get("title"));
+        assertEquals("model-1", ((Map<?, ?>) loaded.get("modelConfig")).get("modelId"));
+        assertEquals("wga-run-1", mapListValue(loaded, "runs").get(0).get("runId"));
+
+        GeneralAgentConversationListQuery listQuery = new GeneralAgentConversationListQuery();
+        listQuery.setUserId("dev-admin");
+        listQuery.setOrgId("default-org");
+        assertEquals(1, service.listGeneralAgentConversationStates(listQuery).size());
+
+        GeneralAgentConversationDeleteCommand delete = new GeneralAgentConversationDeleteCommand();
+        delete.setUserId("dev-admin");
+        delete.setOrgId("default-org");
+        delete.setThreadId("wga-thread-1");
+        service.deleteGeneralAgentConversationState(delete);
+
+        assertTrue(repository.generalAgentConversations.isEmpty());
+    }
+
+    @Test
     public void draftStreamCreatesConversationAndPersistsMessageDetail() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftChatAgent", "draft chat desc"));
@@ -2261,6 +2322,7 @@ public class AppServiceImplTest {
         private final List<AssistantKnowledgeFileRecord> assistantKnowledgeFiles = new ArrayList<>();
         private final List<AssistantActionRecord> assistantActions = new ArrayList<>();
         private final List<GeneralAgentConfigRecord> generalAgentConfigs = new ArrayList<>();
+        private final List<GeneralAgentConversationRecord> generalAgentConversations = new ArrayList<>();
 
         @Override
         public AppRecord saveAssistant(AppRecord record) {
@@ -3797,6 +3859,66 @@ public class AppServiceImplTest {
                 }
             }
             return null;
+        }
+
+        @Override
+        public GeneralAgentConversationRecord saveGeneralAgentConversation(GeneralAgentConversationRecord record) {
+            GeneralAgentConversationRecord existing = findGeneralAgentConversation(
+                    record.getUserId(), record.getOrgId(), record.getThreadId());
+            if (existing != null) {
+                generalAgentConversations.remove(existing);
+                record.setId(existing.getId());
+                record.setCreatedAt(existing.getCreatedAt());
+            } else {
+                record.setId(ids.incrementAndGet());
+            }
+            generalAgentConversations.add(record);
+            return record;
+        }
+
+        @Override
+        public GeneralAgentConversationRecord findGeneralAgentConversation(String userId, String orgId, String threadId) {
+            for (GeneralAgentConversationRecord conversation : generalAgentConversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())
+                        && threadId.equals(conversation.getThreadId())) {
+                    return conversation;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public GeneralAgentConversationRecord findGeneralAgentConversationByPreview(String userId,
+                                                                                   String orgId,
+                                                                                   String previewId) {
+            for (GeneralAgentConversationRecord conversation : generalAgentConversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())
+                        && previewId.equals(conversation.getPreviewId())) {
+                    return conversation;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<GeneralAgentConversationRecord> listGeneralAgentConversations(String userId, String orgId) {
+            List<GeneralAgentConversationRecord> matches = new ArrayList<>();
+            for (GeneralAgentConversationRecord conversation : generalAgentConversations) {
+                if (userId.equals(conversation.getUserId())
+                        && orgId.equals(conversation.getOrgId())) {
+                    matches.add(conversation);
+                }
+            }
+            matches.sort(Comparator.comparing(GeneralAgentConversationRecord::getUpdatedAt).reversed());
+            return matches;
+        }
+
+        @Override
+        public boolean deleteGeneralAgentConversation(String userId, String orgId, String threadId) {
+            GeneralAgentConversationRecord found = findGeneralAgentConversation(userId, orgId, threadId);
+            return found != null && generalAgentConversations.remove(found);
         }
 
         private ApiKeyUsageAggregateRecord findUsageAggregate(ApiKeyUsageAggregateRecord target) {

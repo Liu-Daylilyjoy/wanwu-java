@@ -7,6 +7,10 @@ import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
 import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -332,6 +336,7 @@ public class WanwuGeneralAgentApiController {
                     conversations.remove(removed);
                 }
             }
+            deletePersistedConversation(ctx, threadId);
         }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
@@ -344,22 +349,21 @@ public class WanwuGeneralAgentApiController {
             @RequestParam(value = "pageNo", required = false) Integer pageNo,
             @RequestParam(value = "pageSize", required = false) Integer pageSize) {
         UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
-        synchronized (STORE_LOCK) {
-            List<Map<String, Object>> rows = new ArrayList<>();
-            LinkedList<ConversationState> conversations = CONVERSATIONS_BY_SCOPE.get(ctx.scope());
-            if (conversations != null) {
-                for (ConversationState conversation : conversations) {
-                    rows.add(conversationSummary(conversation));
-                }
-            }
-            return FrontendResponse.ok(page(rows, intValue(pageNo, 1), intValue(pageSize, 10)));
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (ConversationState conversation : conversationsForScope(ctx)) {
+            rows.add(conversationSummary(conversation));
         }
+        return FrontendResponse.ok(page(rows, intValue(pageNo, 1), intValue(pageSize, 10)));
     }
 
     @GetMapping("/conversation/detail")
     public FrontendResponse<Map<String, Object>> conversationDetail(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestParam("threadId") String threadId) {
-        ConversationState conversation = CONVERSATIONS.get(threadId);
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
+        ConversationState conversation = conversationByThread(ctx, threadId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", conversation == null ? Collections.emptyList() : runList(conversation.runs));
         result.put("total", conversation == null ? 0 : conversation.runs.size());
@@ -367,8 +371,13 @@ public class WanwuGeneralAgentApiController {
     }
 
     @GetMapping("/conversation/config")
-    public FrontendResponse<Map<String, Object>> conversationConfig(@RequestParam("threadId") String threadId) {
-        ConversationState conversation = CONVERSATIONS.get(threadId);
+    public FrontendResponse<Map<String, Object>> conversationConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
+            @RequestParam("threadId") String threadId) {
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
+        ConversationState conversation = conversationByThread(ctx, threadId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("threadId", threadId);
         result.put("modelConfig", conversation == null ? Collections.emptyMap() : conversation.modelConfig);
@@ -377,12 +386,18 @@ public class WanwuGeneralAgentApiController {
 
     @PutMapping("/conversation/config")
     public FrontendResponse<Map<String, Object>> updateConversationConfig(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestBody(required = false) Map<String, Object> request) {
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
         Map<String, Object> body = body(request);
         String threadId = firstText(body, "threadId", "id");
-        ConversationState conversation = CONVERSATIONS.get(threadId);
+        ConversationState conversation = conversationByThread(ctx, threadId);
         if (conversation != null) {
             conversation.modelConfig = objectMap(body.get("modelConfig"));
+            conversation.updatedAt = System.currentTimeMillis();
+            saveConversation(conversation);
         }
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
@@ -409,18 +424,26 @@ public class WanwuGeneralAgentApiController {
 
     @GetMapping("/conversation/workspace")
     public FrontendResponse<Map<String, Object>> workspace(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestParam("threadId") String threadId,
             @RequestParam(value = "runId", required = false) String runId,
             @RequestParam(value = "path", required = false) String path) {
-        return FrontendResponse.ok(workspaceInfo(threadId, runId, path));
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
+        return FrontendResponse.ok(workspaceInfo(ctx, threadId, runId, path));
     }
 
     @GetMapping("/conversation/workspace/preview")
     public ResponseEntity<byte[]> previewWorkspace(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestParam("threadId") String threadId,
             @RequestParam(value = "runId", required = false) String runId,
             @RequestParam(value = "path", required = false) String path) {
-        byte[] bytes = workspaceContent(threadId, runId).getBytes(StandardCharsets.UTF_8);
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
+        byte[] bytes = workspaceContent(ctx, threadId, runId).getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/markdown;charset=UTF-8"))
                 .body(bytes);
@@ -428,10 +451,14 @@ public class WanwuGeneralAgentApiController {
 
     @GetMapping("/conversation/workspace/download")
     public ResponseEntity<byte[]> downloadWorkspace(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestParam("threadId") String threadId,
             @RequestParam(value = "runId", required = false) String runId,
             @RequestParam(value = "path", required = false) String path) {
-        byte[] bytes = workspaceContent(threadId, runId).getBytes(StandardCharsets.UTF_8);
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
+        byte[] bytes = workspaceContent(ctx, threadId, runId).getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"answer.md\"")
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
@@ -496,19 +523,18 @@ public class WanwuGeneralAgentApiController {
 
     @GetMapping("/skill/preview/conversation/detail")
     public FrontendResponse<Map<String, Object>> skillPreviewConversationDetail(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "x-user-id", required = false) String headerUserId,
+            @RequestHeader(value = "x-org-id", required = false) String headerOrgId,
             @RequestParam(value = "previewId", required = false) String previewId,
             @RequestParam(value = "threadId", required = false) String threadId) {
+        UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
         ConversationState conversation = null;
         if (hasText(threadId)) {
-            conversation = CONVERSATIONS.get(threadId);
+            conversation = conversationByThread(ctx, threadId);
         }
         if (conversation == null && hasText(previewId)) {
-            for (ConversationState item : CONVERSATIONS.values()) {
-                if (previewId.equals(item.previewId)) {
-                    conversation = item;
-                    break;
-                }
-            }
+            conversation = conversationByPreview(ctx, previewId);
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", conversation == null ? Collections.emptyList() : runList(conversation.runs));
@@ -554,12 +580,13 @@ public class WanwuGeneralAgentApiController {
             }
             scoped.addFirst(conversation);
         }
+        saveConversation(conversation);
         return conversation;
     }
 
     private List<Map<String, Object>> chat(UserContext ctx, Map<String, Object> request, boolean skill) {
         String threadId = firstText(request, "threadId", "id");
-        ConversationState conversation = hasText(threadId) ? CONVERSATIONS.get(threadId) : null;
+        ConversationState conversation = hasText(threadId) ? conversationByThread(ctx, threadId) : null;
         if (conversation == null) {
             conversation = createConversationState(ctx, request, skill);
         }
@@ -595,6 +622,7 @@ public class WanwuGeneralAgentApiController {
         run.events = events;
         conversation.runs.add(0, run);
         conversation.updatedAt = now;
+        saveConversation(conversation);
         return events;
     }
 
@@ -608,8 +636,8 @@ public class WanwuGeneralAgentApiController {
                 .body(body.toString());
     }
 
-    private Map<String, Object> workspaceInfo(String threadId, String runId, String path) {
-        RunState run = findRun(threadId, runId);
+    private Map<String, Object> workspaceInfo(UserContext ctx, String threadId, String runId, String path) {
+        RunState run = findRun(ctx, threadId, runId);
         String answer = run == null ? "" : run.answer;
         Map<String, Object> file = new LinkedHashMap<>();
         file.put("name", "answer.md");
@@ -629,16 +657,16 @@ public class WanwuGeneralAgentApiController {
         return result;
     }
 
-    private String workspaceContent(String threadId, String runId) {
-        RunState run = findRun(threadId, runId);
+    private String workspaceContent(UserContext ctx, String threadId, String runId) {
+        RunState run = findRun(ctx, threadId, runId);
         if (run == null) {
             return "# Wanwu General Agent\n\nNo workspace file has been generated yet.\n";
         }
         return "# Wanwu General Agent\n\n" + run.answer + "\n";
     }
 
-    private RunState findRun(String threadId, String runId) {
-        ConversationState conversation = CONVERSATIONS.get(threadId);
+    private RunState findRun(UserContext ctx, String threadId, String runId) {
+        ConversationState conversation = conversationByThread(ctx, threadId);
         if (conversation == null) {
             return null;
         }
@@ -648,6 +676,187 @@ public class WanwuGeneralAgentApiController {
             }
         }
         return null;
+    }
+
+    private ConversationState conversationByThread(UserContext ctx, String threadId) {
+        if (!hasText(threadId)) {
+            return null;
+        }
+        ConversationState cached = CONVERSATIONS.get(threadId);
+        if (cached != null) {
+            return cached;
+        }
+        Map<String, Object> state = loadConversationState(ctx, threadId, "");
+        if (state.isEmpty()) {
+            return null;
+        }
+        ConversationState conversation = conversationFromState(ctx, state);
+        cacheConversation(conversation);
+        return conversation;
+    }
+
+    private ConversationState conversationByPreview(UserContext ctx, String previewId) {
+        if (!hasText(previewId)) {
+            return null;
+        }
+        for (ConversationState item : CONVERSATIONS.values()) {
+            if (previewId.equals(item.previewId)) {
+                return item;
+            }
+        }
+        Map<String, Object> state = loadConversationState(ctx, "", previewId);
+        if (state.isEmpty()) {
+            return null;
+        }
+        ConversationState conversation = conversationFromState(ctx, state);
+        cacheConversation(conversation);
+        return conversation;
+    }
+
+    private List<ConversationState> conversationsForScope(UserContext ctx) {
+        List<ConversationState> persisted = loadConversationStates(ctx);
+        if (!persisted.isEmpty()) {
+            for (ConversationState conversation : persisted) {
+                cacheConversation(conversation);
+            }
+            return persisted;
+        }
+        synchronized (STORE_LOCK) {
+            LinkedList<ConversationState> cached = CONVERSATIONS_BY_SCOPE.get(ctx.scope());
+            return cached == null ? Collections.<ConversationState>emptyList() : new ArrayList<>(cached);
+        }
+    }
+
+    private Map<String, Object> loadConversationState(UserContext ctx, String threadId, String previewId) {
+        try {
+            GeneralAgentConversationQuery query = new GeneralAgentConversationQuery();
+            query.setUserId(ctx.userId);
+            query.setOrgId(ctx.orgId);
+            query.setThreadId(threadId);
+            query.setPreviewId(previewId);
+            Map<String, Object> state = appService.getGeneralAgentConversationState(query);
+            return state == null ? Collections.<String, Object>emptyMap() : state;
+        } catch (RuntimeException ex) {
+            return Collections.emptyMap();
+        }
+    }
+
+    private List<ConversationState> loadConversationStates(UserContext ctx) {
+        List<ConversationState> result = new ArrayList<>();
+        try {
+            GeneralAgentConversationListQuery query = new GeneralAgentConversationListQuery();
+            query.setUserId(ctx.userId);
+            query.setOrgId(ctx.orgId);
+            List<Map<String, Object>> states = appService.listGeneralAgentConversationStates(query);
+            if (states == null) {
+                return result;
+            }
+            for (Map<String, Object> state : states) {
+                result.add(conversationFromState(ctx, state));
+            }
+        } catch (RuntimeException ex) {
+            return Collections.emptyList();
+        }
+        return result;
+    }
+
+    private void cacheConversation(ConversationState conversation) {
+        if (conversation == null || !hasText(conversation.threadId)) {
+            return;
+        }
+        synchronized (STORE_LOCK) {
+            CONVERSATIONS.put(conversation.threadId, conversation);
+            LinkedList<ConversationState> scoped = CONVERSATIONS_BY_SCOPE.get(conversation.scope);
+            if (scoped == null) {
+                scoped = new LinkedList<>();
+                CONVERSATIONS_BY_SCOPE.put(conversation.scope, scoped);
+            }
+            scoped.removeIf(item -> conversation.threadId.equals(item.threadId));
+            scoped.addFirst(conversation);
+        }
+    }
+
+    private void saveConversation(ConversationState conversation) {
+        if (conversation == null || !hasText(conversation.threadId)) {
+            return;
+        }
+        try {
+            GeneralAgentConversationStateCommand command = new GeneralAgentConversationStateCommand();
+            command.setUserId(conversation.userId);
+            command.setOrgId(conversation.orgId);
+            command.setThreadId(conversation.threadId);
+            command.setTitle(conversation.title);
+            command.setCreatedAt(conversation.createdAt);
+            command.setUpdatedAt(conversation.updatedAt);
+            command.setSkillConversation(conversation.skillConversation);
+            command.setSkillId(conversation.skillId);
+            command.setPreviewId(conversation.previewId);
+            command.setModelConfig(conversation.modelConfig);
+            command.setRuns(runStateList(conversation.runs));
+            appService.saveGeneralAgentConversationState(command);
+        } catch (RuntimeException ex) {
+            // Keep the development shell usable even if the RPC provider is temporarily unavailable.
+        }
+    }
+
+    private void deletePersistedConversation(UserContext ctx, String threadId) {
+        if (!hasText(threadId)) {
+            return;
+        }
+        try {
+            GeneralAgentConversationDeleteCommand command = new GeneralAgentConversationDeleteCommand();
+            command.setUserId(ctx.userId);
+            command.setOrgId(ctx.orgId);
+            command.setThreadId(threadId);
+            appService.deleteGeneralAgentConversationState(command);
+        } catch (RuntimeException ex) {
+            // Local delete already happened; persistence will be retried by future writes.
+        }
+    }
+
+    private ConversationState conversationFromState(UserContext ctx, Map<String, Object> state) {
+        ConversationState conversation = new ConversationState();
+        conversation.userId = ctx.userId;
+        conversation.orgId = ctx.orgId;
+        conversation.scope = ctx.scope();
+        conversation.threadId = defaultIfBlank(firstText(state, "threadId"), "");
+        conversation.title = defaultIfBlank(firstText(state, "title"), "New Conversation");
+        conversation.createdAt = longValue(state.get("createdAt"), System.currentTimeMillis());
+        conversation.updatedAt = longValue(state.get("updatedAt"), conversation.createdAt);
+        conversation.skillConversation = booleanValue(state.get("isSkillConversation"));
+        conversation.skillId = defaultIfBlank(firstText(state, "skillId"), "");
+        conversation.previewId = defaultIfBlank(firstText(state, "previewId"), "");
+        conversation.modelConfig = objectMap(state.get("modelConfig"));
+        conversation.runs.addAll(runsFromState(mapList(state.get("runs"))));
+        return conversation;
+    }
+
+    private List<Map<String, Object>> runStateList(List<RunState> runs) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (RunState run : runs) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("threadId", run.threadId);
+            row.put("runId", run.runId);
+            row.put("createdAt", run.createdAt);
+            row.put("answer", run.answer);
+            row.put("events", run.events);
+            result.add(row);
+        }
+        return result;
+    }
+
+    private List<RunState> runsFromState(List<Map<String, Object>> rows) {
+        List<RunState> runs = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            RunState run = new RunState();
+            run.threadId = defaultIfBlank(firstText(row, "threadId"), "");
+            run.runId = defaultIfBlank(firstText(row, "runId"), "");
+            run.createdAt = longValue(row.get("createdAt"), System.currentTimeMillis());
+            run.answer = defaultIfBlank(firstText(row, "answer"), "");
+            run.events = mapList(row.get("events"));
+            runs.add(run);
+        }
+        return runs;
     }
 
     private void appendQuestionEvent(Map<String, Object> request, String status) {
@@ -667,6 +876,8 @@ public class WanwuGeneralAgentApiController {
                     run.events.add(event("type", "ACTIVITY_SNAPSHOT", "threadId", conversation.threadId, "runId", runId,
                             "activityId", "question-" + questionId, "activityType", "question",
                             "content", content, "timestamp", timestamp(System.currentTimeMillis())));
+                    conversation.updatedAt = System.currentTimeMillis();
+                    saveConversation(conversation);
                     return;
                 }
             }
@@ -1053,6 +1264,27 @@ public class WanwuGeneralAgentApiController {
 
     private int intValue(Integer value, int defaultValue) {
         return value == null ? defaultValue : value;
+    }
+
+    private long longValue(Object value, long defaultValue) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return defaultValue;
+        }
+    }
+
+    private boolean booleanValue(Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
     }
 
     private String timestamp(long millis) {
