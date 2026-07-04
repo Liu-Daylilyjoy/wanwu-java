@@ -1135,7 +1135,10 @@ public class WanwuFrontendApiController {
             query.setWorkflowId(request == null ? null : request.workflowId());
             query.setUserId(userContext.getUserId());
             query.setOrgId(userContext.getOrgId());
-            return FrontendResponse.ok(appService.listChatflowApplications(query));
+            Map<String, Object> result = appService.listChatflowApplications(query);
+            ExplorationAppHistoryStore.INSTANCE.record(
+                    userContext.getUserId(), CHATFLOW_APP_TYPE, query.getWorkflowId());
+            return FrontendResponse.ok(result);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -1242,6 +1245,8 @@ public class WanwuFrontendApiController {
             command.setOrgId(userContext.getOrgId());
             Map<String, Object> result = workflowRunResult(appService.runWorkflow(command));
             recordAppStatistic(userContext, command.getWorkflowId(), WORKFLOW_APP_TYPE, true, false, startedAt, STAT_SOURCE_WEB);
+            ExplorationAppHistoryStore.INSTANCE.record(
+                    userContext.getUserId(), WORKFLOW_APP_TYPE, command.getWorkflowId());
             return FrontendResponse.ok(result);
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -3463,6 +3468,8 @@ public class WanwuFrontendApiController {
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getAssistantId(), AGENT_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
+                ExplorationAppHistoryStore.INSTANCE.record(
+                        userContext.getUserId(), AGENT_APP_TYPE, command.getAssistantId());
             }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
@@ -3486,6 +3493,8 @@ public class WanwuFrontendApiController {
             RagChatResult result = appService.streamRagChat(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getRagId(), RAG_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
+                ExplorationAppHistoryStore.INSTANCE.record(
+                        userContext.getUserId(), RAG_APP_TYPE, command.getRagId());
             }
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)

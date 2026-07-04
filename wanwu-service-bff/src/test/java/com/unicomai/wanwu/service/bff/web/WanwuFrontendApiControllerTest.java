@@ -143,6 +143,7 @@ public class WanwuFrontendApiControllerTest {
     @AfterEach
     public void clearOperationClientStatisticStore() {
         OperationClientStatisticStore.INSTANCE.clear();
+        ExplorationAppHistoryStore.INSTANCE.clear();
     }
 
     private final IamService iamService = mock(IamService.class);
@@ -540,6 +541,15 @@ public class WanwuFrontendApiControllerTest {
         app.put("createdAt", "2026-06-30 00:00:00");
         when(appService.listApplications(any(ApplicationListQuery.class)))
                 .thenReturn(new ApplicationListResult(Collections.singletonList(app), 1));
+        AssistantConversationStreamResult stream = new AssistantConversationStreamResult();
+        stream.setAssistantId("assistant-001");
+        stream.setConversationId("conversation-001");
+        stream.setDetailId("detail-001");
+        stream.setPrompt("hello");
+        stream.setResponse("hi");
+        stream.setCreatedAt(1782806400000L);
+        when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
+                .thenReturn(stream);
 
         mockMvc.perform(get("/user/api/v1/exploration/app/list")
                         .header("Authorization", "Bearer dev-token")
@@ -562,11 +572,26 @@ public class WanwuFrontendApiControllerTest {
                         .param("searchType", "favorite"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].isFavorite").value(true));
-        mockMvc.perform(get("/user/api/v1/exploration/app/history"))
+        mockMvc.perform(post("/user/api/v1/assistant/stream")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"hello\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list", hasSize(0)));
+                .andExpect(content().string(containsString("hi")));
+        mockMvc.perform(get("/user/api/v1/exploration/app/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("searchType", "history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.list[0].visitedAt").exists());
+        mockMvc.perform(get("/user/api/v1/exploration/app/history")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.total").value(1));
 
-        verify(appService, times(2)).listApplications(any(ApplicationListQuery.class));
+        verify(appService, times(4)).listApplications(any(ApplicationListQuery.class));
+        verify(appService).streamAssistantConversation(any(AssistantConversationStreamCommand.class));
     }
 
     @Test

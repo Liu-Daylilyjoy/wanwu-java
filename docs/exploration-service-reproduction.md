@@ -23,6 +23,7 @@ Date: 2026-06-30
   - `GET /user/api/v1/exploration/app/history`
 - App square list reuses `AppService.listApplications` and enriches rows with frontend-required `isFavorite`, `user`, `avatar`, `createdAt`, and `publishType` defaults.
 - Favorite state is kept in the Docker development BFF memory for immediate frontend readback.
+- History state is recorded in the Docker development BFF memory when the zero-change frontend runs published Agent, RAG, Workflow, or Chatflow application routes, matching the Go BFF `AppHistoryRecord` router behavior.
 - Existing resource controllers already expose MCP square, prompt template square, and Skill square routes.
 - The admin development account now exposes `exploration`, `exploration.app`, `exploration.mcp`, `exploration.template`, and `exploration.skill`.
 
@@ -31,7 +32,7 @@ Date: 2026-06-30
 Executed in Docker with Java 8:
 
 - `mvn -q -pl wanwu-service-bff,wanwu-service-iam -am "-Dtest=WanwuFrontendApiControllerTest,IamServiceImplTest" -DfailIfNoTests=false test`
-- BFF contract test: `WanwuFrontendApiControllerTest` covers app square list/favorite/history contracts and square permissions.
+- BFF contract test: `WanwuFrontendApiControllerTest` covers app square list/favorite/history contracts, including published Agent runtime history readback, and square permissions.
 - IAM service test: `IamServiceImplTest` covers square permissions and role-template children.
 
 Frontend-entry smoke target:
@@ -39,7 +40,8 @@ Frontend-entry smoke target:
 - `http://localhost:3000/user/api/v1/base/login` returns exploration permissions for `admin`.
 - `/exploration/app/list` returns app cards with `isFavorite` and `user.userName`.
 - `/exploration/app/favorite` toggles favorite state.
-- `/exploration/app/history` returns an empty frontend-compatible list.
+- `/assistant/stream` records the published Agent in local exploration history.
+- `/exploration/app/history` and `/exploration/app/list?searchType=history` return the recorded app with `visitedAt`.
 
 ## Current Boundary
 
@@ -48,7 +50,7 @@ This slice is a frontend-compatible square navigation loop. It prevents the zero
 It does not yet implement:
 
 - Persistent marketplace favorite/history storage.
-- Real marketplace ranking, recommendation, or browse-history recording.
+- Real marketplace ranking, recommendation, and Go-equivalent history ranking.
 - Chatflow marketplace routes.
 - Full public template workflow square routes.
 - Deeper published app runtime beyond the Agent/RAG/Workflow shells already reproduced in earlier slices.

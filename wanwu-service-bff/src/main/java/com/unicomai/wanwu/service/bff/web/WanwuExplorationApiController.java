@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -46,6 +47,10 @@ public class WanwuExplorationApiController {
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "searchType", required = false, defaultValue = "all") String searchType) {
         UserContext ctx = userContext(authorization);
+        if ("history".equals(defaultIfBlank(searchType, "all"))) {
+            java.util.ArrayList<Map<String, Object>> apps = historyApps(ctx, appType, name);
+            return FrontendResponse.ok(new ApplicationListResult(apps, apps.size()));
+        }
         ApplicationListResult source = appService.listApplications(new ApplicationListQuery(
                 defaultIfBlank(appType, ""),
                 defaultIfBlank(name, ""),
@@ -78,11 +83,65 @@ public class WanwuExplorationApiController {
     }
 
     @GetMapping("/exploration/app/history")
-    public FrontendResponse<Map<String, Object>> history() {
+    public FrontendResponse<Map<String, Object>> history(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "appType", required = false) String appType,
+            @RequestParam(value = "name", required = false) String name) {
+        UserContext ctx = userContext(authorization);
+        java.util.ArrayList<Map<String, Object>> apps = historyApps(ctx, appType, name);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("list", Collections.emptyList());
-        result.put("total", 0);
+        result.put("list", apps);
+        result.put("total", apps.size());
         return FrontendResponse.ok(result);
+    }
+
+    private java.util.ArrayList<Map<String, Object>> historyApps(UserContext ctx, String appType, String name) {
+        List<ExplorationAppHistoryStore.HistoryEntry> entries =
+                ExplorationAppHistoryStore.INSTANCE.list(ctx.userId, defaultIfBlank(appType, ""));
+        java.util.ArrayList<Map<String, Object>> apps = new java.util.ArrayList<>();
+        if (entries.isEmpty()) {
+            return apps;
+        }
+        Map<String, Map<String, Object>> sourceByKey = currentAppsByKey(ctx, appType, name);
+        for (ExplorationAppHistoryStore.HistoryEntry entry : entries) {
+            Map<String, Object> source = sourceByKey.get(appKey(entry.getAppType(), entry.getAppId()));
+            Map<String, Object> app = source == null ? historyPlaceholder(entry) : explorationApp(source);
+            app.put("visitedAt", entry.updatedAtText());
+            app.put("historyCreatedAt", entry.createdAtText());
+            if (matchesName(app, name)) {
+                apps.add(app);
+            }
+        }
+        return apps;
+    }
+
+    private Map<String, Map<String, Object>> currentAppsByKey(UserContext ctx, String appType, String name) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        ApplicationListResult source = appService.listApplications(new ApplicationListQuery(
+                defaultIfBlank(appType, ""),
+                defaultIfBlank(name, ""),
+                ctx.userId,
+                ctx.orgId));
+        if (source == null || source.getList() == null) {
+            return result;
+        }
+        for (Map<String, Object> item : source.getList()) {
+            Map<String, Object> app = explorationApp(item);
+            result.put(appKey(value(app, "appType"), value(app, "appId")), app);
+        }
+        return result;
+    }
+
+    private Map<String, Object> historyPlaceholder(ExplorationAppHistoryStore.HistoryEntry entry) {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("appId", entry.getAppId());
+        app.put("appType", entry.getAppType());
+        app.put("name", entry.getAppId());
+        app.put("desc", "");
+        app.put("publishType", "public");
+        app.put("createdAt", entry.createdAtText());
+        app.put("updatedAt", entry.updatedAtText());
+        return explorationApp(app);
     }
 
     private boolean matchesSearchType(Map<String, Object> app, String searchType) {
@@ -93,10 +152,18 @@ public class WanwuExplorationApiController {
         if ("private".equals(normalized)) {
             return "private".equals(app.get("publishType"));
         }
-        if ("history".equals(normalized)) {
-            return false;
-        }
         return true;
+    }
+
+    private boolean matchesName(Map<String, Object> app, String name) {
+        String keyword = defaultIfBlank(name, "");
+        if (keyword.isEmpty()) {
+            return true;
+        }
+        String lower = keyword.toLowerCase(java.util.Locale.ENGLISH);
+        return value(app, "name").toLowerCase(java.util.Locale.ENGLISH).contains(lower)
+                || value(app, "desc").toLowerCase(java.util.Locale.ENGLISH).contains(lower)
+                || value(app, "appId").toLowerCase(java.util.Locale.ENGLISH).contains(lower);
     }
 
     private Map<String, Object> explorationApp(Map<String, Object> source) {
