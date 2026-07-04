@@ -4123,17 +4123,18 @@ public class WanwuFrontendApiController {
     }
 
     private ResponseEntity<byte[]> exportWorkflowJson(String authorization, Map<String, String> request, boolean published) {
-        return exportFlowJson(authorization, request, published, false);
+        return exportFlowJson(authorization, request, published, false, "workflow_export.json");
     }
 
     private ResponseEntity<byte[]> exportChatflowJson(String authorization, Map<String, String> request, boolean published) {
-        return exportFlowJson(authorization, request, published, true);
+        return exportFlowJson(authorization, request, published, true, "chatflow_export.json");
     }
 
     private ResponseEntity<byte[]> exportFlowJson(String authorization,
                                                   Map<String, String> request,
                                                   boolean published,
-                                                  boolean chatflow) {
+                                                  boolean chatflow,
+                                                  String fileName) {
         try {
             UserContext userContext = userContext(authorization);
             WorkflowExportQuery query = new WorkflowExportQuery();
@@ -4150,7 +4151,9 @@ public class WanwuFrontendApiController {
             body.put("desc", result == null ? "" : result.getDesc());
             body.put("schema", result == null ? "" : result.getSchema());
             return ResponseEntity.ok()
-                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=utf-8''" + fileName)
+                    .header("Access-Control-Expose-Headers", "Content-Disposition")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
                     .body(JSON.writeValueAsBytes(body));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(400)

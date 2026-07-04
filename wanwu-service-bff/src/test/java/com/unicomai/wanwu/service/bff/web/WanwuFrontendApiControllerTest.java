@@ -708,6 +708,9 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .param("workflow_id", "workflow-001"))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_OCTET_STREAM))
+                .andExpect(header().string("Content-Disposition", containsString("workflow_export.json")))
+                .andExpect(header().string("Access-Control-Expose-Headers", "Content-Disposition"))
                 .andExpect(content().string(containsString("\"name\":\"PolicyFlow\"")))
                 .andExpect(content().string(containsString("\"schema\":\"{\\\"nodes\\\":[]}\"")));
 
@@ -857,6 +860,9 @@ public class WanwuFrontendApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .param("workflow_id", "chatflow-001"))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_OCTET_STREAM))
+                .andExpect(header().string("Content-Disposition", containsString("chatflow_export.json")))
+                .andExpect(header().string("Access-Control-Expose-Headers", "Content-Disposition"))
                 .andExpect(content().string(containsString("\"name\":\"PolicyChat\"")));
 
         MockMultipartFile file = new MockMultipartFile(
