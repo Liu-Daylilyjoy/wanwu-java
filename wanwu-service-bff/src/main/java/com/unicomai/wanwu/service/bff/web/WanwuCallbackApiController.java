@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -28,12 +29,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import javax.servlet.http.HttpServletRequest;
 
@@ -54,6 +57,9 @@ public class WanwuCallbackApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private KnowledgeService knowledgeService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private McpService mcpService;
+
     public WanwuCallbackApiController() {
     }
 
@@ -67,9 +73,15 @@ public class WanwuCallbackApiController {
 
     public WanwuCallbackApiController(ModelService modelService, AppService appService,
                                       KnowledgeService knowledgeService) {
+        this(modelService, appService, knowledgeService, null);
+    }
+
+    public WanwuCallbackApiController(ModelService modelService, AppService appService,
+                                      KnowledgeService knowledgeService, McpService mcpService) {
         this.modelService = modelService;
         this.appService = appService;
         this.knowledgeService = knowledgeService;
+        this.mcpService = mcpService;
     }
 
     @PostMapping("/callback/v1/file/url/base64")
@@ -292,14 +304,42 @@ public class WanwuCallbackApiController {
         return FrontendResponse.ok(listResult(Collections.emptyList()));
     }
 
-    @GetMapping({"/callback/v1/workflow/tool/square", "/callback/v1/workflow/tool/custom",
-            "/callback/v1/mcp", "/callback/v1/mcp/server", "/callback/v1/skill/detail"})
-    public FrontendResponse<Map<String, Object>> callbackDetail(@RequestParam Map<String, String> request) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("id", firstText(request, "id", "toolId", "mcpId", "skillId"));
-        data.put("name", "callback-detail");
-        data.put("request", request);
-        return FrontendResponse.ok(data);
+    @GetMapping("/callback/v1/workflow/tool/square")
+    public FrontendResponse<Map<String, Object>> callbackWorkflowSquareTool(
+            @RequestParam Map<String, String> request) {
+        String id = firstText(request, "toolSquareId", "id", "toolId");
+        return FrontendResponse.ok(callbackDetailOrFallback(request, id, () ->
+                mcpService.getToolSquare("", "", id)));
+    }
+
+    @GetMapping("/callback/v1/workflow/tool/custom")
+    public FrontendResponse<Map<String, Object>> callbackWorkflowCustomTool(
+            @RequestParam Map<String, String> request) {
+        String id = firstText(request, "customToolId", "id", "toolId");
+        return FrontendResponse.ok(callbackDetailOrFallback(request, id, () ->
+                mcpService.getCustomTool("", "", id)));
+    }
+
+    @GetMapping("/callback/v1/mcp")
+    public FrontendResponse<Map<String, Object>> callbackMcp(@RequestParam Map<String, String> request) {
+        String id = firstText(request, "mcpId", "id");
+        return FrontendResponse.ok(callbackDetailOrFallback(request, id, () ->
+                mcpService.getMcp("", "", id)));
+    }
+
+    @GetMapping("/callback/v1/mcp/server")
+    public FrontendResponse<Map<String, Object>> callbackMcpServer(@RequestParam Map<String, String> request) {
+        String id = firstText(request, "mcpServerId", "id");
+        return FrontendResponse.ok(callbackDetailOrFallback(request, id, () ->
+                mcpService.getMcpServer("", "", id)));
+    }
+
+    @GetMapping("/callback/v1/skill/detail")
+    public FrontendResponse<Map<String, Object>> callbackSkillDetail(@RequestParam Map<String, String> request) {
+        String skillId = firstText(request, "skillId", "id");
+        String skillType = defaultIfBlank(firstText(request, "skillType", "type"), "builtin");
+        return FrontendResponse.ok(callbackDetailOrFallback(request, skillId, () ->
+                callbackSkillDetail(skillId, skillType)));
     }
 
     @PostMapping("/callback/v1/agent/{assistantId}/chat")
@@ -314,13 +354,23 @@ public class WanwuCallbackApiController {
 
     @PostMapping({"/callback/v1/rag/search-knowledge-base",
             "/callback/v1/rag/search-QA-base",
-            "/callback/v1/wga/rag/search-knowledge-base",
-            "/callback/v1/skill/builtin/list",
-            "/callback/v1/skill/custom/list"})
+            "/callback/v1/wga/rag/search-knowledge-base"})
     public FrontendResponse<Map<String, Object>> callbackList(@RequestBody(required = false) Map<String, Object> request) {
         Map<String, Object> data = listResult(Collections.emptyList());
         data.put("request", request == null ? Collections.emptyMap() : request);
         return FrontendResponse.ok(data);
+    }
+
+    @PostMapping("/callback/v1/skill/builtin/list")
+    public FrontendResponse<Map<String, Object>> callbackBuiltinSkillList(
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(callbackSkillList(request, "builtin"));
+    }
+
+    @PostMapping("/callback/v1/skill/custom/list")
+    public FrontendResponse<Map<String, Object>> callbackCustomSkillList(
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(callbackSkillList(request, "custom"));
     }
 
     @PostMapping("/callback/v1/rag/knowledge/stream/search")
@@ -392,6 +442,67 @@ public class WanwuCallbackApiController {
         } catch (RuntimeException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
+    }
+
+    private Map<String, Object> callbackDetailOrFallback(
+            Map<String, String> request, String id, Supplier<Map<String, Object>> lookup) {
+        if (mcpService != null && !isBlank(id)) {
+            try {
+                Map<String, Object> data = lookup.get();
+                if (data != null && !data.isEmpty()) {
+                    return data;
+                }
+            } catch (RuntimeException ignored) {
+                // Keep callback discovery usable when the resource service is absent or the id is stale.
+            }
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", id);
+        data.put("name", "callback-detail");
+        data.put("request", request == null ? Collections.emptyMap() : request);
+        return data;
+    }
+
+    private Map<String, Object> callbackSkillDetail(String skillId, String skillType) {
+        Map<String, Object> source = "custom".equals(skillType)
+                ? mcpService.getCustomSkill("", "", skillId)
+                : mcpService.getBuiltinSkill("", "", skillId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("skillId", defaultIfBlank(firstText(source, "skillId"), skillId));
+        data.put("skillType", skillType);
+        data.put("name", firstText(source, "name"));
+        data.put("desc", firstText(source, "desc"));
+        data.put("avatar", avatarPath(source.get("avatar")));
+        data.put("objectPath", firstText(source, "objectPath", "skillPath", "downloadUrl", "zipUrl"));
+        return data;
+    }
+
+    private Map<String, Object> callbackSkillList(Map<String, Object> request, String skillType) {
+        List<Map<String, Object>> details = new ArrayList<>();
+        if (mcpService != null) {
+            for (String skillId : stringList(request == null ? null : request.get("skillIdList"))) {
+                if (isBlank(skillId)) {
+                    continue;
+                }
+                try {
+                    details.add(callbackSkillDetail(skillId, skillType));
+                } catch (RuntimeException ignored) {
+                    // Go omits missing skill ids from callback list responses.
+                }
+            }
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("skillList", details);
+        data.put("list", details);
+        data.put("total", details.size());
+        return data;
+    }
+
+    private String avatarPath(Object avatar) {
+        if (avatar instanceof Map) {
+            return firstText((Map<?, ?>) avatar, "path", "url", "key");
+        }
+        return avatar == null ? "" : String.valueOf(avatar);
     }
 
     private Map<String, Object> openAiBase(String object, String modelId) {
@@ -948,6 +1059,19 @@ public class WanwuCallbackApiController {
         return "dev-model-key".equals(value)
                 || "useless-api-key".equals(value)
                 || "it-is-not-your-api-key".equals(value);
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List)) {
+            return isBlank(value == null ? "" : String.valueOf(value))
+                    ? Collections.<String>emptyList()
+                    : Collections.singletonList(String.valueOf(value));
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : (List<?>) value) {
+            result.add(item == null ? "" : String.valueOf(item));
+        }
+        return result;
     }
 
     private String defaultIfBlank(String value, String fallback) {

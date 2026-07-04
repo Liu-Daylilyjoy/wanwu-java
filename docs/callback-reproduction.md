@@ -1,6 +1,6 @@
 # Callback Compatibility Reproduction
 
-Date: 2026-06-30
+Date: 2026-07-04
 
 ## Go Source Baseline
 
@@ -9,6 +9,10 @@ Original Go files inspected:
 - `D:\work\week3\wanwu\internal\bff-service\server\http\handler\init.go`
 - `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\callback\router.go`
 - `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\callback.go`
+- `D:\work\week3\wanwu\internal\bff-service\server\http\handler\callback\workflow.go`
+- `D:\work\week3\wanwu\internal\bff-service\server\http\handler\callback\mcp.go`
+- `D:\work\week3\wanwu\internal\bff-service\server\http\handler\callback\skill.go`
+- `D:\work\week3\wanwu\internal\bff-service\server\http\handler\callback\skill_detail.go`
 
 Go BFF registers public callback routes under `/callback/v1` and several internal callback/status aliases under the v1 API group.
 
@@ -31,12 +35,12 @@ Covered route families:
 - File callbacks: `/callback/v1/file/url/base64`, `/callback/v1/file/upload/base64`
 - Image and tourism helper callbacks: `/callback/v1/image/outline`, `/callback/v1/tourism/poi/search`
 - Model callback routes: info, chat completions, embeddings, multimodal embeddings, rerank, multimodal rerank, OCR, GUI, PDF parser, ASR
-- Workflow/chatflow callback lists and tool detail shells
-- MCP callback detail shells
+- Workflow/chatflow callback lists and MCP-backed workflow tool detail callbacks
+- MCP callback details backed by Java `McpService`
 - Agent callback chat SSE shell
 - RAG callback search and stream search shells
 - WGA sandbox run/cleanup callback shells
-- App record and skill callback shells
+- App record shell plus skill detail/list callbacks backed by Java `McpService`, including Go-style `skillList` response bodies
 - v1 callback aliases for doc status, deploy info, category info, doc status init, and knowledge status
 
 ## Current Contract
@@ -46,14 +50,14 @@ This slice is a compatibility shell:
 - Routes no longer return `Not Found`.
 - Response envelopes follow the frontend/BFF success shape where Go handlers are frontend-facing.
 - Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
+- Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Stream routes use `text/event-stream` with deterministic development payloads.
 - Mutating callback routes echo status and request data for development observability.
 
 ## Remaining Gaps
 
-- Real model provider invocation is not implemented.
+- Provider-specific model execution is still partial; configured OpenAI-compatible chat/embedding/rerank endpoints can proxy, while OCR/ASR/PDF/GUI remain local shells.
 - Real OCR/ASR/PDF parsing/GUI tasks are not implemented.
 - Real RAG recall and knowledge-base stream search are not implemented.
 - Real WGA sandbox execution and cleanup are not implemented.
-- Doc/knowledge status callbacks do not yet mutate persisted MySQL-backed import/indexing state.
 - Callback authentication, callback signature verification, and usage metrics are not reproduced yet.

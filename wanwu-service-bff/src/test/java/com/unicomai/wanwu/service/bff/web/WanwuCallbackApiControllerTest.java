@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import org.junit.jupiter.api.Test;
@@ -570,20 +571,72 @@ public class WanwuCallbackApiControllerTest {
 
     @Test
     public void workflowMcpRagSkillAndSandboxCallbacksReturnFrontendSafeResponses() throws Exception {
+        McpService mcpService = mock(McpService.class);
+        when(mcpService.getToolSquare("", "", "builtin-weather"))
+                .thenReturn(map("toolSquareId", "builtin-weather", "name", "Weather Tool"));
+        when(mcpService.getCustomTool("", "", "tool-001"))
+                .thenReturn(map("customToolId", "tool-001", "name", "WeatherAPI"));
+        when(mcpService.getMcp("", "", "mcp-001"))
+                .thenReturn(map("mcpId", "mcp-001", "name", "Search MCP"));
+        when(mcpService.getMcpServer("", "", "mcpserver-001"))
+                .thenReturn(map("mcpServerId", "mcpserver-001", "name", "Local MCP Server"));
+        when(mcpService.getBuiltinSkill("", "", "builtin-summary"))
+                .thenReturn(map("skillId", "builtin-summary", "name", "Summary Skill", "desc", "summary",
+                        "avatar", map("path", "/imgs/skill.svg"), "downloadUrl", "/skill/builtin-summary.zip"));
+        when(mcpService.getCustomSkill("", "", "skill-custom-001"))
+                .thenReturn(map("skillId", "skill-custom-001", "name", "Custom Skill", "desc", "custom",
+                        "avatar", map("path", "/imgs/custom-skill.svg"), "objectPath", "/upload/custom-skill.zip"));
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, null, null, mcpService))
+                .build();
+
         mockMvc.perform(get("/callback/v1/workflow/list"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.list").isArray());
 
-        mockMvc.perform(get("/callback/v1/mcp").param("id", "mcp-001"))
+        callbackMvc.perform(get("/callback/v1/workflow/tool/square").param("toolSquareId", "builtin-weather"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.id").value("mcp-001"));
+                .andExpect(jsonPath("$.data.toolSquareId").value("builtin-weather"))
+                .andExpect(jsonPath("$.data.name").value("Weather Tool"));
 
-        mockMvc.perform(post("/callback/v1/skill/builtin/list")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"keyword\":\"skill\"}"))
+        callbackMvc.perform(get("/callback/v1/workflow/tool/custom").param("customToolId", "tool-001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list").isArray());
+                .andExpect(jsonPath("$.data.customToolId").value("tool-001"))
+                .andExpect(jsonPath("$.data.name").value("WeatherAPI"));
+
+        callbackMvc.perform(get("/callback/v1/mcp").param("mcpId", "mcp-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mcpId").value("mcp-001"))
+                .andExpect(jsonPath("$.data.name").value("Search MCP"));
+
+        callbackMvc.perform(get("/callback/v1/mcp/server").param("mcpServerId", "mcpserver-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mcpServerId").value("mcpserver-001"))
+                .andExpect(jsonPath("$.data.name").value("Local MCP Server"));
+
+        callbackMvc.perform(get("/callback/v1/skill/detail")
+                        .param("skillId", "builtin-summary")
+                        .param("skillType", "builtin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillId").value("builtin-summary"))
+                .andExpect(jsonPath("$.data.skillType").value("builtin"))
+                .andExpect(jsonPath("$.data.avatar").value("/imgs/skill.svg"));
+
+        callbackMvc.perform(post("/callback/v1/skill/builtin/list")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillIdList\":[\"builtin-summary\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillList[0].skillId").value("builtin-summary"))
+                .andExpect(jsonPath("$.data.skillList[0].objectPath").value("/skill/builtin-summary.zip"));
+
+        callbackMvc.perform(post("/callback/v1/skill/custom/list")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillIdList\":[\"skill-custom-001\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skillList[0].skillId").value("skill-custom-001"))
+                .andExpect(jsonPath("$.data.skillList[0].skillType").value("custom"))
+                .andExpect(jsonPath("$.data.skillList[0].objectPath").value("/upload/custom-skill.zip"));
 
         mockMvc.perform(post("/callback/v1/wga/sandbox/run")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -604,6 +657,13 @@ public class WanwuCallbackApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(content().string(containsString("success")));
+
+        verify(mcpService).getToolSquare("", "", "builtin-weather");
+        verify(mcpService).getCustomTool("", "", "tool-001");
+        verify(mcpService).getMcp("", "", "mcp-001");
+        verify(mcpService).getMcpServer("", "", "mcpserver-001");
+        verify(mcpService, times(2)).getBuiltinSkill("", "", "builtin-summary");
+        verify(mcpService).getCustomSkill("", "", "skill-custom-001");
     }
 
     @Test
@@ -659,6 +719,14 @@ public class WanwuCallbackApiControllerTest {
         assertEquals("kb-001", knowledgeStatusCaptor.getValue().get("knowledgeId"));
         assertEquals(130, knowledgeStatusCaptor.getValue().get("reportStatus"));
         verify(knowledgeService).initCallbackDocStatus("", "");
+    }
+
+    private static Map<String, Object> map(Object... pairs) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put(String.valueOf(pairs[i]), pairs[i + 1]);
+        }
+        return result;
     }
 
     private static ModelInfo configuredModel(String modelId, String modelName, String endpointUrl, String apiKey) {
