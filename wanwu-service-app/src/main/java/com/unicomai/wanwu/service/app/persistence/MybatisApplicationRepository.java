@@ -22,6 +22,7 @@ import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.ApiKeyUsageAggregateEntity;
@@ -46,6 +47,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.RagDraftEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.RagSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.ModelStatisticEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowDraftEntity;
+import com.unicomai.wanwu.service.app.persistence.entity.WorkflowRunEntity;
 import com.unicomai.wanwu.service.app.persistence.entity.WorkflowSnapshotEntity;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.ApiKeyUsageAggregateMapper;
@@ -70,6 +72,7 @@ import com.unicomai.wanwu.service.app.persistence.mapper.RagDraftMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.RagSnapshotMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.ModelStatisticMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.WorkflowDraftMapper;
+import com.unicomai.wanwu.service.app.persistence.mapper.WorkflowRunMapper;
 import com.unicomai.wanwu.service.app.persistence.mapper.WorkflowSnapshotMapper;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -88,6 +91,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     private final RagSnapshotMapper ragSnapshotMapper;
     private final WorkflowDraftMapper workflowDraftMapper;
     private final WorkflowSnapshotMapper workflowSnapshotMapper;
+    private final WorkflowRunMapper workflowRunMapper;
     private final ApiKeyMapper apiKeyMapper;
     private final ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper;
     private final ApiKeyUsageRecordMapper apiKeyUsageRecordMapper;
@@ -113,6 +117,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
                                         RagSnapshotMapper ragSnapshotMapper,
                                         WorkflowDraftMapper workflowDraftMapper,
                                         WorkflowSnapshotMapper workflowSnapshotMapper,
+                                        WorkflowRunMapper workflowRunMapper,
                                         ApiKeyMapper apiKeyMapper,
                                         ApiKeyUsageAggregateMapper apiKeyUsageAggregateMapper,
                                         ApiKeyUsageRecordMapper apiKeyUsageRecordMapper,
@@ -137,6 +142,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         this.ragSnapshotMapper = ragSnapshotMapper;
         this.workflowDraftMapper = workflowDraftMapper;
         this.workflowSnapshotMapper = workflowSnapshotMapper;
+        this.workflowRunMapper = workflowRunMapper;
         this.apiKeyMapper = apiKeyMapper;
         this.apiKeyUsageAggregateMapper = apiKeyUsageAggregateMapper;
         this.apiKeyUsageRecordMapper = apiKeyUsageRecordMapper;
@@ -570,6 +576,7 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     @Transactional
     public boolean deleteWorkflow(String userId, String orgId, String workflowId, String appType) {
         appUrlMapper.deleteByAssistant(userId, orgId, workflowId);
+        workflowRunMapper.deleteByWorkflow(userId, orgId, workflowId);
         workflowSnapshotMapper.deleteByWorkflow(userId, orgId, workflowId);
         int draftDeleted = workflowDraftMapper.deleteDraft(userId, orgId, workflowId);
         int appDeleted = appMapper.deleteWorkflowApp(userId, orgId, workflowId, appType);
@@ -654,6 +661,20 @@ public class MybatisApplicationRepository implements ApplicationRepository {
             workflowDraftMapper.updateById(entity);
         }
         return true;
+    }
+
+    @Override
+    public WorkflowRunRecord saveWorkflowRun(WorkflowRunRecord record) {
+        WorkflowRunEntity entity = toEntity(record);
+        workflowRunMapper.insert(entity);
+        record.setId(entity.getId());
+        return record;
+    }
+
+    @Override
+    public List<WorkflowRunRecord> listWorkflowRuns(String userId, String orgId, String workflowId, int limit) {
+        int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
+        return toWorkflowRunRecords(workflowRunMapper.selectByWorkflow(userId, orgId, workflowId, safeLimit));
     }
 
     @Override
@@ -1442,6 +1463,51 @@ public class MybatisApplicationRepository implements ApplicationRepository {
         record.setCategory(entity.getCategory());
         record.setWorkflowInfoJson(entity.getWorkflowInfoJson());
         record.setWorkflowSchemaJson(entity.getWorkflowSchemaJson());
+        return record;
+    }
+
+    private WorkflowRunEntity toEntity(WorkflowRunRecord record) {
+        WorkflowRunEntity entity = new WorkflowRunEntity();
+        entity.setId(record.getId());
+        entity.setCreatedAt(record.getCreatedAt());
+        entity.setUpdatedAt(record.getUpdatedAt());
+        entity.setFinishedAt(record.getFinishedAt());
+        entity.setUserId(record.getUserId());
+        entity.setOrgId(record.getOrgId());
+        entity.setWorkflowId(record.getWorkflowId());
+        entity.setRunId(record.getRunId());
+        entity.setStatus(record.getStatus());
+        entity.setInputJson(record.getInputJson());
+        entity.setOutputJson(record.getOutputJson());
+        entity.setCostMillis(record.getCostMillis());
+        return entity;
+    }
+
+    private List<WorkflowRunRecord> toWorkflowRunRecords(List<WorkflowRunEntity> entities) {
+        List<WorkflowRunRecord> records = new java.util.ArrayList<>();
+        for (WorkflowRunEntity entity : entities) {
+            records.add(toRecord(entity));
+        }
+        return records;
+    }
+
+    private WorkflowRunRecord toRecord(WorkflowRunEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        WorkflowRunRecord record = new WorkflowRunRecord();
+        record.setId(entity.getId());
+        record.setCreatedAt(entity.getCreatedAt());
+        record.setUpdatedAt(entity.getUpdatedAt());
+        record.setFinishedAt(entity.getFinishedAt());
+        record.setUserId(entity.getUserId());
+        record.setOrgId(entity.getOrgId());
+        record.setWorkflowId(entity.getWorkflowId());
+        record.setRunId(entity.getRunId());
+        record.setStatus(entity.getStatus());
+        record.setInputJson(entity.getInputJson());
+        record.setOutputJson(entity.getOutputJson());
+        record.setCostMillis(entity.getCostMillis());
         return record;
     }
 

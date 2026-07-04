@@ -121,6 +121,12 @@ public class WanwuWorkflowApiController {
     private Map<String, Object> workflowRunResult(WorkflowRunResult result) {
         String workflowId = result == null ? "" : defaultIfBlank(result.getWorkflowId(), "");
         Map<String, Object> body = workflowIdentity(workflowId);
+        body.put("runId", result == null ? "" : defaultIfBlank(result.getRunId(), ""));
+        body.put("run_id", result == null ? "" : defaultIfBlank(result.getRunId(), ""));
+        body.put("status", result == null ? "" : defaultIfBlank(result.getStatus(), ""));
+        body.put("createdAt", result == null ? 0L : result.getCreatedAt());
+        body.put("finishedAt", result == null ? 0L : result.getFinishedAt());
+        body.put("costMillis", result == null ? 0L : result.getCostMillis());
         body.put("output", result == null || result.getOutput() == null
                 ? Collections.emptyMap()
                 : result.getOutput());

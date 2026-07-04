@@ -118,6 +118,10 @@ public interface ApplicationRepository {
 
     boolean rollbackWorkflow(AppRecord record, WorkflowDraftRecord draft);
 
+    WorkflowRunRecord saveWorkflowRun(WorkflowRunRecord record);
+
+    List<WorkflowRunRecord> listWorkflowRuns(String userId, String orgId, String workflowId, int limit);
+
     ApiKeyRecord saveApiKey(ApiKeyRecord record);
 
     ApiKeyRecord updateApiKey(ApiKeyRecord record);

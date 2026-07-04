@@ -125,6 +125,7 @@ import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -491,6 +492,8 @@ public class AppServiceImplTest {
         create.setDesc("policy workflow");
         create.setAvatarKey("avatars/workflow.png");
         create.setAvatarPath("/static/workflow.png");
+        create.setSchema("{\"parameters\":[{\"name\":\"question\",\"type\":\"string\"}],"
+                + "\"outputs\":[{\"name\":\"summary\",\"type\":\"string\"}]}");
         create.setUserId("dev-admin");
         create.setOrgId("default-org");
         WorkflowCreateResult created = service.createWorkflow(create);
@@ -510,7 +513,7 @@ public class AppServiceImplTest {
         WorkflowExportResult draftExport = service.exportWorkflow(
                 new WorkflowExportQuery(created.getWorkflowId(), "", false, "dev-admin", "default-org"));
         assertEquals("PolicyFlow", draftExport.getName());
-        assertTrue(draftExport.getSchema().contains(created.getWorkflowId()));
+        assertTrue(draftExport.getSchema().contains("\"summary\""));
 
         AppPublishCommand publish = new AppPublishCommand();
         publish.setAppId(created.getWorkflowId());
@@ -532,7 +535,12 @@ public class AppServiceImplTest {
         run.setInput(Collections.singletonMap("question", "hello"));
         WorkflowRunResult runResult = service.runWorkflow(run);
         assertEquals(created.getWorkflowId(), runResult.getWorkflowId());
+        assertTrue(runResult.getRunId().startsWith("workflow-run-"));
+        assertEquals("success", runResult.getStatus());
         assertEquals("hello", runResult.getOutput().get("question"));
+        assertEquals("PolicyFlow generated summary for {question=hello}", runResult.getOutput().get("summary"));
+        assertEquals(1, repository.listWorkflowRuns("dev-admin", "default-org", created.getWorkflowId(), 10).size());
+        assertEquals(runResult.getRunId(), repository.listWorkflowRuns("dev-admin", "default-org", created.getWorkflowId(), 10).get(0).getRunId());
 
         WorkflowCopyCommand copy = new WorkflowCopyCommand();
         copy.setWorkflowId(created.getWorkflowId());
@@ -2308,6 +2316,7 @@ public class AppServiceImplTest {
         private final List<RagSnapshotRecord> ragSnapshots = new ArrayList<>();
         private final List<WorkflowDraftRecord> workflowDrafts = new ArrayList<>();
         private final List<WorkflowSnapshotRecord> workflowSnapshots = new ArrayList<>();
+        private final List<WorkflowRunRecord> workflowRuns = new ArrayList<>();
         private final List<AppUrlRecord> appUrls = new ArrayList<>();
         private final List<ApiKeyRecord> apiKeys = new ArrayList<>();
         private final List<ApiKeyUsageAggregateRecord> apiKeyUsageAggregates = new ArrayList<>();
@@ -2927,6 +2936,15 @@ public class AppServiceImplTest {
                 }
             }
             workflowSnapshots.removeAll(removed);
+            List<WorkflowRunRecord> removedRuns = new ArrayList<>();
+            for (WorkflowRunRecord run : workflowRuns) {
+                if (userId.equals(run.getUserId())
+                        && orgId.equals(run.getOrgId())
+                        && workflowId.equals(run.getWorkflowId())) {
+                    removedRuns.add(run);
+                }
+            }
+            workflowRuns.removeAll(removedRuns);
             return true;
         }
 
@@ -3040,6 +3058,28 @@ public class AppServiceImplTest {
             }
             workflowDrafts.add(draft);
             return true;
+        }
+
+        @Override
+        public WorkflowRunRecord saveWorkflowRun(WorkflowRunRecord record) {
+            record.setId(ids.incrementAndGet());
+            workflowRuns.add(record);
+            return record;
+        }
+
+        @Override
+        public List<WorkflowRunRecord> listWorkflowRuns(String userId, String orgId, String workflowId, int limit) {
+            List<WorkflowRunRecord> matches = new ArrayList<>();
+            for (WorkflowRunRecord run : workflowRuns) {
+                if (userId.equals(run.getUserId())
+                        && orgId.equals(run.getOrgId())
+                        && workflowId.equals(run.getWorkflowId())) {
+                    matches.add(run);
+                }
+            }
+            matches.sort(Comparator.comparing(WorkflowRunRecord::getCreatedAt).reversed());
+            int safeLimit = limit <= 0 ? matches.size() : Math.min(limit, matches.size());
+            return new ArrayList<>(matches.subList(0, safeLimit));
         }
 
         @Override

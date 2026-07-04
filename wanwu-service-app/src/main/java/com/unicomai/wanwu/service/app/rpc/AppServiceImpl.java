@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.app.rpc;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
@@ -153,6 +154,7 @@ import com.unicomai.wanwu.service.app.domain.ModelStatisticAggregateRecord;
 import com.unicomai.wanwu.service.app.domain.RagDraftConfigRecord;
 import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
+import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -1705,18 +1707,40 @@ public class AppServiceImpl implements AppService {
         }
         String userId = defaultIfBlank(command.getUserId(), DEV_USER_ID);
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
-        if (applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId()) == null) {
+        AppRecord workflow = applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId());
+        if (workflow == null) {
             throw new IllegalArgumentException("workflow draft not found");
         }
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("workflowId", command.getWorkflowId());
-        output.put("status", "success");
-        output.put("message", "Demo workflow response");
+        long startedAt = clock.millis();
+        WorkflowDraftRecord draft = applicationRepository.findWorkflowDraft(userId, orgId, command.getWorkflowId());
         Map<String, Object> input = command.getInput() == null
                 ? Collections.<String, Object>emptyMap()
                 : command.getInput();
-        output.putAll(input);
-        return new WorkflowRunResult(command.getWorkflowId(), output);
+        Map<String, Object> output = workflowRunOutput(workflow, draft, input);
+        long finishedAt = Math.max(startedAt, clock.millis());
+        String runId = newWorkflowRunId();
+
+        WorkflowRunRecord record = new WorkflowRunRecord();
+        record.setCreatedAt(startedAt);
+        record.setUpdatedAt(finishedAt);
+        record.setFinishedAt(finishedAt);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setWorkflowId(command.getWorkflowId());
+        record.setRunId(runId);
+        record.setStatus("success");
+        record.setInputJson(toJsonOrNull(input));
+        record.setOutputJson(toJsonOrNull(output));
+        record.setCostMillis(Math.max(0L, finishedAt - startedAt));
+        applicationRepository.saveWorkflowRun(record);
+
+        WorkflowRunResult result = new WorkflowRunResult(command.getWorkflowId(), output);
+        result.setRunId(runId);
+        result.setStatus(record.getStatus());
+        result.setCreatedAt(startedAt);
+        result.setFinishedAt(finishedAt);
+        result.setCostMillis(record.getCostMillis());
+        return result;
     }
 
     @Override
@@ -5017,6 +5041,85 @@ public class AppServiceImpl implements AppService {
         return toJsonOrNull(schema);
     }
 
+    private Map<String, Object> workflowRunOutput(AppRecord workflow,
+                                                  WorkflowDraftRecord draft,
+                                                  Map<String, Object> input) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("workflowId", workflow.getAppId());
+        output.put("workflow_id", workflow.getAppId());
+        output.put("status", "success");
+        output.put("message", "Demo workflow response");
+        output.putAll(input);
+        List<Map<String, Object>> declaredOutputs = workflowDeclaredOutputs(draft == null ? "" : draft.getSchemaJson());
+        for (Map<String, Object> declared : declaredOutputs) {
+            String name = stringValue(declared.get("name"));
+            if (isBlank(name)) {
+                continue;
+            }
+            output.put(name, workflowOutputValue(workflow, name, stringValue(declared.get("type")), input));
+        }
+        return output;
+    }
+
+    private List<Map<String, Object>> workflowDeclaredOutputs(String schemaJson) {
+        List<Map<String, Object>> outputs = new ArrayList<>();
+        JsonNode root = workflowSchema(schemaJson);
+        JsonNode declared = root.path("outputs");
+        if (!declared.isArray()) {
+            return outputs;
+        }
+        for (JsonNode node : declared) {
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("name", node.path("name").asText(node.path("key").asText("")));
+            output.put("type", node.path("type").asText("string"));
+            outputs.add(output);
+        }
+        return outputs;
+    }
+
+    private JsonNode workflowSchema(String schemaJson) {
+        if (isBlank(schemaJson)) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(schemaJson);
+        } catch (Exception ex) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private Object workflowOutputValue(AppRecord workflow,
+                                       String name,
+                                       String type,
+                                       Map<String, Object> input) {
+        if (input.containsKey(name)) {
+            return input.get(name);
+        }
+        if ("integer".equals(type)) {
+            return 0;
+        }
+        if ("number".equals(type) || "float".equals(type) || "double".equals(type)) {
+            return 0.0d;
+        }
+        if ("boolean".equals(type)) {
+            return true;
+        }
+        if ("array".equals(type) || "list".equals(type)) {
+            return Collections.emptyList();
+        }
+        if ("object".equals(type)) {
+            Map<String, Object> object = new LinkedHashMap<>();
+            object.put("workflowId", workflow.getAppId());
+            object.put("input", input);
+            return object;
+        }
+        String source = input.isEmpty() ? "input" : String.valueOf(input);
+        if (source.length() > 120) {
+            source = source.substring(0, 120);
+        }
+        return defaultIfBlank(workflow.getName(), "Workflow") + " generated " + name + " for " + source;
+    }
+
     private Map<String, Object> avatar(AppRecord record) {
         Map<String, Object> avatar = new LinkedHashMap<>();
         avatar.put("key", defaultIfBlank(record.getAvatarKey(), ""));
@@ -5068,6 +5171,10 @@ public class AppServiceImpl implements AppService {
 
     private String newDetailId() {
         return "detail-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newWorkflowRunId() {
+        return "workflow-run-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private String newApiKey() {

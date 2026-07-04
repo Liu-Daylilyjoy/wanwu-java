@@ -639,8 +639,14 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", "{\"nodes\":[]}"));
         when(appService.importWorkflow(any(WorkflowImportCommand.class)))
                 .thenReturn(new WorkflowCreateResult("workflow-003"));
+        WorkflowRunResult workflowRun = new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok"));
+        workflowRun.setRunId("workflow-run-001");
+        workflowRun.setStatus("success");
+        workflowRun.setCreatedAt(100L);
+        workflowRun.setFinishedAt(125L);
+        workflowRun.setCostMillis(25L);
         when(appService.runWorkflow(any(WorkflowRunCommand.class)))
-                .thenReturn(new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok")));
+                .thenReturn(workflowRun);
 
         mockMvc.perform(post("/user/api/v1/appspace/workflow")
                         .header("Authorization", "Bearer dev-token")
@@ -714,6 +720,9 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"workflow_id\":\"workflow-001\",\"input\":{\"question\":\"hello\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.runId").value("workflow-run-001"))
+                .andExpect(jsonPath("$.data.status").value("success"))
+                .andExpect(jsonPath("$.data.costMillis").value(25))
                 .andExpect(jsonPath("$.data.output.answer").value("ok"));
 
         mockMvc.perform(delete("/user/api/v1/appspace/app")
@@ -1219,8 +1228,14 @@ public class WanwuFrontendApiControllerTest {
                 + "\"outputs\":[{\"name\":\"summary\",\"type\":\"string\",\"desc\":\"Summary\"}]}";
         when(appService.exportWorkflow(any(WorkflowExportQuery.class)))
                 .thenReturn(new WorkflowExportResult("PolicyFlow", "policy workflow", workflowSchema));
+        WorkflowRunResult workflowApiRun = new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok"));
+        workflowApiRun.setRunId("workflow-run-001");
+        workflowApiRun.setStatus("success");
+        workflowApiRun.setCreatedAt(100L);
+        workflowApiRun.setFinishedAt(125L);
+        workflowApiRun.setCostMillis(25L);
         when(appService.runWorkflow(any(WorkflowRunCommand.class)))
-                .thenReturn(new WorkflowRunResult("workflow-001", Collections.singletonMap("answer", "ok")));
+                .thenReturn(workflowApiRun);
 
         workflowApiMvc.perform(get("/workflow/api/workflow/parameter")
                         .header("x-user-id", "dev-admin")
@@ -1252,6 +1267,9 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.workflow_id").value("workflow-001"))
+                .andExpect(jsonPath("$.data.run_id").value("workflow-run-001"))
+                .andExpect(jsonPath("$.data.status").value("success"))
+                .andExpect(jsonPath("$.data.costMillis").value(25))
                 .andExpect(jsonPath("$.data.output.answer").value("ok"));
 
         org.mockito.ArgumentCaptor<WorkflowRunCommand> runCaptor = forClass(WorkflowRunCommand.class);
