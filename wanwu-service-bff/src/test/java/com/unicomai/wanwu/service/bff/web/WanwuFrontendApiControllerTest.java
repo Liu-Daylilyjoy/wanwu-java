@@ -1301,8 +1301,8 @@ public class WanwuFrontendApiControllerTest {
     public void permissionManagementWriteRoutesCallIamService() throws Exception {
         when(iamService.createUser(anyString(), anyString(), any(Map.class)))
                 .thenReturn(userInfo("user-001", "alice"));
-        when(iamService.importUsers(anyString(), anyString(), anyString(), anyLong()))
-                .thenReturn(map("total", 1, "successCount", 1, "failCount", 0));
+        when(iamService.importUsers(anyString(), anyString(), any(List.class)))
+                .thenReturn(map("total", 2, "successCount", 2, "failCount", 0));
         when(iamService.listUsersOutsideOrg(anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(page(userInfo("user-002", "bob"), 1, 1, 10));
         when(iamService.createRole(anyString(), anyString(), any(Map.class)))
@@ -1317,12 +1317,14 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.userId").value("user-001"));
         mockMvc.perform(multipart("/user/api/v1/user/batch")
-                        .file(new MockMultipartFile("file", "users.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                "rows".getBytes(StandardCharsets.UTF_8)))
+                        .file(new MockMultipartFile("file", "users.csv", "text/csv",
+                                ("username,nickname,password,email,phone,company,role,remark\n"
+                                        + "carol,Carol,Password1!,carol@example.local,13800000001,Wanwu Java,app,imported\n"
+                                        + "dave,Dave,Password1!,dave@example.local,13800000002,Wanwu Java,app,imported")
+                                        .getBytes(StandardCharsets.UTF_8)))
                         .header("Authorization", "Bearer dev-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.successCount").value(1));
+                .andExpect(jsonPath("$.data.successCount").value(2));
         mockMvc.perform(put("/user/api/v1/user")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -1404,7 +1406,12 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.code").value(0));
 
         verify(iamService).createUser(anyString(), anyString(), any(Map.class));
-        verify(iamService).importUsers(anyString(), anyString(), anyString(), anyLong());
+        ArgumentCaptor<List> importedUsers = forClass(List.class);
+        verify(iamService).importUsers(anyString(), anyString(), importedUsers.capture());
+        assertEquals(2, importedUsers.getValue().size());
+        assertEquals("carol", ((Map) importedUsers.getValue().get(0)).get("username"));
+        assertEquals("Wanwu Java", ((Map) importedUsers.getValue().get(0)).get("company"));
+        assertEquals("app", ((Map) importedUsers.getValue().get(0)).get("roleName"));
         verify(iamService).updateUser(anyString(), anyString(), any(Map.class));
         verify(iamService).updateUserStatus(anyString(), anyString(), any(Map.class));
         verify(iamService).deleteUser(anyString(), anyString(), any(Map.class));

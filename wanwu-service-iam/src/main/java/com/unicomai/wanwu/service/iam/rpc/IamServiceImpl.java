@@ -244,17 +244,35 @@ public class IamServiceImpl implements IamService {
         request.put("userId", "batch-user-" + seq);
         request.put("username", defaultText(singletonMap("fileName", fileName), "fileName", "batch-user-" + seq));
         request.put("nickname", "Imported User " + seq);
-        Map<String, Object> user = userRecord(String.valueOf(request.get("userId")), request, operatorUserId, operatorOrgId);
-        users.put(String.valueOf(user.get("userId")), user);
-        saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("total", 1);
-        result.put("successCount", 1);
-        result.put("failCount", 0);
+        Map<String, Object> result = importUsers(operatorUserId, operatorOrgId, Collections.singletonList(request));
         result.put("fileName", defaultText(singletonMap("fileName", fileName), "fileName", ""));
         result.put("fileSize", fileSize);
-        result.put("list", Collections.singletonList(copy(user)));
+        return result;
+    }
+
+    @Override
+    public synchronized Map<String, Object> importUsers(String operatorUserId,
+                                                        String operatorOrgId,
+                                                        List<Map<String, Object>> importedUsers) {
+        if (importedUsers == null || importedUsers.isEmpty()) {
+            throw new IllegalArgumentException("no valid user data");
+        }
+        java.util.ArrayList<Map<String, Object>> created = new java.util.ArrayList<>();
+        for (Map<String, Object> row : importedUsers) {
+            Map<String, Object> request = importedUserRequest(row, operatorOrgId);
+            if (!Strings.hasText(defaultText(request, "username", ""))) {
+                continue;
+            }
+            created.add(createUser(operatorUserId, operatorOrgId, request));
+        }
+        if (created.isEmpty()) {
+            throw new IllegalArgumentException("no valid user data");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", created.size());
+        result.put("successCount", created.size());
+        result.put("failCount", 0);
+        result.put("list", created);
         return result;
     }
 
@@ -796,6 +814,41 @@ public class IamServiceImpl implements IamService {
         result.put("passwordVersion", 0);
         result.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
         return result;
+    }
+
+    private Map<String, Object> importedUserRequest(Map<String, Object> row, String operatorOrgId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        String username = defaultText(row, "username", defaultText(row, "userName", ""));
+        request.put("username", username);
+        request.put("nickname", defaultText(row, "nickname", username));
+        request.put("phone", defaultText(row, "phone", ""));
+        request.put("email", defaultText(row, "email", ""));
+        request.put("gender", defaultText(row, "gender", ""));
+        request.put("remark", defaultText(row, "remark", ""));
+        request.put("company", defaultText(row, "company", "Wanwu Java"));
+        request.put("orgId", operatorOrgId);
+        Object roleIds = firstPresent(row, "roleIds", "roles", "roleId");
+        if (roleIds != null) {
+            request.put("roleIds", roleIds);
+        } else {
+            String roleName = defaultText(row, "roleName", defaultText(row, "role", "app"));
+            request.put("roleIds", Collections.singletonList(roleIdForName(roleName)));
+        }
+        return request;
+    }
+
+    private String roleIdForName(String roleName) {
+        if (!Strings.hasText(roleName)) {
+            return "app";
+        }
+        for (Map<String, Object> role : roles.values()) {
+            if (roleName.equals(String.valueOf(role.get("roleId")))
+                    || roleName.equals(String.valueOf(role.get("id")))
+                    || roleName.equals(String.valueOf(role.get("name")))) {
+                return String.valueOf(role.get("roleId"));
+            }
+        }
+        return roleName;
     }
 
     private Map<String, Object> defaultOrganization() {

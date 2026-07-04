@@ -7,6 +7,7 @@ import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 
+import java.util.List;
 import java.util.Map;
 
 public interface IamService {
@@ -34,6 +35,8 @@ public interface IamService {
     Map<String, Object> createUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
 
     Map<String, Object> importUsers(String operatorUserId, String operatorOrgId, String fileName, long fileSize);
+
+    Map<String, Object> importUsers(String operatorUserId, String operatorOrgId, List<Map<String, Object>> users);
 
     void updateUser(String operatorUserId, String operatorOrgId, Map<String, Object> request);
 

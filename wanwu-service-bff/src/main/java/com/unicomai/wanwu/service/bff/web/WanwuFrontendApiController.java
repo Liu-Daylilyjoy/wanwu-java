@@ -129,6 +129,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -258,9 +259,17 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(value = "file", required = false) MultipartFile file) {
         UserContext userContext = userContext(authorization);
-        String fileName = file == null ? "" : defaultIfBlank(file.getOriginalFilename(), "");
-        long fileSize = file == null ? 0L : file.getSize();
-        return FrontendResponse.ok(iamService.importUsers(userContext.getUserId(), userContext.getOrgId(), fileName, fileSize));
+        if (file == null || file.isEmpty()) {
+            return FrontendResponse.failure(1001, "file is required");
+        }
+        try {
+            return FrontendResponse.ok(iamService.importUsers(
+                    userContext.getUserId(), userContext.getOrgId(), importedUsers(file)));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        } catch (IOException ex) {
+            return FrontendResponse.failure(1001, "user import failed: " + ex.getMessage());
+        }
     }
 
     @PutMapping("/user")
@@ -3135,6 +3144,116 @@ public class WanwuFrontendApiController {
             }
         }
         return fallback;
+    }
+
+    private List<Map<String, Object>> importedUsers(MultipartFile file) throws IOException {
+        String fileName = originalFileName(file).toLowerCase(Locale.ROOT);
+        byte[] bytes = file.getBytes();
+        String table = fileName.endsWith(".xlsx")
+                ? SimpleXlsxReader.toDelimitedText(bytes)
+                : new String(bytes, StandardCharsets.UTF_8);
+        return parseImportedUsers(table);
+    }
+
+    private List<Map<String, Object>> parseImportedUsers(String table) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (isBlank(table)) {
+            return result;
+        }
+        String[] lines = table.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        if (lines.length == 0) {
+            return result;
+        }
+        char delimiter = lines[0].indexOf('\t') >= 0 ? '\t' : ',';
+        List<String> headers = splitDelimitedLine(lines[0], delimiter);
+        for (int i = 1; i < lines.length; i++) {
+            if (isBlank(lines[i])) {
+                continue;
+            }
+            List<String> values = splitDelimitedLine(lines[i], delimiter);
+            Map<String, Object> row = new LinkedHashMap<>();
+            for (int j = 0; j < headers.size() && j < values.size(); j++) {
+                String key = userImportKey(headers.get(j));
+                if (!isBlank(key)) {
+                    row.put(key, values.get(j));
+                }
+            }
+            if (!isBlank(firstImportText(row, "username", "userName"))) {
+                result.add(row);
+            }
+        }
+        return result;
+    }
+
+    private List<String> splitDelimitedLine(String line, char delimiter) {
+        List<String> values = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    current.append('"');
+                    i++;
+                } else {
+                    quoted = !quoted;
+                }
+                continue;
+            }
+            if (ch == delimiter && !quoted) {
+                values.add(current.toString().trim());
+                current.setLength(0);
+                continue;
+            }
+            current.append(ch);
+        }
+        values.add(current.toString().trim());
+        return values;
+    }
+
+    private String userImportKey(String header) {
+        String key = defaultIfBlank(header, "").toLowerCase(Locale.ROOT)
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
+        if ("username".equals(key) || "user".equals(key) || "account".equals(key)) {
+            return "username";
+        }
+        if ("nickname".equals(key) || "name".equals(key)) {
+            return "nickname";
+        }
+        if ("password".equals(key)) {
+            return "password";
+        }
+        if ("email".equals(key)) {
+            return "email";
+        }
+        if ("phone".equals(key) || "mobile".equals(key) || "telephone".equals(key)) {
+            return "phone";
+        }
+        if ("company".equals(key) || "unit".equals(key) || "organization".equals(key)) {
+            return "company";
+        }
+        if ("role".equals(key) || "rolename".equals(key)) {
+            return "roleName";
+        }
+        if ("remark".equals(key) || "note".equals(key) || "comment".equals(key)) {
+            return "remark";
+        }
+        if ("gender".equals(key)) {
+            return "gender";
+        }
+        return "";
+    }
+
+    private String firstImportText(Map<String, Object> values, String... keys) {
+        for (String key : keys) {
+            Object value = values.get(key);
+            if (value != null && !isBlank(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return "";
     }
 
     private String originalFileName(MultipartFile file) {

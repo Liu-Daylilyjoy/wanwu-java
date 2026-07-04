@@ -69,12 +69,12 @@ This slice provides a Docker development IAM repository. After the MySQL persist
 - Deletion removes non-built-in development records.
 - The built-in `admin` and `app` accounts remain protected seed records.
 - Role permissions are normalized from either string arrays or frontend route/permission maps.
-- `user/batch` accepts the frontend multipart upload route and records a deterministic imported development user.
+- `user/batch` parses uploaded CSV/TSV text or `.xlsx` sheet data using the existing local parser, maps `username/password/company/phone/role/remark` style headers into IAM user rows, and creates one persisted user per imported row.
 
 ## Remaining Gaps
 
 - Normalized Go-equivalent IAM relational tables are still missing; the current durable boundary is a JSON compatibility table.
 - Real password hashing, reset rules, and login policy are not reproduced.
-- Real Excel parsing and per-row import errors are not reproduced.
+- Go-equivalent strict Excel header localization, username/password/phone policy validation, and per-row import error reporting are not reproduced.
 - Hierarchical organization constraints and cross-org permission checks are minimal.
 - Audit logs, invitation workflow, and notification side effects are not reproduced.
