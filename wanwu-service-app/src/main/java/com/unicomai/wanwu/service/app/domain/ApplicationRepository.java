@@ -86,6 +86,8 @@ public interface ApplicationRepository {
 
     AppTemplateRecord findAppTemplate(String templateType, String templateId);
 
+    boolean incrementAppTemplateDownload(String templateType, String templateId, long updatedAt);
+
     List<AppFavoriteRecord> listAppFavorites(String userId, String appType);
 
     void saveAppFavorite(AppFavoriteRecord record);

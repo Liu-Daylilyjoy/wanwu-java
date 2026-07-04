@@ -32,7 +32,7 @@ Workflow templates:
 - `GET /workflow/template/list`: returns persisted template cards and `downloadLink.url`.
 - `GET /workflow/template/detail`: returns detail fields used by the template detail page.
 - `GET /workflow/template/recommend`: returns related template cards excluding the current template.
-- `GET /workflow/template/download`: returns the template schema JSON as an attachment.
+- `GET /workflow/template/download`: records the Workflow template download count through `AppService.recordAppTemplateDownload`, then returns the template schema JSON as an attachment.
 - `POST /workflow/template`: creates a workflow through `AppService.createWorkflow` and returns both `workflow_id` and `workflowId`.
 
 ## Current Boundary
@@ -41,7 +41,7 @@ This slice removes frontend `Not Found` failures for Template Square and assista
 
 - Template records are Flyway-seeded development records in `app_templates`, not the full Go marketplace publication/governance model.
 - Workflow template copy creates a workflow draft with a simple schema, not a full visual runtime graph imported from the Go template service.
-- Real marketplace ranking, download counts, authorship governance, and template publication remain future slices.
+- Real marketplace ranking, authorship governance, and template publication remain future slices.
 
 ## Verification
 

@@ -5,6 +5,7 @@ import com.unicomai.wanwu.service.app.persistence.entity.AppTemplateEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -36,4 +37,15 @@ public interface AppTemplateMapper extends BaseMapper<AppTemplateEntity> {
     })
     AppTemplateEntity selectByTemplateId(@Param("templateType") String templateType,
                                          @Param("templateId") String templateId);
+
+    @Update({
+            "UPDATE app_templates",
+            "SET download_count = download_count + 1,",
+            "    updated_at = #{updatedAt}",
+            "WHERE template_type = #{templateType}",
+            "  AND template_id = #{templateId}"
+    })
+    int incrementDownload(@Param("templateType") String templateType,
+                          @Param("templateId") String templateId,
+                          @Param("updatedAt") long updatedAt);
 }

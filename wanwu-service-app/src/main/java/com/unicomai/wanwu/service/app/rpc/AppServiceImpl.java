@@ -894,6 +894,17 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public void recordAppTemplateDownload(String templateType, String templateId) {
+        String normalizedType = normalizeTemplateType(templateType);
+        if (isBlank(templateId)) {
+            throw new IllegalArgumentException("template id is required");
+        }
+        if (!applicationRepository.incrementAppTemplateDownload(normalizedType, templateId, clock.millis())) {
+            throw new IllegalArgumentException("template not found: " + templateId);
+        }
+    }
+
+    @Override
     public void changeExplorationAppFavorite(ExplorationAppFavoriteCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("favorite command is required");

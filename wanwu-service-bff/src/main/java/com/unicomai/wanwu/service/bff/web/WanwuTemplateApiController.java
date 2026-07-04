@@ -135,6 +135,7 @@ public class WanwuTemplateApiController {
     @GetMapping("/workflow/template/download")
     public ResponseEntity<byte[]> downloadWorkflowTemplate(@RequestParam("templateId") String templateId) {
         Map<String, Object> template = workflowTemplateDetail(templateId);
+        recordWorkflowTemplateDownload(templateId);
         String payload;
         try {
             payload = JSON.writeValueAsString(template.get("schema"));
@@ -191,6 +192,17 @@ public class WanwuTemplateApiController {
         body.put("workflow_id", workflowId);
         body.put("workflowId", workflowId);
         return body;
+    }
+
+    private void recordWorkflowTemplateDownload(String templateId) {
+        if (appService == null) {
+            return;
+        }
+        try {
+            appService.recordAppTemplateDownload("workflow", templateId);
+        } catch (RuntimeException ignored) {
+            // Go logs and continues when template download count recording fails.
+        }
     }
 
     private List<Map<String, Object>> assistantTemplateRows(String category, String name) {

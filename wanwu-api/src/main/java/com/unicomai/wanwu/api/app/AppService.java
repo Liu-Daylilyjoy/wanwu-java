@@ -141,6 +141,8 @@ public interface AppService {
 
     Map<String, Object> getAppTemplate(String templateType, String templateId);
 
+    void recordAppTemplateDownload(String templateType, String templateId);
+
     void changeExplorationAppFavorite(ExplorationAppFavoriteCommand command);
 
     void recordAppHistory(ExplorationAppHistoryCommand command);

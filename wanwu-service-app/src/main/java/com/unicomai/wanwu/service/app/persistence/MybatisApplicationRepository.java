@@ -529,6 +529,11 @@ public class MybatisApplicationRepository implements ApplicationRepository {
     }
 
     @Override
+    public boolean incrementAppTemplateDownload(String templateType, String templateId, long updatedAt) {
+        return appTemplateMapper.incrementDownload(templateType, templateId, updatedAt) > 0;
+    }
+
+    @Override
     public List<AppFavoriteRecord> listAppFavorites(String userId, String appType) {
         List<AppFavoriteEntity> entities = appFavoriteMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AppFavoriteEntity>()

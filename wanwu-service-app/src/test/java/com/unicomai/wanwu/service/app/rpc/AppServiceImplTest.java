@@ -318,6 +318,10 @@ public class AppServiceImplTest {
         assertEquals("workflow-template-custom", workflowDetail.get("templateId"));
         assertEquals(7, workflowDetail.get("downloadCount"));
         assertEquals("workflow-template-custom", ((Map<?, ?>) workflowDetail.get("schema")).get("id"));
+
+        service.recordAppTemplateDownload("workflow", "workflow-template-custom");
+        Map<String, Object> downloaded = service.getAppTemplate("workflow", "workflow-template-custom");
+        assertEquals(8, downloaded.get("downloadCount"));
     }
 
     @Test
@@ -2958,6 +2962,17 @@ public class AppServiceImplTest {
                 }
             }
             return null;
+        }
+
+        @Override
+        public boolean incrementAppTemplateDownload(String templateType, String templateId, long updatedAt) {
+            AppTemplateRecord record = findAppTemplate(templateType, templateId);
+            if (record == null) {
+                return false;
+            }
+            record.setDownloadCount(record.getDownloadCount() == null ? 1 : record.getDownloadCount() + 1);
+            record.setUpdatedAt(updatedAt);
+            return true;
         }
 
         @Override

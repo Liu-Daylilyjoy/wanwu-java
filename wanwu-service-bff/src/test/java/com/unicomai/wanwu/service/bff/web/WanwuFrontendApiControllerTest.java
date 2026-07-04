@@ -528,6 +528,7 @@ public class WanwuFrontendApiControllerTest {
         verify(appService).createAssistant(any(AssistantCreateCommand.class));
         verify(appService).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
         verify(appService).createWorkflow(any(WorkflowCreateCommand.class));
+        verify(appService).recordAppTemplateDownload(eq("workflow"), eq("workflow-template-doc-review"));
     }
 
     @Test
