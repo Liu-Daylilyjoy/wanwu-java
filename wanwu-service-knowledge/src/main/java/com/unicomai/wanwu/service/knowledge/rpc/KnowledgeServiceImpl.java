@@ -40,6 +40,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int PERMISSION_READ = 0;
     private static final int PERMISSION_EDIT = 10;
     private static final int PERMISSION_ADMIN = 20;
+    private static final int PERMISSION_SYSTEM = 30;
     private static final int CATEGORY_KNOWLEDGE = 0;
     private static final int QA_STATUS_FINISHED = 2;
     private static final int REPORT_STATUS_PENDING = 0;
@@ -251,6 +252,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         metasByKnowledgeId.remove(knowledgeId);
         permissionsByKnowledgeId.remove(knowledgeId);
         saveSnapshot();
+    }
+
+    @Override
+    public synchronized void checkKnowledgeUserPermission(String userId, String orgId, String knowledgeId, int permissionType) {
+        KnowledgeState knowledge = existingKnowledge(knowledgeId);
+        if (!matchesOwner(orgId, knowledge)) {
+            throw new IllegalArgumentException("knowledge permission denied");
+        }
+        int granted = explicitPermissionForUser(knowledgeId, userId);
+        if (defaultIfBlank(userId, DEFAULT_USER_ID).equals(knowledge.userId)
+                && defaultIfBlank(orgId, DEFAULT_ORG_ID).equals(knowledge.orgId)) {
+            granted = Math.max(granted, PERMISSION_SYSTEM);
+        }
+        if (granted < permissionType) {
+            throw new IllegalArgumentException("knowledge permission denied");
+        }
     }
 
     @Override
@@ -1105,7 +1122,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         permission.userName = "dev-app".equals(permission.userId) ? "app" : permission.userId;
         permission.orgId = defaultIfBlank(string(knowledgeUser.get("orgId")), DEFAULT_ORG_ID);
         permission.orgName = DEFAULT_ORG_NAME;
-        permission.permissionType = PERMISSION_ADMIN;
+        permission.permissionType = PERMISSION_SYSTEM;
         permission.transfer = true;
         permissions(knowledgeId).add(permission);
         saveSnapshot();
@@ -1717,7 +1734,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         permission.userName = "dev-admin".equals(userId) ? "admin" : userId;
         permission.orgId = orgId;
         permission.orgName = DEFAULT_ORG_NAME;
-        permission.permissionType = PERMISSION_ADMIN;
+        permission.permissionType = PERMISSION_SYSTEM;
         permission.transfer = true;
         permissions(knowledgeId).add(permission);
     }
@@ -2261,6 +2278,17 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private int permissionForUser(String knowledgeId, String userId) {
         String safeUser = defaultIfBlank(userId, DEFAULT_USER_ID);
         int permissionType = PERMISSION_READ;
+        for (PermissionState permission : permissions(knowledgeId)) {
+            if (safeUser.equals(permission.userId)) {
+                permissionType = Math.max(permissionType, permission.permissionType);
+            }
+        }
+        return permissionType;
+    }
+
+    private int explicitPermissionForUser(String knowledgeId, String userId) {
+        String safeUser = defaultIfBlank(userId, DEFAULT_USER_ID);
+        int permissionType = -1;
         for (PermissionState permission : permissions(knowledgeId)) {
             if (safeUser.equals(permission.userId)) {
                 permissionType = Math.max(permissionType, permission.permissionType);

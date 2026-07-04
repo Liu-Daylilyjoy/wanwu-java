@@ -20,6 +20,8 @@ import com.unicomai.wanwu.api.model.dto.ProviderModelTypeResult;
 import com.unicomai.wanwu.api.model.dto.RecommendModelQuery;
 import com.unicomai.wanwu.api.model.dto.RecommendModelResult;
 
+import java.util.List;
+
 public interface ModelService {
 
     ServiceDescriptor describe();
@@ -33,6 +35,10 @@ public interface ModelService {
     void changeModelStatus(ModelStatusCommand command);
 
     ModelInfo getModel(String userId, String orgId, String modelId);
+
+    List<String> listModelIdsByUuids(List<String> uuids);
+
+    void checkModelUserPermission(String userId, String orgId, List<String> modelIds);
 
     ModelListResult listModels(ModelListQuery query);
 

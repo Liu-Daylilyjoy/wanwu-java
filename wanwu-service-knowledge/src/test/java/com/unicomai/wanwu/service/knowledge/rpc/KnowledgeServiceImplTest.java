@@ -14,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -49,9 +50,13 @@ public class KnowledgeServiceImplTest {
         assertEquals("Dev KB", knowledge.get("name"));
         assertEquals(0, knowledge.get("category"));
         assertEquals(0, knowledge.get("external"));
-        assertEquals(20, knowledge.get("permissionType"));
+        assertEquals(30, knowledge.get("permissionType"));
         assertEquals("2", map(knowledge.get("embeddingModelInfo")).get("modelId"));
         assertTrue((Boolean) listOfMaps(knowledge.get("knowledgeTagList")).get(0).get("selected"));
+
+        service.checkKnowledgeUserPermission("dev-admin", "default-org", knowledgeId, 30);
+        assertThrows(IllegalArgumentException.class, () ->
+                service.checkKnowledgeUserPermission("dev-app", "default-org", knowledgeId, 0));
 
         Map<String, Object> tagList = service.listTags("dev-admin", "default-org", tagQuery(knowledgeId, ""));
         assertEquals(1, listOfMaps(tagList.get("knowledgeTagList")).size());

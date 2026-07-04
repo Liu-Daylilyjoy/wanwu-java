@@ -195,6 +195,59 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    public synchronized List<String> listModelIdsByUuids(List<String> uuids) {
+        List<String> result = new ArrayList<String>();
+        if (uuids == null || uuids.isEmpty()) {
+            return result;
+        }
+        for (String uuid : uuids) {
+            if (isBlank(uuid)) {
+                continue;
+            }
+            for (ModelInfo model : models.values()) {
+                if (uuid.equals(model.getUuid()) || uuid.equals(model.getModelId())) {
+                    if (!result.contains(model.getModelId())) {
+                        result.add(model.getModelId());
+                    }
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public synchronized void checkModelUserPermission(String userId, String orgId, List<String> modelIds) {
+        if (modelIds == null || modelIds.isEmpty()) {
+            return;
+        }
+        String safeUser = defaultIfBlank(userId, DEFAULT_USER_ID);
+        String safeOrg = defaultIfBlank(orgId, DEFAULT_ORG_ID);
+        String unauthorized = "";
+        for (String modelId : modelIds) {
+            ModelInfo model = models.get(modelId);
+            if (model == null) {
+                unauthorized = modelId;
+                continue;
+            }
+            boolean allowed;
+            if (SCOPE_PUBLIC.equals(model.getScopeType())) {
+                allowed = true;
+            } else if (SCOPE_ORG.equals(model.getScopeType())) {
+                allowed = safeOrg.equals(model.getOrgId());
+            } else {
+                allowed = safeUser.equals(model.getUserId()) && safeOrg.equals(model.getOrgId());
+            }
+            if (!allowed) {
+                unauthorized = modelId;
+            }
+        }
+        if (!isBlank(unauthorized)) {
+            throw new IllegalArgumentException("bff_model_perm: " + unauthorized);
+        }
+    }
+
+    @Override
     public synchronized ModelListResult listModels(ModelListQuery query) {
         ModelListQuery safe = query == null ? new ModelListQuery() : query;
         List<ModelInfo> result = new ArrayList<ModelInfo>();

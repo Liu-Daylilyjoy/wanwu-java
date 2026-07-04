@@ -31,6 +31,7 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -95,6 +96,32 @@ public class ModelServiceImplTest {
         service.deleteModel("dev-admin", "default-org", created.getModelId());
         ModelListResult afterDelete = service.listModels(new ModelListQuery("dev-admin", "default-org", "", "", "DeepSeek Chat Updated", "", ""));
         assertEquals(0, afterDelete.getTotal());
+    }
+
+    @Test
+    public void modelUuidLookupAndPermissionFollowGoScopeRules() {
+        ModelInfo builtin = service.listModels(new ModelListQuery("dev-admin", "default-org", "", "", "", "", ""))
+                .getList().get(0);
+        assertEquals(Collections.singletonList(builtin.getModelId()),
+                service.listModelIdsByUuids(Collections.singletonList(builtin.getUuid())));
+
+        service.checkModelUserPermission("dev-admin", "default-org",
+                Collections.singletonList(builtin.getModelId()));
+        assertThrows(IllegalArgumentException.class, () ->
+                service.checkModelUserPermission("dev-app", "default-org",
+                        Collections.singletonList(builtin.getModelId())));
+
+        ModelUpsertCommand create = new ModelUpsertCommand();
+        create.setUserId("model-owner");
+        create.setOrgId("owner-org");
+        create.setProvider("OpenAI-API-compatible");
+        create.setModelType("llm");
+        create.setModel("public-compatible");
+        create.setDisplayName("Public Compatible");
+        create.setScopeType("2");
+        ModelInfo publicModel = service.importModel(create);
+        service.checkModelUserPermission("another-user", "another-org",
+                Collections.singletonList(publicModel.getModelId()));
     }
 
     @Test

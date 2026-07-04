@@ -165,6 +165,41 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void openApiFineGrainedAuthRejectsModelAndKnowledgePermissionErrors() throws Exception {
+        when(modelService.listModelIdsByUuids(Collections.singletonList("blocked-model-uuid")))
+                .thenReturn(Collections.singletonList("blocked-model"));
+        doAnswer(invocation -> {
+            throw new IllegalArgumentException("bff_model_perm: blocked-model");
+        }).when(modelService).checkModelUserPermission(eq("dev-admin"), eq("default-org"),
+                eq(Collections.singletonList("blocked-model")));
+        doAnswer(invocation -> {
+            throw new IllegalArgumentException("knowledge permission denied");
+        }).when(knowledgeService).checkKnowledgeUserPermission(eq("dev-admin"), eq("default-org"),
+                eq("knowledge-blocked"), eq(30));
+
+        mockMvc.perform(put("/service/api/openapi/v1/agent/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantUuid\":\"assistant-openapi-001\",\"modelConfig\":{\"modelId\":\"blocked-model-uuid\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bff_model_perm: blocked-model"));
+
+        mockMvc.perform(put("/service/api/openapi/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("knowledgeId is required"));
+
+        mockMvc.perform(delete("/service/api/openapi/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-blocked\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("knowledge permission denied"));
+    }
+
+    @Test
     public void chatRagAndWorkflowRoutesMapToExistingAppService() throws Exception {
         AssistantConversationStreamResult assistantResult = new AssistantConversationStreamResult();
         assistantResult.setConversationId("conversation-openapi-001");
@@ -244,6 +279,9 @@ public class WanwuOpenApiControllerTest {
 
     @Test
     public void agentConfigAndPublishRoutesUseAppService() throws Exception {
+        when(modelService.listModelIdsByUuids(Collections.singletonList("model-001")))
+                .thenReturn(Collections.singletonList("model-001"));
+
         mockMvc.perform(put("/service/api/openapi/v1/agent/config")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -261,6 +299,8 @@ public class WanwuOpenApiControllerTest {
         ArgumentCaptor<AssistantConfigUpdateCommand> configCaptor =
                 forClass(AssistantConfigUpdateCommand.class);
         verify(appService).updateAssistantConfig(configCaptor.capture());
+        verify(modelService).checkModelUserPermission(eq("dev-admin"), eq("default-org"),
+                eq(Collections.singletonList("model-001")));
         assertEquals("assistant-openapi-001", configCaptor.getValue().getAssistantId());
         assertEquals("dev-admin", configCaptor.getValue().getUserId());
         assertEquals("default-org", configCaptor.getValue().getOrgId());
@@ -441,7 +481,8 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].knowledgeId").value("knowledge-openapi-001"));
 
         mockMvc.perform(get("/service/api/openapi/v1/knowledge/doc/config")
-                        .header("Authorization", "Bearer dev-token"))
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-openapi-001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.chunkSize").value(700));
 

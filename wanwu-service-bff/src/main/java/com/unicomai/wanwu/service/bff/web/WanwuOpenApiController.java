@@ -79,6 +79,9 @@ public class WanwuOpenApiController {
     private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CHATFLOW_APP_TYPE = "chatflow";
     private static final String MCP_SERVER_APP_TYPE = "mcpserver";
+    private static final int KNOWLEDGE_VIEW = 0;
+    private static final int KNOWLEDGE_EDIT = 10;
+    private static final int KNOWLEDGE_SYSTEM = 30;
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final long OAUTH_CODE_SECONDS = 600L;
@@ -142,6 +145,12 @@ public class WanwuOpenApiController {
     public ResponseEntity<Map<String, Object>> openApiAuthError(OpenApiAuthException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(errorBody(defaultIfBlank(ex.getMessage(), "invalid api key")));
+    }
+
+    @ExceptionHandler(OpenApiBadRequestException.class)
+    public ResponseEntity<Map<String, Object>> openApiBadRequest(OpenApiBadRequestException ex) {
+        return ResponseEntity.badRequest()
+                .body(errorBody(defaultIfBlank(ex.getMessage(), "invalid openapi request")));
     }
 
     @PostMapping("/agent")
@@ -218,7 +227,10 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            appService.updateAssistantConfig(openApiAgentConfig(ctx, body(request)));
+            Map<String, Object> safe = body(request);
+            authModelByUuid(ctx, safe, "modelConfig.modelId", "rerankConfig.modelId",
+                    "recommendConfig.modelConfig.modelId");
+            appService.updateAssistantConfig(openApiAgentConfig(ctx, safe));
             return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -533,7 +545,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            Map<String, Object> data = knowledgeService.createKnowledge(ctx.userId, ctx.orgId, body(request));
+            Map<String, Object> safe = body(request);
+            authModelByUuid(ctx, safe, "embeddingModelInfo.modelId", "knowledgeGraph.llmModelId");
+            Map<String, Object> data = knowledgeService.createKnowledge(ctx.userId, ctx.orgId, safe);
             return FrontendResponse.ok(withKnowledgeAliases(data));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -546,7 +560,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            knowledgeService.updateKnowledge(ctx.userId, ctx.orgId, body(request));
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_SYSTEM);
+            knowledgeService.updateKnowledge(ctx.userId, ctx.orgId, safe);
             return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -559,7 +575,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            knowledgeService.deleteKnowledge(ctx.userId, ctx.orgId, body(request));
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_SYSTEM);
+            knowledgeService.deleteKnowledge(ctx.userId, ctx.orgId, safe);
             return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -580,11 +598,16 @@ public class WanwuOpenApiController {
     }
 
     @GetMapping("/knowledge/doc/config")
-    public FrontendResponse<Map<String, Object>> docConfig(@RequestHeader HttpHeaders headers) {
+    public FrontendResponse<Map<String, Object>> docConfig(
+            @RequestHeader HttpHeaders headers,
+            @RequestParam(value = "knowledgeId", required = false) String knowledgeId) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = new LinkedHashMap<>();
+            safe.put("knowledgeId", knowledgeId);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_VIEW);
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.getDocConfig(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+                    knowledgeService.getDocConfig(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -596,8 +619,10 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_VIEW);
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.listDocs(ctx.userId, ctx.orgId, body(request))));
+                    knowledgeService.listDocs(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -609,7 +634,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            knowledgeService.importDocs(ctx.userId, ctx.orgId, body(request));
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_EDIT);
+            knowledgeService.importDocs(ctx.userId, ctx.orgId, safe);
             return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -622,7 +649,9 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
-            knowledgeService.updateDocConfig(ctx.userId, ctx.orgId, body(request));
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_EDIT);
+            knowledgeService.updateDocConfig(ctx.userId, ctx.orgId, safe);
             return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
@@ -635,8 +664,10 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_EDIT);
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.exportDocs(ctx.userId, ctx.orgId, body(request))));
+                    knowledgeService.exportDocs(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -648,30 +679,42 @@ public class WanwuOpenApiController {
             @RequestBody(required = false) Map<String, Object> request) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = body(request);
+            authModelByUuid(ctx, safe, "knowledgeMatchParams.rerankModelId");
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.hitKnowledge(ctx.userId, ctx.orgId, body(request))));
+                    knowledgeService.hitKnowledge(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
     }
 
     @GetMapping("/knowledge/doc/import/tip")
-    public FrontendResponse<Map<String, Object>> knowledgeImportTip(@RequestHeader HttpHeaders headers) {
+    public FrontendResponse<Map<String, Object>> knowledgeImportTip(
+            @RequestHeader HttpHeaders headers,
+            @RequestParam(value = "knowledgeId", required = false) String knowledgeId) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = new LinkedHashMap<>();
+            safe.put("knowledgeId", knowledgeId);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_VIEW);
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.getDocImportTip(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+                    knowledgeService.getDocImportTip(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
     }
 
     @GetMapping("/knowledge/export/record/list")
-    public FrontendResponse<Map<String, Object>> listKnowledgeExportRecords(@RequestHeader HttpHeaders headers) {
+    public FrontendResponse<Map<String, Object>> listKnowledgeExportRecords(
+            @RequestHeader HttpHeaders headers,
+            @RequestParam(value = "knowledgeId", required = false) String knowledgeId) {
         try {
             OpenApiContext ctx = context(headers);
+            Map<String, Object> safe = new LinkedHashMap<>();
+            safe.put("knowledgeId", knowledgeId);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_VIEW);
             return FrontendResponse.ok(serviceResult(
-                    knowledgeService.listExportRecords(ctx.userId, ctx.orgId, Collections.<String, Object>emptyMap())));
+                    knowledgeService.listExportRecords(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -684,6 +727,7 @@ public class WanwuOpenApiController {
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> safe = body(request);
+            authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_EDIT);
             if (safe.containsKey("exportRecordId") || safe.containsKey("export_record_id")) {
                 knowledgeService.deleteExportRecord(ctx.userId, ctx.orgId, safe);
             } else {
@@ -898,6 +942,70 @@ public class WanwuOpenApiController {
         OpenApiAuthSupport.AuthResult auth = OpenApiAuthSupport.resolve(
                 appService, OpenApiAuthSupport.extractToken(headers));
         return new OpenApiContext(auth.userId, auth.orgId, auth.apiKeyId);
+    }
+
+    private void authModelByUuid(OpenApiContext ctx, Map<String, Object> body, String... fieldPaths) {
+        List<String> uuids = nestedTextValues(body, fieldPaths);
+        if (uuids.isEmpty()) {
+            return;
+        }
+        if (modelService == null) {
+            throw new OpenApiBadRequestException("model service unavailable");
+        }
+        try {
+            List<String> modelIds = modelService.listModelIdsByUuids(uuids);
+            modelService.checkModelUserPermission(ctx.userId, ctx.orgId,
+                    modelIds == null ? Collections.<String>emptyList() : modelIds);
+        } catch (RuntimeException ex) {
+            throw new OpenApiBadRequestException(defaultIfBlank(ex.getMessage(), "model permission denied"));
+        }
+    }
+
+    private void authKnowledge(OpenApiContext ctx, Map<String, Object> body, String fieldName, int permissionType) {
+        String knowledgeId = nestedText(body, fieldName);
+        if (isBlank(knowledgeId)) {
+            throw new OpenApiBadRequestException("knowledgeId is required");
+        }
+        if (knowledgeService == null) {
+            throw new OpenApiBadRequestException("knowledge service unavailable");
+        }
+        try {
+            knowledgeService.checkKnowledgeUserPermission(ctx.userId, ctx.orgId, knowledgeId, permissionType);
+        } catch (RuntimeException ex) {
+            throw new OpenApiBadRequestException(defaultIfBlank(ex.getMessage(), "knowledge permission denied"));
+        }
+    }
+
+    private List<String> nestedTextValues(Map<String, Object> body, String... fieldPaths) {
+        List<String> values = new ArrayList<>();
+        if (fieldPaths == null) {
+            return values;
+        }
+        for (String fieldPath : fieldPaths) {
+            String value = nestedText(body, fieldPath);
+            if (!isBlank(value) && !values.contains(value)) {
+                values.add(value);
+            }
+        }
+        return values;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String nestedText(Map<String, Object> body, String fieldPath) {
+        if (body == null || isBlank(fieldPath)) {
+            return "";
+        }
+        Object current = body;
+        for (String key : fieldPath.split("\\.")) {
+            if (!(current instanceof Map)) {
+                return "";
+            }
+            current = ((Map<String, Object>) current).get(key);
+            if (current == null) {
+                return "";
+            }
+        }
+        return current instanceof String ? ((String) current).trim() : "";
     }
 
     private AppKeyInfo mcpAppKey(String key, String legacyApiKey) {

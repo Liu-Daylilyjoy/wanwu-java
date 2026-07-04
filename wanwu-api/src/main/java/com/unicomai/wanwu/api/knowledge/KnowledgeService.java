@@ -16,6 +16,8 @@ public interface KnowledgeService {
 
     void deleteKnowledge(String userId, String orgId, Map<String, Object> request);
 
+    void checkKnowledgeUserPermission(String userId, String orgId, String knowledgeId, int permissionType);
+
     Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> listKeywords(String userId, String orgId, Map<String, Object> request);
