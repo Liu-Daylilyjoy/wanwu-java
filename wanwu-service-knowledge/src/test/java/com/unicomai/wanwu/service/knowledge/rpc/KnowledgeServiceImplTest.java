@@ -189,6 +189,25 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaHitRanksQuestionMatchesBeforeAnswerMatches() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Ranking QA", 1)).get("knowledgeId");
+        service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does recall work?", "Ranking is only in this answer."));
+        Map<String, Object> stronger = service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does Ranking work?", "Question text should rank first."));
+
+        Map<String, Object> request = qaHit(knowledgeId, "Ranking");
+        map(request.get("knowledgeMatchParams")).put("topK", 1);
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals(stronger.get("qaPairId"), searchList.get(0).get("qaPairId"));
+        assertEquals(1.0D, ((List<Double>) hit.get("score")).get(0));
+    }
+
+    @Test
     public void exportRecordsFollowQaAndDocFrontendContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Export KB", 0)).get("knowledgeId");

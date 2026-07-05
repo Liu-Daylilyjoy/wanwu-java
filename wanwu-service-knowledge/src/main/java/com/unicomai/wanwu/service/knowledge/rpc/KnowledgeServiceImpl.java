@@ -1700,6 +1700,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, Object> safe = safe(request);
         String question = string(safe.get("question"));
         int topK = intValue(map(safe.get("knowledgeMatchParams")).get("topK"), 5);
+        if (topK <= 0) {
+            topK = 5;
+        }
         Set<String> knowledgeIds = new LinkedHashSet<String>();
         for (Object raw : list(safe.get("knowledgeList"))) {
             String knowledgeId = string(map(raw).get("knowledgeId"));
@@ -1722,17 +1725,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 if (!pair.enabled || pair.status != QA_STATUS_FINISHED) {
                     continue;
                 }
-                if (!isBlank(question) && !containsIgnoreCase(pair.question, question)
-                        && !containsIgnoreCase(pair.answer, question)) {
+                double score = qaHitScore(question, pair);
+                if (score <= 0D) {
                     continue;
                 }
                 searchList.add(toQaHitInfo(pair, knowledge));
-                scores.add(1.0D);
-                if (searchList.size() >= topK) {
-                    return qaHitResult(searchList, scores);
-                }
+                scores.add(score);
             }
         }
+        sortAndLimitKnowledgeHits(searchList, scores, topK);
         return qaHitResult(searchList, scores);
     }
 
@@ -2995,6 +2996,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             searchList.add(rank.row);
             scores.add(rank.score);
         }
+    }
+
+    private double qaHitScore(String question, QaPairState pair) {
+        if (isBlank(question)) {
+            return 1.0D;
+        }
+        if (containsIgnoreCase(pair.question, question)) {
+            return 1.0D;
+        }
+        if (containsIgnoreCase(pair.answer, question)) {
+            return 0.85D;
+        }
+        if (qaMetaContains(pair, question)) {
+            return 0.65D;
+        }
+        return 0D;
     }
 
     private boolean qaMetaContains(QaPairState pair, String expected) {
