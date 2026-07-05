@@ -478,6 +478,53 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void reimportDocsRebuildsSegmentsFromSavedImportSourceAndUpdatedConfig() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Reimport Docs", 0)).get("knowledgeId");
+        String content = "First imported paragraph.\n\nSecond imported paragraph.\n\nThird imported paragraph.";
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-reimport", "Reimport.txt", content));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-reimport", "Manual segment should be removed by reimport",
+                        Collections.singletonList("manual")));
+
+        assertEquals(4, service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-reimport", "")).get("segmentTotalNum"));
+
+        Map<String, Object> reimportRequest = new LinkedHashMap<String, Object>();
+        reimportRequest.put("knowledgeId", knowledgeId);
+        reimportRequest.put("docIdList", Collections.singletonList("doc-reimport"));
+        service.reimportDocs("dev-admin", "default-org", reimportRequest);
+
+        assertEquals(3, service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-reimport", "")).get("segmentTotalNum"));
+        assertEquals(0, service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-reimport", "Manual segment")).get("segmentTotalNum"));
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "Second imported paragraph"));
+        assertEquals("Second imported paragraph.", listOfMaps(hit.get("searchList")).get(0).get("snippet"));
+
+        Map<String, Object> docSegment = new LinkedHashMap<String, Object>();
+        docSegment.put("segmentMethod", "1");
+        docSegment.put("maxSplitter", 500);
+        docSegment.put("subMaxSplitter", 20);
+        Map<String, Object> updateConfigRequest = new LinkedHashMap<String, Object>();
+        updateConfigRequest.put("knowledgeId", knowledgeId);
+        updateConfigRequest.put("docIdList", Collections.singletonList("doc-reimport"));
+        updateConfigRequest.put("docSegment", docSegment);
+        service.updateDocConfig("dev-admin", "default-org", updateConfigRequest);
+
+        Map<String, Object> parentPage = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-reimport", "First imported"));
+        Map<String, Object> parent = listOfMaps(parentPage.get("contentList")).get(0);
+        assertEquals(true, parent.get("isParent"));
+        assertEquals(2, parent.get("childNum"));
+        Map<String, Object> childPage = service.listDocChildSegments("dev-admin", "default-org",
+                childList("doc-reimport", (String) parent.get("contentId")));
+        assertEquals(2, listOfMaps(childPage.get("contentList")).size());
+    }
+
+    @Test
     public void knowledgeHitReturnsImportedDocumentSegmentsForFrontendContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Hit KB", 0)).get("knowledgeId");

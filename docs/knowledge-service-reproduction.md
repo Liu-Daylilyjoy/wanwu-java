@@ -17,7 +17,7 @@ Date: 2026-07-01
   - Knowledge tag CRUD, bind, and bind-count.
   - Knowledge keyword create/list/detail/update/delete, knowledge-base association, and document-page keyword echo.
   - Knowledge splitter preset list and custom CRUD.
-  - Document URL analysis, local document import/list/delete, document config, import tip, upload limit, request-content segment generation, segment create/update/delete/status/labels, and child segment create/list/update/delete.
+  - Document URL analysis, local document import/list/delete/reimport, document config update, import tip, upload limit, request-content segment generation, segment create/update/delete/status/labels, and child segment create/list/update/delete.
   - Metadata key/value shells.
   - Permission owner/admin/user/org compatibility.
   - QA pair create/list/update/switch/delete, import-tip, request-content CSV/TSV import, local CSV export record, and local text hit.
@@ -45,7 +45,7 @@ The graph path now follows the Go `KnowledgeGraphResp` and schema contract from 
 
 The QA database path now also has a working local loop: create a QA knowledge base (`category = 1`), create/edit/delete QA pairs, switch them on or off, list them with name/status filters, import request-provided CSV/TSV QA content or BFF-local uploaded UTF-8 files into real pairs, export QA pairs into a persisted local CSV export record, and run a deterministic hit test over enabled finished pairs. Frontend uploads that only provide `docUrl` still create a visible imported placeholder pair using the uploaded filename. This mirrors the frontend and Go BFF shape but does not yet reproduce the Go service's asynchronous uploaded-object parsing or retrieval engine.
 
-The document path stores imported `docInfoList` entries in memory, derives searchable segments from request-provided `content`, `text`, `docContent`, `contentBase64`, URL metadata, or BFF-local uploaded UTF-8 file content when present, falls back to the previous document-name segment when no content is available, supports URL basename analysis, lets the frontend create/update/delete/enable/disable/tag parent segments, create/list/update/delete child segments, and creates persisted local ZIP export records for selected documents. Custom splitter and parent-child segment settings now affect local request-content chunking. The implementation deliberately does not run parser-backed binary/Office/PDF conversion, build embeddings, or run asynchronous parser/index callbacks yet.
+The document path stores imported `docInfoList` entries in memory, derives searchable segments from request-provided `content`, `text`, `docContent`, `contentBase64`, URL metadata, or BFF-local uploaded UTF-8 file content when present, falls back to the previous document-name segment when no content is available, supports URL basename analysis, lets the frontend create/update/delete/enable/disable/tag parent segments, create/list/update/delete child segments, and creates persisted local ZIP export records for selected documents. Custom splitter and parent-child segment settings now affect local request-content chunking. Reimport stores the last import source/config and synchronously rebuilds local parent/child segments for the selected `docIdList`; document config update applies the new segment config and immediately rebuilds the same local segment tree. The implementation deliberately does not run parser-backed binary/Office/PDF conversion, build embeddings, or run asynchronous parser/index callbacks yet.
 
 The export-record path now follows the Go `knowledge_export_task` frontend contract for `exportRecordId`, `author`, `status`, `filePath`, `errorMsg`, `exportTime`, and `knowledgeName`. QA export and document export write to the same snapshot-backed record list; `/knowledge/export/record/list` paginates it, `/knowledge/export/record` deletes it, and `/knowledge/export/file/{exportRecordId}/{fileName}` returns local CSV/ZIP bytes for the unchanged frontend download button. The Go service runs asynchronous export tasks and uploads files to MinIO; the Java reproduction completes the local development export synchronously.
 
@@ -58,7 +58,7 @@ The external knowledge path now follows the Go BFF contract from `knowledge_exte
 ## Still Missing
 
 - Normalized Go-equivalent MySQL tables for knowledge bases, tags, keywords, splitters, docs, metadata, permissions, QA pairs, reports, external APIs, and external knowledge.
-- Go-equivalent MinIO object lifecycle, parser-backed binary/Office/PDF conversion, vector indexing/rerank retrieval, reimport, MinIO-backed asynchronous export files, and real parser/indexer/report workers that emit callbacks.
+- Go-equivalent MinIO object lifecycle, parser-backed binary/Office/PDF conversion, vector indexing/rerank retrieval, asynchronous reimport task workers, MinIO-backed asynchronous export files, and real parser/indexer/report workers that emit callbacks.
 - Go-equivalent asynchronous QA import tasks, MinIO-backed asynchronous export tasks, and vector/keyword/rerank retrieval for QA hit tests.
 - Real keyword extraction/sync into the RAG engine, LLM/RAG graph extraction, graph-derived report generation, asynchronous uploaded CSV report task execution, Dify external API validation/listing, and RAG query integration.
 - Normalized callback task tables and callback auth/signature validation.

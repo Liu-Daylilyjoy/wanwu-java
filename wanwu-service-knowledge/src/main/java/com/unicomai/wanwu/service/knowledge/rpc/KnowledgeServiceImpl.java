@@ -687,6 +687,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             doc.segmentMethod = segmentMethod;
             doc.author = displayUserName(defaultIfBlank(userId, DEFAULT_USER_ID));
             doc.graphStatus = 0;
+            captureImportSource(doc, docInfo, docSegment);
             docs(knowledgeId).add(doc);
             createImportedSegments(doc, docInfo, docSegment);
         }
@@ -694,11 +695,40 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public void updateDocConfig(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void updateDocConfig(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        Map<String, Object> docSegment = map(safe.get("docSegment"));
+        List<DocState> selected = selectedDocs(knowledgeId, safe);
+        for (DocState doc : selected) {
+            Map<String, Object> requestedSegment = docSegment.isEmpty() ? map(doc.importSegmentConfig) : docSegment;
+            Map<String, Object> normalized = normalizedDocSegment(requestedSegment, doc.segmentMethod);
+            doc.segmentMethod = string(normalized.get("segmentMethod"));
+            doc.importSegmentConfig = normalized;
+            doc.status = DOC_STATUS_FINISHED;
+            doc.graphStatus = 0;
+            segmentsByDocId.remove(doc.docId);
+            createImportedSegments(doc, sourceDocInfo(doc), normalized);
+        }
+        saveSnapshot();
     }
 
     @Override
-    public void reimportDocs(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void reimportDocs(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        List<DocState> selected = selectedDocs(knowledgeId, safe);
+        for (DocState doc : selected) {
+            Map<String, Object> docSegment = normalizedDocSegment(map(doc.importSegmentConfig), doc.segmentMethod);
+            doc.segmentMethod = string(docSegment.get("segmentMethod"));
+            doc.status = DOC_STATUS_FINISHED;
+            doc.graphStatus = 0;
+            segmentsByDocId.remove(doc.docId);
+            createImportedSegments(doc, sourceDocInfo(doc), docSegment);
+        }
+        saveSnapshot();
     }
 
     @Override
@@ -2512,6 +2542,68 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    private void captureImportSource(DocState doc, Map<String, Object> docInfo, Map<String, Object> docSegment) {
+        String content = firstText(docInfo, "content", "text", "docContent", "snippet");
+        if (isBlank(content)) {
+            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
+        }
+        doc.sourceContent = content;
+        doc.sourceDocUrl = firstText(docInfo, "docUrl", "url", "filePath");
+        doc.importSegmentConfig = normalizedDocSegment(docSegment, doc.segmentMethod);
+    }
+
+    private Map<String, Object> sourceDocInfo(DocState doc) {
+        Map<String, Object> docInfo = new LinkedHashMap<String, Object>();
+        docInfo.put("docId", doc.docId);
+        docInfo.put("docName", doc.docName);
+        docInfo.put("docType", doc.docType);
+        docInfo.put("docSize", doc.fileSize);
+        if (!isBlank(doc.sourceContent)) {
+            docInfo.put("content", doc.sourceContent);
+        }
+        if (!isBlank(doc.sourceDocUrl)) {
+            docInfo.put("docUrl", doc.sourceDocUrl);
+        }
+        return docInfo;
+    }
+
+    private Map<String, Object> normalizedDocSegment(Map<String, Object> docSegment, String fallbackMethod) {
+        Map<String, Object> normalized = new LinkedHashMap<String, Object>();
+        if (docSegment != null) {
+            normalized.putAll(docSegment);
+        }
+        String segmentMethod = string(normalized.get("segmentMethod"));
+        if (isBlank(segmentMethod)) {
+            segmentMethod = defaultIfBlank(fallbackMethod, "0");
+            normalized.put("segmentMethod", segmentMethod);
+        }
+        if (!normalized.containsKey("maxSplitter")) {
+            normalized.put("maxSplitter", 500);
+        }
+        return normalized;
+    }
+
+    private List<DocState> selectedDocs(String knowledgeId, Map<String, Object> request) {
+        Set<String> docIds = new LinkedHashSet<String>(stringList(request.get("docIdList")));
+        String singleDocId = string(request.get("docId"));
+        if (!isBlank(singleDocId)) {
+            docIds.add(singleDocId);
+        }
+        if (docIds.isEmpty()) {
+            throw new IllegalArgumentException("docIdList is required");
+        }
+        List<DocState> selected = new ArrayList<DocState>();
+        for (DocState doc : docs(knowledgeId)) {
+            if (docIds.contains(doc.docId)) {
+                selected.add(doc);
+            }
+        }
+        if (selected.size() != docIds.size()) {
+            throw new IllegalArgumentException("document not found");
+        }
+        return selected;
+    }
+
     private SegmentState newSegment(String docId, String content, int contentNum) {
         SegmentState segment = new SegmentState();
         segment.contentId = "segment-" + nextSegmentId.incrementAndGet();
@@ -3543,6 +3635,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String segmentMethod;
         private String author;
         private int graphStatus;
+        private String sourceContent;
+        private String sourceDocUrl;
+        private Map<String, Object> importSegmentConfig = new LinkedHashMap<String, Object>();
     }
 
     private static final class SegmentState {
