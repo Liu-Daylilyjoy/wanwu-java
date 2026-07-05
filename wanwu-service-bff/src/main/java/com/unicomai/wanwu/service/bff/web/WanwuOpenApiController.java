@@ -80,6 +80,8 @@ public class WanwuOpenApiController {
     private static final String WORKFLOW_APP_TYPE = "workflow";
     private static final String CHATFLOW_APP_TYPE = "chatflow";
     private static final String MCP_SERVER_APP_TYPE = "mcpserver";
+    private static final String MCP_PROTOCOL_VERSION = "2024-11-05";
+    private static final String MCP_SERVER_NAME = "wanwu-java-mcp-server";
     private static final int KNOWLEDGE_VIEW = 0;
     private static final int KNOWLEDGE_EDIT = 10;
     private static final int KNOWLEDGE_SYSTEM = 30;
@@ -1044,6 +1046,12 @@ public class WanwuOpenApiController {
 
     private Map<String, Object> mcpJsonRpcResult(AppKeyInfo appKey, Map<String, Object> request) {
         String method = text(request, "method");
+        if ("initialize".equals(method)) {
+            return mcpInitializeResult(appKey, request);
+        }
+        if ("ping".equals(method)) {
+            return Collections.emptyMap();
+        }
         if ("tools/list".equals(method)) {
             return Collections.<String, Object>singletonMap("tools", mcpToolDescriptors(appKey));
         }
@@ -1051,6 +1059,27 @@ public class WanwuOpenApiController {
             return mcpToolCallResult(appKey, objectMap(request.get("params")));
         }
         return Collections.singletonMap("mcpServerId", defaultIfBlank(appKey.getAppId(), ""));
+    }
+
+    private Map<String, Object> mcpInitializeResult(AppKeyInfo appKey, Map<String, Object> request) {
+        Map<String, Object> params = objectMap(request.get("params"));
+        String protocolVersion = defaultIfBlank(text(params, "protocolVersion"), MCP_PROTOCOL_VERSION);
+
+        Map<String, Object> tools = new LinkedHashMap<>();
+        tools.put("listChanged", false);
+        Map<String, Object> capabilities = new LinkedHashMap<>();
+        capabilities.put("tools", tools);
+
+        Map<String, Object> serverInfo = new LinkedHashMap<>();
+        serverInfo.put("name", MCP_SERVER_NAME);
+        serverInfo.put("version", "development");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("protocolVersion", protocolVersion);
+        result.put("capabilities", capabilities);
+        result.put("serverInfo", serverInfo);
+        result.put("mcpServerId", defaultIfBlank(appKey.getAppId(), ""));
+        return result;
     }
 
     private List<Map<String, Object>> mcpToolDescriptors(AppKeyInfo appKey) {
@@ -1090,6 +1119,16 @@ public class WanwuOpenApiController {
         content.put("text", text);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("content", Collections.singletonList(content));
+        Map<String, Object> structuredContent = new LinkedHashMap<>();
+        structuredContent.put("mcpServerId", defaultIfBlank(appKey.getAppId(), ""));
+        structuredContent.put("name", defaultIfBlank(name, "unknown"));
+        structuredContent.put("arguments", arguments);
+        if (!matched.isEmpty()) {
+            structuredContent.put("toolId", firstText(matched, "id", "toolId", "mcpServerToolId"));
+            structuredContent.put("toolType", firstText(matched, "type", "toolType"));
+            structuredContent.put("description", defaultIfBlank(text(matched, "desc"), text(matched, "description")));
+        }
+        result.put("structuredContent", structuredContent);
         result.put("isError", matched.isEmpty());
         return result;
     }

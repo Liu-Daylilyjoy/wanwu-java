@@ -549,6 +549,26 @@ public class WanwuOpenApiControllerTest {
         mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
                         .param("key", "app-key")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-init-1\",\"method\":\"initialize\","
+                                + "\"params\":{\"protocolVersion\":\"2024-11-05\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("mcp-init-1"))
+                .andExpect(jsonPath("$.result.protocolVersion").value("2024-11-05"))
+                .andExpect(jsonPath("$.result.capabilities.tools.listChanged").value(false))
+                .andExpect(jsonPath("$.result.serverInfo.name").value("wanwu-java-mcp-server"))
+                .andExpect(jsonPath("$.result.mcpServerId").value("mcpserver-001"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "app-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-ping-1\",\"method\":\"ping\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("mcp-ping-1"))
+                .andExpect(jsonPath("$.result").isMap());
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "app-key")
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-list-1\",\"method\":\"tools/list\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.tools[0].name").value("get_weather"))
@@ -562,7 +582,10 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.content[0].type").value("text"))
                 .andExpect(jsonPath("$.result.content[0].text").value(containsString("get_weather")))
-                .andExpect(jsonPath("$.result.content[0].text").value(containsString("Hangzhou")));
+                .andExpect(jsonPath("$.result.content[0].text").value(containsString("Hangzhou")))
+                .andExpect(jsonPath("$.result.structuredContent.mcpServerId").value("mcpserver-001"))
+                .andExpect(jsonPath("$.result.structuredContent.toolId").value("tool-weather"))
+                .andExpect(jsonPath("$.result.structuredContent.arguments.city").value("Hangzhou"));
 
         verify(knowledgeService).createKnowledge(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).selectKnowledge(eq("dev-admin"), eq("default-org"), any());
