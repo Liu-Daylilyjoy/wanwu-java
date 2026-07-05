@@ -241,9 +241,31 @@ public class WanwuStaticDocsController {
     private static List<String> sampleRow(List<String> headers) {
         String[] samples = new String[headers.size()];
         for (int i = 0; i < headers.size(); i++) {
-            samples[i] = "example_" + headers.get(i).replaceAll("[^A-Za-z0-9]+", "_").toLowerCase();
+            samples[i] = sampleValue(headers.get(i));
         }
         return Arrays.asList(samples);
+    }
+
+    private static String sampleValue(String header) {
+        if ("\u7528\u6237\u540d".equals(header)) {
+            return "zhangsan";
+        }
+        if ("\u5bc6\u7801".equals(header)) {
+            return "Password1!";
+        }
+        if ("\u5355\u4f4d".equals(header)) {
+            return "Wanwu Java";
+        }
+        if ("\u7535\u8bdd".equals(header)) {
+            return "13800000001";
+        }
+        if ("\u89d2\u8272".equals(header)) {
+            return "app";
+        }
+        if ("\u5907\u6ce8".equals(header)) {
+            return "imported";
+        }
+        return "example_" + header.replaceAll("[^A-Za-z0-9]+", "_").toLowerCase();
     }
 
     private static String joinCsv(List<String> values) {
@@ -290,7 +312,8 @@ public class WanwuStaticDocsController {
 
     private static Map<String, List<String>> xlsxTemplates() {
         Map<String, List<String>> templates = new LinkedHashMap<String, List<String>>();
-        templates.put("users.xlsx", Arrays.asList("username", "nickname", "password", "email", "phone", "role"));
+        templates.put("users.xlsx", Arrays.asList("\u7528\u6237\u540d", "\u5bc6\u7801", "\u5355\u4f4d",
+                "\u7535\u8bdd", "\u89d2\u8272", "\u5907\u6ce8"));
         templates.put("sensitive.xlsx", Arrays.asList("Political", "Revile", "Pornography", "ViolentTerror",
                 "Illegal", "InformationSecurity", "Other"));
         templates.put("graph_schema.xlsx", Arrays.asList("node", "relation", "target", "description"));

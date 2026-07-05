@@ -27,6 +27,7 @@ These are opened directly by browser actions in permission, knowledge, QA, commu
 
 - CSV templates are generated as UTF-8 `text/csv`.
 - XLSX templates are generated as minimal valid OOXML ZIP files with one worksheet. The Safety Guard sensitive-word template uses the same type-column matrix shape that the local import parser accepts.
+- The user batch-import template now uses the Go BFF header contract (`用户名/密码/单位/电话/角色/备注`) and includes a sample row that passes the Java IAM import validator.
 - Unknown names return 404.
 - The implementation does not read arbitrary local files and does not depend on the original Go workspace being present inside the Docker image.
 
@@ -34,4 +35,4 @@ This is a frontend compatibility slice. The generated templates are development-
 
 ## Verification
 
-- `WanwuStaticDocsControllerTest` covers all frontend-referenced template names, content types, XLSX ZIP entries, content disposition headers, no-cache headers, and unknown-file 404 behavior.
+- `WanwuStaticDocsControllerTest` covers all frontend-referenced template names, content types, XLSX ZIP entries, content disposition headers, no-cache headers, Go-compatible user-import template headers/sample row, and unknown-file 404 behavior.

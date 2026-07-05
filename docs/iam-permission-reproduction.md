@@ -70,6 +70,7 @@ This slice provides a Docker development IAM repository. After the MySQL persist
 - The built-in `admin` and `app` accounts remain protected seed records.
 - Role permissions are normalized from either string arrays or frontend route/permission maps.
 - `user/batch` parses uploaded CSV/TSV text or `.xlsx` sheet data using the existing local parser, maps both Go's localized template headers (`用户名/密码/单位/电话/角色/备注`) and English `username/password/company/phone/role/remark` aliases into IAM user rows, enforces the Go 500-row limit, and creates one persisted user per imported row.
+- `/user/api/v1/static/docs/users.xlsx` now emits the same localized batch-import header contract, so the unchanged frontend's downloaded template can be uploaded back into `user/batch`.
 - Imported users now pass Go-style username, password, phone, and non-empty company validation before IAM writes them. Initial import passwords are stored as hashes on the user record and hidden from frontend read models.
 
 ## Remaining Gaps

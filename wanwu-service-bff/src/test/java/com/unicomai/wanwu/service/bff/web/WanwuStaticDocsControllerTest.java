@@ -36,6 +36,18 @@ public class WanwuStaticDocsControllerTest {
     }
 
     @Test
+    public void userImportTemplateMatchesGoBatchImportHeaders() throws Exception {
+        MvcResult result = mockMvc().perform(get("/user/api/v1/static/docs/users.xlsx"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String table = SimpleXlsxReader.toDelimitedText(result.getResponse().getContentAsByteArray());
+
+        assertTrue(table.contains("\u7528\u6237\u540d\t\u5bc6\u7801\t\u5355\u4f4d\t\u7535\u8bdd\t\u89d2\u8272\t\u5907\u6ce8"));
+        assertTrue(table.contains("zhangsan\tPassword1!\tWanwu Java\t13800000001\tapp\timported"));
+    }
+
+    @Test
     public void unknownStaticDocReturnsNotFoundInsteadOfReadingArbitraryFiles() throws Exception {
         mockMvc().perform(get("/user/api/v1/static/docs/../../application.yml"))
                 .andExpect(status().isNotFound());
