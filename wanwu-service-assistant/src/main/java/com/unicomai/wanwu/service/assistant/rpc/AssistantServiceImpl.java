@@ -26,8 +26,15 @@ import com.unicomai.wanwu.api.app.dto.AssistantDetailQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AssistantResourceCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationDeleteCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationListQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationQuery;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
 import com.unicomai.wanwu.api.assistant.AssistantService;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
@@ -41,6 +48,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -56,6 +64,8 @@ public class AssistantServiceImpl implements AssistantService {
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private McpService mcpService;
 
     private final ConcurrentMap<String, List<String>> esDocuments = new ConcurrentHashMap<String, List<String>>();
 
@@ -63,7 +73,12 @@ public class AssistantServiceImpl implements AssistantService {
     }
 
     AssistantServiceImpl(AppService appService) {
+        this(appService, null);
+    }
+
+    AssistantServiceImpl(AppService appService, McpService mcpService) {
         this.appService = appService;
+        this.mcpService = mcpService;
     }
 
     @Override
@@ -505,6 +520,156 @@ public class AssistantServiceImpl implements AssistantService {
         return assistantConversionStream(request);
     }
 
+    @Override
+    public Map<String, Object> customPromptCreate(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        return mcpService().createCustomPrompt(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public void customPromptDelete(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        mcpService().deleteCustomPrompt(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public void customPromptUpdate(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        mcpService().updateCustomPrompt(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public Map<String, Object> customPromptGet(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        Map<String, Object> response = mcpService().getCustomPrompt(
+                userId(safeRequest), orgId(safeRequest), customPromptId(safeRequest));
+        response.put("identity", identity(userId(safeRequest), orgId(safeRequest)));
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> customPromptGetList(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        Map<String, Object> response = mcpService().listCustomPrompts(
+                userId(safeRequest), orgId(safeRequest), defaultIfBlank(stringValue(first(safeRequest, "name")), ""));
+        response.put("customPromptInfos", response.get("list"));
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> customPromptCopy(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        return mcpService().copyCustomPrompt(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public Map<String, Object> createSkillConversation(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        return mcpService().createSkillConversation(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public void deleteSkillConversation(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        mcpService().deleteSkillConversation(userId(safeRequest), orgId(safeRequest), safeRequest);
+    }
+
+    @Override
+    public Map<String, Object> getSkillConversationList(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        return mcpService().listSkillConversations(
+                userId(safeRequest),
+                orgId(safeRequest),
+                positiveInt(first(safeRequest, "pageNo", "page_no"), 1),
+                positiveInt(first(safeRequest, "pageSize", "page_size"), 20));
+    }
+
+    @Override
+    public Map<String, Object> getWgaConversationConfig(Map<String, Object> request) {
+        Map<String, Object> state = appService().getGeneralAgentConversationState(wgaConversationQuery(safe(request)));
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("config", state);
+        return response;
+    }
+
+    @Override
+    public void updateWgaConversationConfig(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        Map<String, Object> existing = appService().getGeneralAgentConversationState(wgaConversationQuery(safeRequest));
+        appService().saveGeneralAgentConversationState(wgaConversationStateCommand(safeRequest, existing));
+    }
+
+    @Override
+    public Map<String, Object> getWgaConfig(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        GeneralAgentConfigQuery query = new GeneralAgentConfigQuery();
+        query.setUserId(userId(safeRequest));
+        query.setOrgId(orgId(safeRequest));
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("config", appService().getGeneralAgentConfig(query));
+        return response;
+    }
+
+    @Override
+    public void updateWgaConfig(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        GeneralAgentConfigUpdateCommand command = new GeneralAgentConfigUpdateCommand();
+        command.setUserId(userId(safeRequest));
+        command.setOrgId(orgId(safeRequest));
+        command.setConfig(wgaConfig(safeRequest));
+        appService().updateGeneralAgentConfig(command);
+    }
+
+    @Override
+    public Map<String, Object> wgaConversationCreate(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        String threadId = defaultIfBlank(stringValue(first(safeRequest, "threadId")),
+                "thread-" + UUID.randomUUID().toString().replace("-", ""));
+        safeRequest.put("threadId", threadId);
+        Map<String, Object> saved = appService().saveGeneralAgentConversationState(
+                wgaConversationStateCommand(safeRequest, Collections.<String, Object>emptyMap()));
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("threadId", defaultIfBlank(stringValue(saved.get("threadId")), threadId));
+        return response;
+    }
+
+    @Override
+    public void wgaConversationDelete(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        GeneralAgentConversationDeleteCommand command = new GeneralAgentConversationDeleteCommand();
+        command.setUserId(userId(safeRequest));
+        command.setOrgId(orgId(safeRequest));
+        command.setThreadId(defaultIfBlank(stringValue(first(safeRequest, "threadId")), ""));
+        appService().deleteGeneralAgentConversationState(command);
+    }
+
+    @Override
+    public Map<String, Object> wgaConversationList(Map<String, Object> request) {
+        Map<String, Object> safeRequest = safe(request);
+        GeneralAgentConversationListQuery query = new GeneralAgentConversationListQuery();
+        query.setUserId(userId(safeRequest));
+        query.setOrgId(orgId(safeRequest));
+        List<Map<String, Object>> all = appService().listGeneralAgentConversationStates(query);
+        int pageNo = positiveInt(first(safeRequest, "pageNo", "page_no"), 1);
+        int pageSize = positiveInt(first(safeRequest, "pageSize", "page_size"), 20);
+        int from = Math.min((pageNo - 1) * pageSize, all.size());
+        int to = Math.min(from + pageSize, all.size());
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("data", new ArrayList<Map<String, Object>>(all.subList(from, to)));
+        response.put("total", (long) all.size());
+        response.put("pageNo", pageNo);
+        response.put("pageSize", pageSize);
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> wgaConversationExists(Map<String, Object> request) {
+        Map<String, Object> state = appService().getGeneralAgentConversationState(wgaConversationQuery(safe(request)));
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("exists", state != null && !state.isEmpty());
+        return response;
+    }
+
     private AssistantCreateCommand createCommand(Map<String, Object> request) {
         Map<String, Object> brief = brief(request);
         AssistantCreateCommand command = new AssistantCreateCommand();
@@ -600,6 +765,61 @@ public class AssistantServiceImpl implements AssistantService {
         command.setUserId(userId(request));
         command.setOrgId(orgId(request));
         return command;
+    }
+
+    private GeneralAgentConversationQuery wgaConversationQuery(Map<String, Object> request) {
+        GeneralAgentConversationQuery query = new GeneralAgentConversationQuery();
+        query.setUserId(userId(request));
+        query.setOrgId(orgId(request));
+        query.setThreadId(defaultIfBlank(stringValue(first(request, "threadId")), ""));
+        query.setPreviewId(defaultIfBlank(stringValue(first(request, "previewId")), ""));
+        return query;
+    }
+
+    private GeneralAgentConversationStateCommand wgaConversationStateCommand(Map<String, Object> request,
+                                                                             Map<String, Object> existing) {
+        long now = System.currentTimeMillis();
+        GeneralAgentConversationStateCommand command = new GeneralAgentConversationStateCommand();
+        command.setUserId(userId(request));
+        command.setOrgId(orgId(request));
+        command.setThreadId(defaultIfBlank(stringValue(first(request, "threadId")),
+                defaultIfBlank(stringValue(existing.get("threadId")), "")));
+        command.setTitle(defaultIfBlank(stringValue(first(request, "title", "prompt")),
+                defaultIfBlank(stringValue(existing.get("title")), "New conversation")));
+        command.setCreatedAt(longValue(first(request, "createdAt", "createAt"),
+                longValue(existing.get("createdAt"), now)));
+        command.setUpdatedAt(longValue(first(request, "updatedAt"), now));
+        command.setSkillConversation(booleanValue(first(request, "skillConversation"), false));
+        command.setSkillId(defaultIfBlank(stringValue(first(request, "skillId")), stringValue(existing.get("skillId"))));
+        command.setPreviewId(defaultIfBlank(stringValue(first(request, "previewId")), stringValue(existing.get("previewId"))));
+        command.setModelConfig(mapOrExisting(first(request, "modelConfig"), existing.get("modelConfig")));
+        List<Map<String, Object>> runs = mapList(first(request, "runs"));
+        command.setRuns(runs.isEmpty() ? mapList(existing.get("runs")) : runs);
+        return command;
+    }
+
+    private Map<String, List<Map<String, Object>>> wgaConfig(Map<String, Object> request) {
+        Map<String, List<Map<String, Object>>> config = new LinkedHashMap<String, List<Map<String, Object>>>();
+        Map<String, Object> nested = mapValue(first(request, "config"));
+        if (!nested.isEmpty()) {
+            for (Map.Entry<String, Object> entry : nested.entrySet()) {
+                config.put(entry.getKey(), mapList(entry.getValue()));
+            }
+            return config;
+        }
+        config.put("toolList", mapList(first(request, "toolList")));
+        config.put("assistantList", mapList(first(request, "assistantList")));
+        config.put("mcpList", mapList(first(request, "mcpList")));
+        config.put("workflowList", mapList(first(request, "workflowList")));
+        config.put("skillList", mapList(first(request, "skillList")));
+        config.put("knowledgeList", mapList(first(request, "knowledgeList")));
+        config.put("ontologyKnowledgeList", mapList(first(request, "ontologyKnowledgeList")));
+        return config;
+    }
+
+    private Map<String, Object> mapOrExisting(Object value, Object fallback) {
+        Map<String, Object> map = mapValue(value);
+        return map.isEmpty() ? mapValue(fallback) : map;
     }
 
     private Map<String, Object> assistantDetail(Map<String, Object> request) {
@@ -722,6 +942,10 @@ public class AssistantServiceImpl implements AssistantService {
         return defaultIfBlank(stringValue(first(request, "assistantId", "agentId", "appId", "uuid")), "");
     }
 
+    private String customPromptId(Map<String, Object> request) {
+        return defaultIfBlank(stringValue(first(request, "customPromptId", "promptId")), "");
+    }
+
     private String userId(Map<String, Object> request) {
         Map<String, Object> identity = mapValue(request.get("identity"));
         String userId = stringValue(first(request, "userId"));
@@ -805,6 +1029,17 @@ public class AssistantServiceImpl implements AssistantService {
         return parsed <= 0 ? fallback : parsed;
     }
 
+    private long longValue(Object value, long fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.parseLong(stringValue(value));
+        } catch (Exception ex) {
+            return fallback;
+        }
+    }
+
     private Boolean booleanValue(Object value, boolean fallback) {
         if (value instanceof Boolean) {
             return (Boolean) value;
@@ -867,5 +1102,12 @@ public class AssistantServiceImpl implements AssistantService {
             throw new IllegalStateException("AppService is not available");
         }
         return appService;
+    }
+
+    private McpService mcpService() {
+        if (mcpService == null) {
+            throw new IllegalStateException("McpService is not available");
+        }
+        return mcpService;
     }
 }

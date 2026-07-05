@@ -107,4 +107,38 @@ public interface AssistantService {
     Map<String, Object> assistantConversionStream(Map<String, Object> request);
 
     Map<String, Object> multiAssistantConversionStream(Map<String, Object> request);
+
+    Map<String, Object> customPromptCreate(Map<String, Object> request);
+
+    void customPromptDelete(Map<String, Object> request);
+
+    void customPromptUpdate(Map<String, Object> request);
+
+    Map<String, Object> customPromptGet(Map<String, Object> request);
+
+    Map<String, Object> customPromptGetList(Map<String, Object> request);
+
+    Map<String, Object> customPromptCopy(Map<String, Object> request);
+
+    Map<String, Object> createSkillConversation(Map<String, Object> request);
+
+    void deleteSkillConversation(Map<String, Object> request);
+
+    Map<String, Object> getSkillConversationList(Map<String, Object> request);
+
+    Map<String, Object> getWgaConversationConfig(Map<String, Object> request);
+
+    void updateWgaConversationConfig(Map<String, Object> request);
+
+    Map<String, Object> getWgaConfig(Map<String, Object> request);
+
+    void updateWgaConfig(Map<String, Object> request);
+
+    Map<String, Object> wgaConversationCreate(Map<String, Object> request);
+
+    void wgaConversationDelete(Map<String, Object> request);
+
+    Map<String, Object> wgaConversationList(Map<String, Object> request);
+
+    Map<String, Object> wgaConversationExists(Map<String, Object> request);
 }

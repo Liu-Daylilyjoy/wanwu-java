@@ -16,6 +16,9 @@
 - Snapshot lifecycle: publish, latest, list, update latest description, rollback, info, and latest batch.
 - Resource bindings: workflow, MCP, tool, skill, and multi-agent create/delete/enable/config methods map to the existing AppService resource-binding commands.
 - Conversation loop: create, delete, clear, get-or-create by assistant, list, detail list, and local stream map to AppService's persisted development conversation implementation.
+- Custom prompt RPCs map to `McpService` custom prompt CRUD/list/copy.
+- Skill conversation RPCs map to `McpService` skill conversation create/delete/list.
+- WGA config and conversation RPCs map to `AppService` GeneralAgent config/conversation state.
 
 The service returns Go-style wrapper keys such as `assistantInfos`, `snapshotId`, `createAt`, `data`, `conversationId`, and `content` while preserving the Java frontend-compatible details inside the payload.
 
@@ -26,7 +29,10 @@ The service returns Go-style wrapper keys such as `assistantInfos`, `snapshotId`
 - `AssistantServiceImplTest#assistantSnapshotCreatePublishesAgentAndReturnsLatestSnapshot`
 - `AssistantServiceImplTest#assistantConversionStreamDelegatesDraftRequest`
 - `AssistantServiceImplTest#esCompatibilityShellStoresSearchesAndDeletesJsonDocs`
+- `AssistantServiceImplTest#customPromptCreateDelegatesToMcpService`
+- `AssistantServiceImplTest#updateWgaConfigMapsGoListsToGeneralAgentConfig`
+- `AssistantServiceImplTest#wgaConversationCreateSavesGeneralAgentState`
 
 ## Remaining Gap
 
-This slice does not complete the full Go `AssistantService`. Custom prompt RPCs, skill conversation RPCs, WGA config/conversation RPCs, exact ES/index persistence, real assistant orchestration, tool/MCP execution, and multi-agent runtime behavior remain later slices. The current implementation establishes the standalone Java RPC boundary and keeps state owned by `wanwu-service-app`.
+This slice establishes the standalone Java RPC boundary and keeps state owned by `wanwu-service-app` or `wanwu-service-mcp`. Exact ES/index persistence, real assistant orchestration, tool/MCP execution, WGA sandbox execution, and multi-agent runtime behavior remain later slices.

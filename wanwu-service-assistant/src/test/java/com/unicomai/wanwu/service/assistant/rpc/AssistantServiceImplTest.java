@@ -8,6 +8,9 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConfigUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.GeneralAgentConversationStateCommand;
+import com.unicomai.wanwu.api.mcp.McpService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -28,12 +31,14 @@ import static org.mockito.Mockito.when;
 public class AssistantServiceImplTest {
 
     private AppService appService;
+    private McpService mcpService;
     private AssistantServiceImpl service;
 
     @BeforeEach
     public void setUp() {
         appService = mock(AppService.class);
-        service = new AssistantServiceImpl(appService);
+        mcpService = mock(McpService.class);
+        service = new AssistantServiceImpl(appService, mcpService);
     }
 
     @Test
@@ -149,6 +154,57 @@ public class AssistantServiceImplTest {
         Map<String, Object> secondSearch = service.searchFromES(map("index_name", "assistant"));
         assertEquals(1L, secondSearch.get("total"));
         assertEquals("{\"conversationId\":\"c2\",\"text\":\"bye\"}", firstString(secondSearch.get("doc_json_list")));
+    }
+
+    @Test
+    public void customPromptCreateDelegatesToMcpService() {
+        when(mcpService.createCustomPrompt(any(), any(), any())).thenReturn(map("customPromptId", "prompt-1"));
+
+        Map<String, Object> response = service.customPromptCreate(map(
+                "identity", map("userId", "user-a", "orgId", "org-a"),
+                "name", "Prompt",
+                "prompt", "Be concise"));
+
+        verify(mcpService).createCustomPrompt("user-a", "org-a", map(
+                "identity", map("userId", "user-a", "orgId", "org-a"),
+                "name", "Prompt",
+                "prompt", "Be concise"));
+        assertEquals("prompt-1", response.get("customPromptId"));
+    }
+
+    @Test
+    public void updateWgaConfigMapsGoListsToGeneralAgentConfig() {
+        service.updateWgaConfig(map(
+                "identity", map("userId", "user-a", "orgId", "org-a"),
+                "toolList", Collections.singletonList(map("toolId", "tool-1", "toolType", "custom"))));
+
+        ArgumentCaptor<GeneralAgentConfigUpdateCommand> captor =
+                ArgumentCaptor.forClass(GeneralAgentConfigUpdateCommand.class);
+        verify(appService).updateGeneralAgentConfig(captor.capture());
+        GeneralAgentConfigUpdateCommand command = captor.getValue();
+        assertEquals("user-a", command.getUserId());
+        assertEquals("org-a", command.getOrgId());
+        assertEquals("tool-1", command.getConfig().get("toolList").get(0).get("toolId"));
+    }
+
+    @Test
+    public void wgaConversationCreateSavesGeneralAgentState() {
+        when(appService.saveGeneralAgentConversationState(any())).thenReturn(map("threadId", "thread-1"));
+
+        Map<String, Object> response = service.wgaConversationCreate(map(
+                "threadId", "thread-1",
+                "prompt", "build workspace",
+                "identity", map("userId", "user-a", "orgId", "org-a"),
+                "modelConfig", map("modelId", "llm-1")));
+
+        ArgumentCaptor<GeneralAgentConversationStateCommand> captor =
+                ArgumentCaptor.forClass(GeneralAgentConversationStateCommand.class);
+        verify(appService).saveGeneralAgentConversationState(captor.capture());
+        GeneralAgentConversationStateCommand command = captor.getValue();
+        assertEquals("thread-1", response.get("threadId"));
+        assertEquals("thread-1", command.getThreadId());
+        assertEquals("build workspace", command.getTitle());
+        assertEquals("llm-1", command.getModelConfig().get("modelId"));
     }
 
     @SuppressWarnings("unchecked")
