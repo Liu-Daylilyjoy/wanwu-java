@@ -27,6 +27,8 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.operate.OperateService;
 import org.junit.jupiter.api.Test;
@@ -669,6 +671,45 @@ public class WanwuOpenApiControllerTest {
         verify(knowledgeService).getDocConfig(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).importDocs(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), any());
+    }
+
+    @Test
+    public void modelOpenApiListReturnsGoPublicFieldsOnly() throws Exception {
+        ModelInfo model = new ModelInfo();
+        model.setModelId("internal-model-id");
+        model.setUuid("model-openapi-001");
+        model.setDisplayName("OpenAPI LLM");
+        model.setProvider("OpenAI-API-compatible");
+        model.setModelType("llm");
+        model.setModel("gpt-compatible");
+        model.setScopeType("public");
+        model.getConfig().put("apiKey", "hidden");
+        when(modelService.listModels(any(ModelListQuery.class)))
+                .thenReturn(new ModelListResult(Collections.singletonList(model), 1));
+
+        mockMvc.perform(get("/service/api/openapi/v1/model/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("modelType", "llm")
+                        .param("provider", "OpenAI-API-compatible")
+                        .param("displayName", "OpenAPI"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].uuid").value("model-openapi-001"))
+                .andExpect(jsonPath("$.data.list[0].displayName").value("OpenAPI LLM"))
+                .andExpect(jsonPath("$.data.list[0].provider").value("OpenAI-API-compatible"))
+                .andExpect(jsonPath("$.data.list[0].modelType").value("llm"))
+                .andExpect(jsonPath("$.data.list[0].model").value("gpt-compatible"))
+                .andExpect(jsonPath("$.data.list[0].scopeType").value("public"))
+                .andExpect(jsonPath("$.data.list[0].modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].config").doesNotExist());
+
+        ArgumentCaptor<ModelListQuery> queryCaptor = forClass(ModelListQuery.class);
+        verify(modelService).listModels(queryCaptor.capture());
+        assertEquals("dev-admin", queryCaptor.getValue().getUserId());
+        assertEquals("default-org", queryCaptor.getValue().getOrgId());
+        assertEquals("llm", queryCaptor.getValue().getModelType());
+        assertEquals("OpenAI-API-compatible", queryCaptor.getValue().getProvider());
+        assertEquals("OpenAPI", queryCaptor.getValue().getDisplayName());
     }
 
     @Test

@@ -34,7 +34,9 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
+import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.operate.OperateService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
@@ -562,9 +564,10 @@ public class WanwuOpenApiController {
             if (modelService == null) {
                 return FrontendResponse.ok(listResult(Collections.emptyList()));
             }
-            return FrontendResponse.ok(modelService.listModels(new ModelListQuery(
+            ModelListResult result = modelService.listModels(new ModelListQuery(
                     ctx.userId, ctx.orgId, defaultIfBlank(modelType, ""), defaultIfBlank(provider, ""),
-                    defaultIfBlank(displayName, ""), "", "")));
+                    defaultIfBlank(displayName, ""), "", ""));
+            return FrontendResponse.ok(openApiModelList(result));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -1467,6 +1470,29 @@ public class WanwuOpenApiController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("list", list);
         data.put("total", list.size());
+        return data;
+    }
+
+    private Map<String, Object> openApiModelList(ModelListResult result) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (result != null && result.getList() != null) {
+            for (ModelInfo model : result.getList()) {
+                if (model == null) {
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("uuid", defaultIfBlank(model.getUuid(), ""));
+                row.put("displayName", defaultIfBlank(model.getDisplayName(), ""));
+                row.put("provider", defaultIfBlank(model.getProvider(), ""));
+                row.put("modelType", defaultIfBlank(model.getModelType(), ""));
+                row.put("model", defaultIfBlank(model.getModel(), ""));
+                row.put("scopeType", defaultIfBlank(model.getScopeType(), ""));
+                list.add(row);
+            }
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("list", list);
+        data.put("total", result == null ? 0L : result.getTotal());
         return data;
     }
 

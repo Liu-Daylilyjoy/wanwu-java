@@ -26,7 +26,7 @@ Implemented in `WanwuOpenApiController` under `/service/api/openapi/v1`:
 - Agent chat JSON plus legacy single-frame SSE response shapes; draft Agent chat now uses draft configuration/conversations, and Agent/RAG chat responses expose local knowledge hits through Go-style search-list fields while keeping the public response envelopes unchanged.
 - Workflow run returns raw schema-aware workflow output JSON, persists a local workflow run snapshot through AppService/MySQL, and workflow/chatflow upload returns the raw signed URL text, matching Go's direct `ctx.Writer.Write` / `ctx.String` behavior instead of the normal BFF response envelope.
 - Chatflow conversation/message/chat loop persisted through AppService/MySQL with a BFF-local fallback.
-- Model list via `ModelService`.
+- Model list via `ModelService`, mapped to the Go OpenAPI public item fields only.
 - Knowledge management/doc/export/hit routes proxy to `KnowledgeService`.
 - MCP SSE/message/streamable compatibility now validates the Go-style `?key=` app key through `AppService.getAppKeyByKey`, requires `appType=mcpserver`, emits the initialized SSE frame, and supports development JSON-RPC `initialize`, `ping`, `tools/list`, plus deterministic `tools/call` results from the Java `McpService` MCP Server tool bindings.
 - Protected non-OAuth/non-MCP routes enforce shared OpenAPI API-key auth support. Missing tokens, disabled API keys, expired API keys, and malformed non-Bearer Authorization headers are rejected before business handlers; successful real keys carry their user/org/api-key id into downstream AppService calls and statistics.
