@@ -23,7 +23,7 @@ The Go knowledge service selects `db.name: mysql`, connects to the `knowledge_se
 - `docker-compose.yml` passes `SPRING_DATASOURCE_*` to `knowledge` and waits for healthy `mysql`.
 - `wanwu-service-knowledge` depends on `wanwu-common-data`.
 - `wanwu-service-knowledge/src/main/resources/db/migration/V1__create_knowledge_records.sql` creates `knowledge_records`.
-- `KnowledgeServiceImpl` loads and saves one JSON snapshot containing the current frontend-compatible knowledge, tag, keyword, splitter, document, segment, metadata, permission, QA-pair, report, external knowledge, and export-record state.
+- `KnowledgeServiceImpl` loads and saves one JSON snapshot containing the current frontend-compatible knowledge, tag, keyword, splitter, document, segment, metadata definitions, document metadata values, permission, QA-pair, report, external knowledge, and export-record state.
 - BFF knowledge import routes enrich Doc, QA, and Report import requests from the local upload store when the unchanged frontend submits `fileUploadId`, `fileId`, or `docId`. This reproduces the Go BFF uploaded-object handoff for UTF-8 CSV/text development files while the final MinIO/parser pipeline is still pending.
 
 ## Persistence Shape
@@ -39,7 +39,7 @@ This keeps the zero-frontend-change routes durable across Docker restarts withou
 
 ## Verified Behavior
 
-- Unit tests cover snapshot upsert, startup reload, restored knowledge/tag/keyword/doc/QA/report/external/export-record state, request-content document chunking, local doc reimport/config rebuild, request-content QA/report import parsing, local export-file retrieval, and sequence continuation.
+- Unit tests cover snapshot upsert, startup reload, restored knowledge/tag/keyword/doc/QA/report/external/export-record state, document metadata value persistence, request-content document chunking, local doc reimport/config rebuild, request-content QA/report import parsing, local export-file retrieval, and sequence continuation.
 - Docker smoke should create a knowledge base through `localhost:3000`, recreate knowledge and BFF containers, verify the knowledge base still appears, and confirm a row exists in `knowledge_service.knowledge_records`.
 
 ## Remaining Gaps

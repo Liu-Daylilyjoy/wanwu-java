@@ -626,7 +626,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("segmentType", "0");
         result.put("uploadTime", doc == null ? CREATED_AT : doc.uploadTime);
         result.put("splitter", "");
-        result.put("metaDataList", Collections.emptyList());
+        result.put("metaDataList", doc == null ? Collections.emptyList() : copyMetaList(doc.metaDataList));
         result.put("contentList", page(filtered,
                 intValue(safe.get("pageNo"), 1),
                 intValue(safe.get("pageSize"), 10)).get("list"));
@@ -748,17 +748,20 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, Object> safe = safe(request);
         String knowledgeId = string(safe.get("knowledgeId"));
         existingKnowledge(knowledgeId);
-        List<Map<String, Object>> metas = metas(knowledgeId);
         for (Object raw : list(safe.get("metaDataList"))) {
-            Map<String, Object> meta = new LinkedHashMap<String, Object>(map(raw));
-            String option = string(meta.get("option"));
-            if ("add".equals(option)) {
-                meta.put("metaId", "meta-" + nextMetaId.incrementAndGet());
-                metas.add(meta);
-            } else if ("update".equals(option)) {
-                replaceMeta(metas, meta);
-            } else if ("delete".equals(option)) {
-                removeMeta(metas, string(meta.get("metaId")));
+            Map<String, Object> meta = map(raw);
+            String option = defaultIfBlank(string(meta.get("option")), "add");
+            if ("delete".equals(option)) {
+                removeMetaDefinitionAndValues(knowledgeId, meta);
+                continue;
+            }
+            Map<String, Object> definition = ensureMetaDefinition(knowledgeId, meta);
+            String docId = string(safe.get("docId"));
+            if (!isBlank(docId) && meta.containsKey("metaValue")) {
+                DocState doc = findDocInKnowledge(knowledgeId, docId);
+                if (doc != null) {
+                    upsertDocMetaValue(doc, normalizeDocMetaValue(meta, definition));
+                }
             }
         }
         saveSnapshot();
@@ -767,6 +770,30 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Override
     public void batchUpdateDocMeta(String userId, String orgId, Map<String, Object> request) {
         updateDocMeta(userId, orgId, request);
+    }
+
+    @Override
+    public synchronized void updateMetaValues(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        List<DocState> targetDocs = metaValueTargetDocs(knowledgeId, safe);
+        for (Object raw : list(safe.get("metaValueList"))) {
+            Map<String, Object> metaValue = map(raw);
+            String option = defaultIfBlank(string(metaValue.get("option")), "add");
+            if ("delete".equals(option)) {
+                for (DocState doc : targetDocs) {
+                    removeDocMetaValue(doc, metaValue);
+                }
+                continue;
+            }
+            Map<String, Object> definition = ensureMetaDefinition(knowledgeId, metaValue);
+            Map<String, Object> normalizedValue = normalizeDocMetaValue(metaValue, definition);
+            for (DocState doc : targetDocs) {
+                upsertDocMetaValue(doc, normalizedValue);
+            }
+        }
+        saveSnapshot();
     }
 
     @Override
@@ -963,13 +990,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public synchronized Map<String, Object> listMetaValues(String userId, String orgId, Map<String, Object> request) {
-        String knowledgeId = string(safe(request).get("knowledgeId"));
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        existingKnowledge(knowledgeId);
+        List<DocState> selected = metaValueTargetDocs(knowledgeId, safe);
         List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
         for (Map<String, Object> meta : metas(knowledgeId)) {
             Map<String, Object> value = new LinkedHashMap<String, Object>();
             value.put("metaId", meta.get("metaId"));
             value.put("metaKey", meta.get("metaKey"));
-            value.put("metaValue", Collections.emptyList());
+            value.put("metaValue", collectDocMetaValues(selected, string(meta.get("metaId")), string(meta.get("metaKey"))));
             value.put("metaValueType", meta.get("metaValueType"));
             result.add(value);
         }
@@ -1918,6 +1948,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("graphStatus", doc.graphStatus);
         result.put("graphErrMsg", "");
         result.put("isMultimodal", false);
+        result.put("metaDataList", copyMetaList(doc.metaDataList));
         return result;
     }
 
@@ -1956,6 +1987,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("rerankInfo", Collections.emptyList());
         result.put("docId", doc.docId);
         result.put("contentId", segment.contentId);
+        result.put("metaDataList", copyMetaList(doc.metaDataList));
         return result;
     }
 
@@ -2503,6 +2535,219 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 metas.remove(i);
             }
         }
+    }
+
+    private Map<String, Object> ensureMetaDefinition(String knowledgeId, Map<String, Object> source) {
+        List<Map<String, Object>> metas = metas(knowledgeId);
+        String metaId = string(source.get("metaId"));
+        String metaKey = metaKey(source);
+        Map<String, Object> existing = findMetaDefinition(metas, metaId, metaKey);
+        Map<String, Object> normalized = normalizeMetaDefinition(source, existing);
+        if (isBlank(string(normalized.get("metaId")))) {
+            normalized.put("metaId", "meta-" + nextMetaId.incrementAndGet());
+        }
+        if (isBlank(string(normalized.get("metaKey")))) {
+            return normalized;
+        }
+        if (existing == null) {
+            metas.add(normalized);
+            return normalized;
+        }
+        String oldMetaId = string(existing.get("metaId"));
+        String oldMetaKey = string(existing.get("metaKey"));
+        existing.clear();
+        existing.putAll(normalized);
+        syncDocMetaDefinition(knowledgeId, oldMetaId, oldMetaKey, existing);
+        return existing;
+    }
+
+    private Map<String, Object> normalizeMetaDefinition(Map<String, Object> source, Map<String, Object> existing) {
+        Map<String, Object> normalized = new LinkedHashMap<String, Object>();
+        normalized.put("metaId", defaultIfBlank(string(source.get("metaId")),
+                existing == null ? "" : string(existing.get("metaId"))));
+        normalized.put("metaKey", defaultIfBlank(metaKey(source),
+                existing == null ? "" : string(existing.get("metaKey"))));
+        normalized.put("metaValueType", defaultIfBlank(firstText(source, "metaValueType", "valueType", "type"),
+                existing == null ? "string" : defaultIfBlank(string(existing.get("metaValueType")), "string")));
+        if (source.containsKey("metaRule")) {
+            normalized.put("metaRule", source.get("metaRule"));
+        } else if (existing != null && existing.containsKey("metaRule")) {
+            normalized.put("metaRule", existing.get("metaRule"));
+        }
+        return normalized;
+    }
+
+    private Map<String, Object> findMetaDefinition(List<Map<String, Object>> metas, String metaId, String metaKey) {
+        if (!isBlank(metaId)) {
+            for (Map<String, Object> meta : metas) {
+                if (metaId.equals(string(meta.get("metaId")))) {
+                    return meta;
+                }
+            }
+        }
+        if (!isBlank(metaKey)) {
+            for (Map<String, Object> meta : metas) {
+                if (metaKey.equals(string(meta.get("metaKey")))) {
+                    return meta;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String metaKey(Map<String, Object> source) {
+        return firstText(source, "metaKey", "key", "name", "metaName");
+    }
+
+    private void removeMetaDefinitionAndValues(String knowledgeId, Map<String, Object> source) {
+        String metaId = string(source.get("metaId"));
+        String metaKey = metaKey(source);
+        List<Map<String, Object>> metas = metas(knowledgeId);
+        for (int i = metas.size() - 1; i >= 0; i--) {
+            if (metaMatches(metas.get(i), metaId, metaKey)) {
+                metas.remove(i);
+            }
+        }
+        for (DocState doc : docs(knowledgeId)) {
+            removeDocMetaValue(doc, source);
+        }
+    }
+
+    private void syncDocMetaDefinition(String knowledgeId, String oldMetaId, String oldMetaKey,
+                                       Map<String, Object> definition) {
+        for (DocState doc : docs(knowledgeId)) {
+            for (Map<String, Object> value : doc.metaDataList) {
+                if (metaMatches(value, oldMetaId, oldMetaKey)) {
+                    value.put("metaId", definition.get("metaId"));
+                    value.put("metaKey", definition.get("metaKey"));
+                    value.put("metaValueType", definition.get("metaValueType"));
+                    if (definition.containsKey("metaRule")) {
+                        value.put("metaRule", definition.get("metaRule"));
+                    }
+                }
+            }
+        }
+    }
+
+    private List<DocState> metaValueTargetDocs(String knowledgeId, Map<String, Object> request) {
+        Set<String> docIds = new LinkedHashSet<String>(stringList(request.get("docIdList")));
+        String docId = string(request.get("docId"));
+        if (!isBlank(docId)) {
+            docIds.add(docId);
+        }
+        boolean allDocs = docIds.isEmpty()
+                || (request.containsKey("applyToSelected") && !booleanValue(request.get("applyToSelected"), true));
+        if (allDocs) {
+            return new ArrayList<DocState>(docs(knowledgeId));
+        }
+        List<DocState> selected = new ArrayList<DocState>();
+        for (DocState doc : docs(knowledgeId)) {
+            if (docIds.contains(doc.docId)) {
+                selected.add(doc);
+            }
+        }
+        return selected;
+    }
+
+    private DocState findDocInKnowledge(String knowledgeId, String docId) {
+        for (DocState doc : docs(knowledgeId)) {
+            if (doc.docId.equals(docId)) {
+                return doc;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> normalizeDocMetaValue(Map<String, Object> source, Map<String, Object> definition) {
+        Map<String, Object> value = new LinkedHashMap<String, Object>();
+        value.put("metaId", definition.get("metaId"));
+        value.put("metaKey", definition.get("metaKey"));
+        Object rawValue = source.containsKey("metaValue") ? source.get("metaValue") : source.get("value");
+        value.put("metaValue", normalizeStoredMetaValue(rawValue));
+        value.put("metaValueType", definition.get("metaValueType"));
+        if (definition.containsKey("metaRule")) {
+            value.put("metaRule", definition.get("metaRule"));
+        }
+        return value;
+    }
+
+    private Object normalizeStoredMetaValue(Object rawValue) {
+        if (rawValue instanceof List) {
+            return new ArrayList<String>(stringList(rawValue));
+        }
+        return string(rawValue);
+    }
+
+    private void upsertDocMetaValue(DocState doc, Map<String, Object> value) {
+        String metaId = string(value.get("metaId"));
+        String metaKey = string(value.get("metaKey"));
+        for (Map<String, Object> existing : doc.metaDataList) {
+            if (metaMatches(existing, metaId, metaKey)) {
+                existing.clear();
+                existing.putAll(copyMeta(value));
+                return;
+            }
+        }
+        doc.metaDataList.add(copyMeta(value));
+    }
+
+    private void removeDocMetaValue(DocState doc, Map<String, Object> meta) {
+        String metaId = string(meta.get("metaId"));
+        String metaKey = metaKey(meta);
+        for (int i = doc.metaDataList.size() - 1; i >= 0; i--) {
+            if (metaMatches(doc.metaDataList.get(i), metaId, metaKey)) {
+                doc.metaDataList.remove(i);
+            }
+        }
+    }
+
+    private boolean metaMatches(Map<String, Object> meta, String metaId, String metaKey) {
+        return (!isBlank(metaId) && metaId.equals(string(meta.get("metaId"))))
+                || (!isBlank(metaKey) && metaKey.equals(string(meta.get("metaKey"))));
+    }
+
+    private List<String> collectDocMetaValues(List<DocState> docs, String metaId, String metaKey) {
+        List<String> values = new ArrayList<String>();
+        for (DocState doc : docs) {
+            for (Map<String, Object> meta : doc.metaDataList) {
+                if (!metaMatches(meta, metaId, metaKey)) {
+                    continue;
+                }
+                for (String value : storedMetaStrings(meta.get("metaValue"))) {
+                    if (!values.contains(value)) {
+                        values.add(value);
+                    }
+                }
+            }
+        }
+        return values;
+    }
+
+    private List<String> storedMetaStrings(Object rawValue) {
+        if (rawValue instanceof List) {
+            return stringList(rawValue);
+        }
+        String value = string(rawValue);
+        return isBlank(value) ? Collections.<String>emptyList() : Collections.singletonList(value);
+    }
+
+    private List<Map<String, Object>> copyMetaList(List<Map<String, Object>> metas) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> meta : safeList(metas)) {
+            result.add(copyMeta(meta));
+        }
+        return result;
+    }
+
+    private Map<String, Object> copyMeta(Map<String, Object> meta) {
+        Map<String, Object> copy = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : meta.entrySet()) {
+            Object value = entry.getValue();
+            copy.put(entry.getKey(), value instanceof List
+                    ? new ArrayList<Object>((List<?>) value)
+                    : value);
+        }
+        return copy;
     }
 
     private void createDefaultSegment(DocState doc) {
@@ -3678,6 +3923,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String sourceContent;
         private String sourceDocUrl;
         private Map<String, Object> importSegmentConfig = new LinkedHashMap<String, Object>();
+        private List<Map<String, Object>> metaDataList = new ArrayList<Map<String, Object>>();
     }
 
     private static final class SegmentState {

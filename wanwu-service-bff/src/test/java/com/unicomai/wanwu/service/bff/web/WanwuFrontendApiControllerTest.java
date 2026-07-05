@@ -2068,6 +2068,13 @@ public class WanwuFrontendApiControllerTest {
         when(knowledgeService.listDocChildSegments(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("contentList", Collections.singletonList(
                         childSegment("child-001", "segment-001", 1, "Child content"))));
+        when(knowledgeService.selectMetaKeys(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeMetaList", Collections.singletonList(
+                        map("metaId", "meta-001", "metaKey", "source", "metaValueType", "string"))));
+        when(knowledgeService.listMetaValues(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeMetaValues", Collections.singletonList(
+                        map("metaId", "meta-001", "metaKey", "source", "metaValue",
+                                Collections.singletonList("manual"), "metaValueType", "string"))));
         when(knowledgeService.hitKnowledge(anyString(), anyString(), any(Map.class)))
                 .thenReturn(map("prompt", "Question: Guide\nReference 1: Guide content\n",
                         "searchList", Collections.singletonList(knowledgeHitResult("Guide.txt", "Guide content", "Dev KB")),
@@ -2220,6 +2227,33 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/meta")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"docId\":\"\",\"metaDataList\":[{\"metaKey\":\"source\",\"metaValueType\":\"string\",\"option\":\"add\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/meta/select")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeMetaList[0].metaKey").value("source"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/meta/value/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"docIdList\":[\"doc-guide\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.knowledgeMetaValues[0].metaValue[0]").value("manual"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/meta/value/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-001\",\"docIdList\":[\"doc-guide\"],\"metaValueList\":[{\"metaId\":\"meta-001\",\"metaKey\":\"source\",\"metaValue\":\"manual\",\"metaValueType\":\"string\",\"option\":\"add\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
         mockMvc.perform(get("/user/api/v1/knowledge/doc/segment/list")
                         .header("Authorization", "Bearer dev-token")
                         .param("docId", "doc-guide")
@@ -2341,6 +2375,10 @@ public class WanwuFrontendApiControllerTest {
         verify(knowledgeService).listDocs(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).analyzeDocUrls(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).importDocs(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateDocMeta(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).selectMetaKeys(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).listMetaValues(anyString(), anyString(), any(Map.class));
+        verify(knowledgeService).updateMetaValues(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocSegments(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).listDocChildSegments(anyString(), anyString(), any(Map.class));
         verify(knowledgeService).hitKnowledge(anyString(), anyString(), any(Map.class));

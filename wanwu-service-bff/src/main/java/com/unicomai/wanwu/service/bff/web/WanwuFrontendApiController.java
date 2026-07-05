@@ -2340,12 +2340,20 @@ public class WanwuFrontendApiController {
                 (ctx, body) -> knowledgeService.exportDocs(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
-    @PostMapping({"/knowledge/doc/meta", "/knowledge/meta/value/update"})
+    @PostMapping("/knowledge/doc/meta")
     public FrontendResponse<Map<String, Object>> updateKnowledgeDocMeta(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
                 (ctx, body) -> knowledgeService.updateDocMeta(ctx.getUserId(), ctx.getOrgId(), body));
+    }
+
+    @PostMapping("/knowledge/meta/value/update")
+    public FrontendResponse<Map<String, Object>> updateKnowledgeMetaValues(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return knowledgeVoidResponse(authorization, request,
+                (ctx, body) -> knowledgeService.updateMetaValues(ctx.getUserId(), ctx.getOrgId(), body));
     }
 
     @PostMapping("/knowledge/doc/meta/batch")

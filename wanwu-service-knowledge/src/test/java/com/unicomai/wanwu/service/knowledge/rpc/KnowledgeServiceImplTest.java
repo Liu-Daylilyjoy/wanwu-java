@@ -487,6 +487,49 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void docMetadataValuesFollowGoMetaValueContracts() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Meta Docs", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-one", "One.txt"));
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-two", "Two.txt"));
+
+        service.updateDocMeta("dev-admin", "default-org", metaDefinition(knowledgeId, "source", "string"));
+        Map<String, Object> meta = listOfMaps(service.selectMetaKeys("dev-admin", "default-org",
+                singleton("knowledgeId", knowledgeId)).get("knowledgeMetaList")).get(0);
+        String metaId = (String) meta.get("metaId");
+        assertEquals("source", meta.get("metaKey"));
+
+        service.updateMetaValues("dev-admin", "default-org",
+                metaValueUpdate(knowledgeId, Collections.singletonList("doc-one"), metaId, "source", "manual"));
+        service.updateMetaValues("dev-admin", "default-org",
+                metaValueUpdate(knowledgeId, Collections.singletonList("doc-two"), metaId, "source", "imported"));
+
+        Map<String, Object> values = service.listMetaValues("dev-admin", "default-org",
+                metaValueList(knowledgeId, "doc-one", "doc-two"));
+        List<Map<String, Object>> rows = listOfMaps(values.get("knowledgeMetaValues"));
+        assertEquals("source", rows.get(0).get("metaKey"));
+        assertEquals(java.util.Arrays.asList("manual", "imported"), rows.get(0).get("metaValue"));
+
+        Map<String, Object> docs = service.listDocs("dev-admin", "default-org", docList(knowledgeId));
+        assertEquals("manual", listOfMaps(listOfMaps(docs.get("list")).get(0).get("metaDataList")).get(0).get("metaValue"));
+
+        Map<String, Object> segments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-one", ""));
+        assertEquals("manual", listOfMaps(segments.get("metaDataList")).get(0).get("metaValue"));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "One.txt"));
+        assertEquals("manual", listOfMaps(listOfMaps(hit.get("searchList")).get(0).get("metaDataList")).get(0).get("metaValue"));
+
+        service.updateMetaValues("dev-admin", "default-org",
+                metaValueDelete(knowledgeId, Collections.singletonList("doc-one"), metaId, "source"));
+        Map<String, Object> afterDelete = service.listMetaValues("dev-admin", "default-org",
+                metaValueList(knowledgeId, "doc-one", "doc-two"));
+        assertEquals(Collections.singletonList("imported"),
+                listOfMaps(afterDelete.get("knowledgeMetaValues")).get(0).get("metaValue"));
+    }
+
+    @Test
     public void documentImportSplitsInlineContentIntoSearchableSegments() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Parsed Docs", 0)).get("knowledgeId");
@@ -903,6 +946,55 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("docIdList", Collections.singletonList(docId));
+        return request;
+    }
+
+    private Map<String, Object> metaDefinition(String knowledgeId, String metaKey, String metaValueType) {
+        Map<String, Object> meta = new LinkedHashMap<String, Object>();
+        meta.put("metaKey", metaKey);
+        meta.put("metaValueType", metaValueType);
+        meta.put("option", "add");
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docId", "");
+        request.put("metaDataList", Collections.singletonList(meta));
+        return request;
+    }
+
+    private Map<String, Object> metaValueUpdate(String knowledgeId, List<String> docIds,
+                                                String metaId, String metaKey, String metaValue) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("metaId", metaId);
+        item.put("metaKey", metaKey);
+        item.put("metaValue", metaValue);
+        item.put("metaValueType", "string");
+        item.put("option", "add");
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docIdList", docIds);
+        request.put("applyToSelected", true);
+        request.put("metaValueList", Collections.singletonList(item));
+        return request;
+    }
+
+    private Map<String, Object> metaValueDelete(String knowledgeId, List<String> docIds,
+                                                String metaId, String metaKey) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("metaId", metaId);
+        item.put("metaKey", metaKey);
+        item.put("option", "delete");
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docIdList", docIds);
+        request.put("applyToSelected", true);
+        request.put("metaValueList", Collections.singletonList(item));
+        return request;
+    }
+
+    private Map<String, Object> metaValueList(String knowledgeId, String... docIds) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("docIdList", java.util.Arrays.asList(docIds));
         return request;
     }
 
