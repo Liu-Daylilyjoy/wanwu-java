@@ -22,7 +22,7 @@ Go authenticates most routes with API Key middleware and stores user/org/api-key
 Implemented in `WanwuOpenApiController` under `/service/api/openapi/v1`:
 
 - Agent create/delete/list/info plus config/publish through `AppService`.
-- Agent published/draft conversation list/detail/delete/clear compatibility.
+- Agent published/draft conversation create/list/detail/delete/clear compatibility, including Go-style `conversation_id` on create with a retained `conversationId` alias.
 - Agent chat JSON plus legacy single-frame SSE response shapes; draft Agent chat now uses draft configuration/conversations, and Agent/RAG chat responses expose local knowledge hits through Go-style search-list fields while keeping the public response envelopes unchanged.
 - Workflow run returns raw schema-aware workflow output JSON, persists a local workflow run snapshot through AppService/MySQL, and workflow/chatflow upload returns the raw signed URL text, matching Go's direct `ctx.Writer.Write` / `ctx.String` behavior instead of the normal BFF response envelope.
 - Chatflow conversation/message/chat loop persisted through AppService/MySQL with a BFF-local fallback.

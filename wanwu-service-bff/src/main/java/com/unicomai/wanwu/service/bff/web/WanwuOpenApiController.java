@@ -264,7 +264,7 @@ public class WanwuOpenApiController {
     }
 
     @PostMapping("/agent/conversation")
-    public FrontendResponse<AssistantConversationCreateResult> createAgentConversation(
+    public FrontendResponse<Map<String, Object>> createAgentConversation(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
         try {
@@ -276,7 +276,8 @@ public class WanwuOpenApiController {
             command.setConversationType(CONVERSATION_TYPE_PUBLISHED);
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
-            return FrontendResponse.ok(appService.createAssistantConversation(command));
+            return FrontendResponse.ok(openApiAgentConversationCreate(
+                    appService.createAssistantConversation(command)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -1381,6 +1382,14 @@ public class WanwuOpenApiController {
             data.put("conversation_id", result.getConversationId());
             data.put("detail_id", result.getDetailId());
         }
+        return data;
+    }
+
+    private Map<String, Object> openApiAgentConversationCreate(AssistantConversationCreateResult result) {
+        String conversationId = result == null ? "" : defaultIfBlank(result.getConversationId(), "");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("conversation_id", conversationId);
+        data.put("conversationId", conversationId);
         return data;
     }
 

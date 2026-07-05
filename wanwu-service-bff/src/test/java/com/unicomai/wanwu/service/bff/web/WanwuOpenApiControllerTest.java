@@ -107,6 +107,7 @@ public class WanwuOpenApiControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uuid\":\"assistant-openapi-001\",\"title\":\"hello\"}"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversation_id").value("conversation-openapi-001"))
                 .andExpect(jsonPath("$.data.conversationId").value("conversation-openapi-001"));
 
         ArgumentCaptor<AssistantCreateCommand> createCaptor = forClass(AssistantCreateCommand.class);
