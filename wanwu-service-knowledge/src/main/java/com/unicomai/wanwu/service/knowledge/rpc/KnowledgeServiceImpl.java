@@ -1699,10 +1699,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     public synchronized Map<String, Object> hitQaPairs(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> safe = safe(request);
         String question = string(safe.get("question"));
-        int topK = intValue(map(safe.get("knowledgeMatchParams")).get("topK"), 5);
+        Map<String, Object> matchParams = map(safe.get("knowledgeMatchParams"));
+        int topK = intValue(matchParams.get("topK"), 5);
         if (topK <= 0) {
             topK = 5;
         }
+        double threshold = doubleValue(firstPresent(matchParams, "threshold", "score"), 0D);
         Set<String> knowledgeIds = new LinkedHashSet<String>();
         for (Object raw : list(safe.get("knowledgeList"))) {
             String knowledgeId = string(map(raw).get("knowledgeId"));
@@ -1726,7 +1728,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     continue;
                 }
                 double score = qaHitScore(question, pair);
-                if (score <= 0D) {
+                if (score <= 0D || score < threshold) {
                     continue;
                 }
                 searchList.add(toQaHitInfo(pair, knowledge));

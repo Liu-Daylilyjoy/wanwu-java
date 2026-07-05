@@ -208,6 +208,25 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaHitHonorsScoreThreshold() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Threshold QA", 1)).get("knowledgeId");
+        service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does recall work?", "Threshold appears only in this answer."));
+        Map<String, Object> stronger = service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does Threshold work?", "Question text should pass threshold."));
+
+        Map<String, Object> request = qaHit(knowledgeId, "Threshold");
+        map(request.get("knowledgeMatchParams")).put("score", 0.9D);
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals(stronger.get("qaPairId"), searchList.get(0).get("qaPairId"));
+        assertEquals(1.0D, ((List<Double>) hit.get("score")).get(0));
+    }
+
+    @Test
     public void exportRecordsFollowQaAndDocFrontendContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Export KB", 0)).get("knowledgeId");
