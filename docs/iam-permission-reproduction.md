@@ -7,6 +7,8 @@ Date: 2026-06-30
 Original Go file inspected:
 
 - `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\permission.go`
+- `D:\work\week3\wanwu\proto\perm-service\perm-service.proto`
+- `D:\work\week3\wanwu\internal\iam-service\server\grpc\perm\service.go`
 
 The Go BFF exposes three permission-management route families:
 
@@ -31,6 +33,7 @@ BFF routes:
 Tests:
 
 - `wanwu-service-iam/src/test/java/com/unicomai/wanwu/service/iam/rpc/IamServiceImplTest.java`
+- `wanwu-service-iam/src/test/java/com/unicomai/wanwu/service/iam/rpc/PermServiceImplTest.java`
 - `wanwu-service-bff/src/test/java/com/unicomai/wanwu/service/bff/web/WanwuFrontendApiControllerTest.java`
 
 Covered routes:
@@ -72,11 +75,12 @@ This slice provides a Docker development IAM repository. After the MySQL persist
 - `user/batch` parses uploaded CSV/TSV text or `.xlsx` sheet data using the existing local parser, maps both Go's localized template headers (`用户名/密码/单位/电话/角色/备注`) and English `username/password/company/phone/role/remark` aliases into IAM user rows, enforces the Go 500-row limit, and creates one persisted user per imported row.
 - `/user/api/v1/static/docs/users.xlsx` now emits the same localized batch-import header contract, so the unchanged frontend's downloaded template can be uploaded back into `user/batch`.
 - Imported users now pass Go-style username, password, phone, and non-empty company validation before IAM writes them. Initial import passwords are stored as hashes on the user record and hidden from frontend read models.
+- Java now exposes an independent `PermService` API contract for Go's `CheckUserEnable` and `CheckUserPerm` RPCs. The IAM-backed implementation checks the shared Java IAM user status, development token freshness against the user's password/update timestamp, organization membership, built-in admin/app permission sets, and mutable role permissions created through the permission-management APIs.
 
 ## Remaining Gaps
 
 - Normalized Go-equivalent IAM relational tables are still missing; the current durable boundary is a JSON compatibility table.
 - Real production password hashing, email verification, reset policy, and login risk controls are not reproduced; the development hash is intentionally local and deterministic.
 - Exact Go Excel parser behavior and localized i18n error text are not fully reproduced; the Java path covers the frontend-visible header mapping, row cap, and validation semantics.
-- Hierarchical organization constraints and cross-org permission checks are minimal.
+- Hierarchical organization constraints are minimal, and production token/session revocation is approximated by the development user's password/update timestamp.
 - Audit logs, invitation workflow, and notification side effects are not reproduced.
