@@ -649,6 +649,43 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunIncludesDeterministicNodeTraceForSchemaNodes() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("NodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"llm\",\"type\":\"llm\",\"data\":{\"label\":\"Summarize\"}}"
+                + "],"
+                + "\"edges\":[{\"source\":\"start\",\"target\":\"llm\"}],"
+                + "\"outputs\":[{\"name\":\"summary\",\"type\":\"string\"},{\"name\":\"llm\",\"type\":\"object\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.singletonMap("question", "hello"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals(2, steps.size());
+        assertEquals("start", steps.get(0).get("nodeId"));
+        assertEquals("llm", steps.get(1).get("nodeId"));
+        assertEquals(2, castMap(output.get("trace")).get("nodeCount"));
+        assertEquals(1, castList(output.get("edges")).size());
+        assertTrue(String.valueOf(output.get("summary")).contains("NodeFlow executed Summarize"));
+        assertEquals("llm", castMap(output.get("llm")).get("nodeId"));
+    }
+
+    @Test
     public void convertAppTypeMovesWorkflowBetweenWorkflowAndChatflowLists() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

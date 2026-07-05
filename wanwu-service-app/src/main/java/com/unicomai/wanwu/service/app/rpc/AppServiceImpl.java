@@ -5188,26 +5188,39 @@ public class AppServiceImpl implements AppService {
     private Map<String, Object> workflowRunOutput(AppRecord workflow,
                                                   WorkflowDraftRecord draft,
                                                   Map<String, Object> input) {
+        String schemaJson = draft == null ? "" : draft.getSchemaJson();
+        JsonNode schema = workflowSchema(schemaJson);
+        List<Map<String, Object>> steps = workflowExecutionSteps(workflow, schema, input);
+        Map<String, Object> nodeOutputs = workflowNodeOutputs(steps);
+        List<Map<String, Object>> edges = workflowEdges(schema);
+
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("workflowId", workflow.getAppId());
         output.put("workflow_id", workflow.getAppId());
         output.put("status", "success");
         output.put("message", "Demo workflow response");
         output.putAll(input);
-        List<Map<String, Object>> declaredOutputs = workflowDeclaredOutputs(draft == null ? "" : draft.getSchemaJson());
+        output.put("steps", steps);
+        output.put("trace", workflowTrace(workflow, steps, edges));
+        output.put("nodeOutputs", nodeOutputs);
+        output.put("edges", edges);
+        List<Map<String, Object>> declaredOutputs = workflowDeclaredOutputs(schema);
         for (Map<String, Object> declared : declaredOutputs) {
             String name = stringValue(declared.get("name"));
             if (isBlank(name)) {
                 continue;
             }
-            output.put(name, workflowOutputValue(workflow, name, stringValue(declared.get("type")), input));
+            output.put(name, workflowOutputValue(workflow, name, stringValue(declared.get("type")), input, nodeOutputs));
         }
         return output;
     }
 
     private List<Map<String, Object>> workflowDeclaredOutputs(String schemaJson) {
+        return workflowDeclaredOutputs(workflowSchema(schemaJson));
+    }
+
+    private List<Map<String, Object>> workflowDeclaredOutputs(JsonNode root) {
         List<Map<String, Object>> outputs = new ArrayList<>();
-        JsonNode root = workflowSchema(schemaJson);
         JsonNode declared = root.path("outputs");
         if (!declared.isArray()) {
             return outputs;
@@ -5236,8 +5249,20 @@ public class AppServiceImpl implements AppService {
                                        String name,
                                        String type,
                                        Map<String, Object> input) {
+        return workflowOutputValue(workflow, name, type, input, Collections.<String, Object>emptyMap());
+    }
+
+    private Object workflowOutputValue(AppRecord workflow,
+                                       String name,
+                                       String type,
+                                       Map<String, Object> input,
+                                       Map<String, Object> nodeOutputs) {
         if (input.containsKey(name)) {
             return input.get(name);
+        }
+        Object nodeValue = workflowNodeOutputValue(name, nodeOutputs);
+        if (nodeValue != null) {
+            return nodeValue;
         }
         if ("integer".equals(type)) {
             return 0;
@@ -5262,6 +5287,156 @@ public class AppServiceImpl implements AppService {
             source = source.substring(0, 120);
         }
         return defaultIfBlank(workflow.getName(), "Workflow") + " generated " + name + " for " + source;
+    }
+
+    private List<Map<String, Object>> workflowExecutionSteps(AppRecord workflow,
+                                                             JsonNode schema,
+                                                             Map<String, Object> input) {
+        List<Map<String, Object>> nodes = workflowNodes(schema);
+        List<Map<String, Object>> steps = new ArrayList<>(nodes.size());
+        int order = 1;
+        for (Map<String, Object> node : nodes) {
+            Map<String, Object> step = new LinkedHashMap<>();
+            String nodeId = defaultIfBlank(textValue(node, "id", "nodeId", "key"), "node-" + order);
+            String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
+            String name = defaultIfBlank(textValue(node, "name", "label", "title"), nodeId);
+            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, nodeId, type, name, input, order);
+            step.put("order", order);
+            step.put("nodeId", nodeId);
+            step.put("name", name);
+            step.put("type", type);
+            step.put("status", "success");
+            step.put("input", input);
+            step.put("output", nodeOutput);
+            steps.add(step);
+            order++;
+        }
+        return steps;
+    }
+
+    private Map<String, Object> workflowNodeOutput(AppRecord workflow,
+                                                   String nodeId,
+                                                   String type,
+                                                   String name,
+                                                   Map<String, Object> input,
+                                                   int order) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("nodeId", nodeId);
+        output.put("type", type);
+        output.put("name", name);
+        output.put("order", order);
+        output.put("input", input);
+        String lowerType = type.toLowerCase(java.util.Locale.ENGLISH);
+        if (lowerType.contains("start") || lowerType.contains("input")) {
+            output.putAll(input);
+            output.put("text", input.isEmpty() ? "" : String.valueOf(input));
+            return output;
+        }
+        if (lowerType.contains("end") || lowerType.contains("output")) {
+            output.put("result", input);
+            output.put("text", defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name);
+            return output;
+        }
+        String source = input.isEmpty() ? "input" : String.valueOf(input);
+        if (source.length() > 120) {
+            source = source.substring(0, 120);
+        }
+        String text = defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name + " with " + source;
+        output.put("text", text);
+        output.put("result", text);
+        output.put("response", text);
+        return output;
+    }
+
+    private Map<String, Object> workflowNodeOutputs(List<Map<String, Object>> steps) {
+        Map<String, Object> nodeOutputs = new LinkedHashMap<>();
+        for (Map<String, Object> step : steps) {
+            nodeOutputs.put(stringValue(step.get("nodeId")), step.get("output"));
+        }
+        return nodeOutputs;
+    }
+
+    private Object workflowNodeOutputValue(String name, Map<String, Object> nodeOutputs) {
+        if (nodeOutputs.containsKey(name)) {
+            return nodeOutputs.get(name);
+        }
+        for (Object value : nodeOutputs.values()) {
+            Map<String, Object> output = mapValue(value);
+            if (output.containsKey(name)) {
+                return output.get(name);
+            }
+        }
+        List<Object> outputs = new ArrayList<>(nodeOutputs.values());
+        for (int i = outputs.size() - 1; i >= 0; i--) {
+            Object value = outputs.get(i);
+            Map<String, Object> output = mapValue(value);
+            if (output.containsKey("response")) {
+                return output.get("response");
+            }
+            if (output.containsKey("text")) {
+                return output.get("text");
+            }
+            if (output.containsKey("result")) {
+                return output.get("result");
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> workflowTrace(AppRecord workflow,
+                                              List<Map<String, Object>> steps,
+                                              List<Map<String, Object>> edges) {
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("workflowId", workflow.getAppId());
+        trace.put("workflowName", defaultIfBlank(workflow.getName(), ""));
+        trace.put("status", "success");
+        trace.put("nodeCount", steps.size());
+        trace.put("edgeCount", edges.size());
+        return trace;
+    }
+
+    private List<Map<String, Object>> workflowNodes(JsonNode root) {
+        return workflowArray(root.path("nodes"));
+    }
+
+    private List<Map<String, Object>> workflowEdges(JsonNode root) {
+        return workflowArray(root.path("edges"));
+    }
+
+    private List<Map<String, Object>> workflowArray(JsonNode node) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        if (!node.isArray()) {
+            return rows;
+        }
+        for (JsonNode item : node) {
+            rows.add(jsonMap(item));
+        }
+        return rows;
+    }
+
+    private Map<String, Object> jsonMap(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return new LinkedHashMap<>();
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {
+        });
+    }
+
+    private String textValue(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            Object direct = source.get(key);
+            if (direct != null && !isBlank(String.valueOf(direct))) {
+                return String.valueOf(direct);
+            }
+        }
+        Map<String, Object> data = mapValue(source.get("data"));
+        for (String key : keys) {
+            Object nested = data.get(key);
+            if (nested != null && !isBlank(String.valueOf(nested))) {
+                return String.valueOf(nested);
+            }
+        }
+        return "";
     }
 
     private Map<String, Object> avatar(AppRecord record) {
