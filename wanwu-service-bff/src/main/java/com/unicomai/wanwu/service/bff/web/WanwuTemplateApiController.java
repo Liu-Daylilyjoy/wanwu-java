@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -225,19 +227,20 @@ public class WanwuTemplateApiController {
                                                    String category,
                                                    String name,
                                                    List<Map<String, Object>> fallback) {
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         if (appService != null) {
             try {
-                List<Map<String, Object>> rows = appService.listAppTemplates(templateType, category, name);
-                if (rows != null && !rows.isEmpty()) {
-                    return copyRows(rows);
+                List<Map<String, Object>> serviceRows = appService.listAppTemplates(templateType, category, name);
+                if (serviceRows != null && !serviceRows.isEmpty()) {
+                    rows.addAll(copyRows(serviceRows));
                 }
             } catch (RuntimeException ignored) {
                 // Keep the template square usable while AppService is still booting in development.
             }
         }
-        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        String idKey = "assistant".equals(templateType) ? "assistantTemplateId" : "templateId";
         for (Map<String, Object> item : fallback) {
-            if (matches(item, category, name)) {
+            if (matches(item, category, name) && !containsTemplate(rows, idKey, text(item, idKey))) {
                 rows.add(copy(item));
             }
         }
@@ -333,7 +336,53 @@ public class WanwuTemplateApiController {
         rows.add(workflowTemplate("workflow-template-brief", "research", "Research Brief",
                 "Collect inputs and create a concise research brief.",
                 "Use this template for market, product, or policy research."));
+        appendGoWorkflowTemplates(rows);
         return rows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void appendGoWorkflowTemplates(List<Map<String, Object>> rows) {
+        InputStream input = getClass().getClassLoader().getResourceAsStream("workflow-template-bundle.json");
+        if (input == null) {
+            return;
+        }
+        try {
+            Map<String, Object> root = JSON.readValue(input, Map.class);
+            for (Object item : listValue(root.get("workflowTemplates"))) {
+                Map<String, Object> template = workflowTemplateFromBundle(mapValue(item));
+                if (!containsTemplate(rows, "templateId", text(template, "templateId"))) {
+                    rows.add(template);
+                }
+            }
+        } catch (IOException ignored) {
+            // Keep hard-coded development templates available if the generated Go bundle is absent or invalid.
+        } finally {
+            try {
+                input.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private Map<String, Object> workflowTemplateFromBundle(Map<String, Object> source) {
+        String id = text(source, "templateId");
+        String name = defaultIfBlank(text(source, "name"), id);
+        String desc = text(source, "desc");
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("templateId", id);
+        item.put("avatar", avatar(source.get("avatar")));
+        item.put("name", name);
+        item.put("desc", desc);
+        item.put("category", text(source, "category"));
+        item.put("author", defaultIfBlank(text(source, "author"), "中国联通"));
+        item.put("downloadCount", source.get("downloadCount") == null ? 0 : source.get("downloadCount"));
+        item.put("summary", defaultIfBlank(text(source, "summary"), desc));
+        item.put("feature", text(source, "feature"));
+        item.put("scenario", text(source, "scenario"));
+        item.put("note", text(source, "note"));
+        Map<String, Object> schema = mapValue(source.get("schema"));
+        item.put("schema", schema.isEmpty() ? workflowSchema(id, name, desc) : schema);
+        return item;
     }
 
     private Map<String, Object> workflowTemplate(String id, String category, String name, String desc, String summary) {
@@ -392,6 +441,18 @@ public class WanwuTemplateApiController {
         return isBlank(name) || text(item, "name").toLowerCase().contains(name.toLowerCase());
     }
 
+    private boolean containsTemplate(List<Map<String, Object>> rows, String idKey, String templateId) {
+        if (isBlank(templateId)) {
+            return true;
+        }
+        for (Map<String, Object> row : rows) {
+            if (templateId.equals(text(row, idKey))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Map<String, Object> listResult(List<Map<String, Object>> rows) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("list", rows);
@@ -407,6 +468,16 @@ public class WanwuTemplateApiController {
     @SuppressWarnings("unchecked")
     private Map<String, Object> copy(Map<String, Object> source) {
         return source == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<String, Object>(source);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> listValue(Object value) {
+        return value instanceof List ? (List<Object>) value : Collections.emptyList();
     }
 
     @SuppressWarnings("unchecked")
