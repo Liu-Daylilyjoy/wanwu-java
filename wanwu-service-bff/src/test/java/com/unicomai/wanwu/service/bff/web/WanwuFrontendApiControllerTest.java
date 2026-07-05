@@ -287,14 +287,29 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void baseCustomReadsOperatePlatformConfig() throws Exception {
-        when(operateService.getSystemCustom("light")).thenReturn(platformConfig());
+        when(operateService.getSystemCustom("light"))
+                .thenReturn(platformConfig(), customPlatformConfig());
 
-        mockMvc.perform(get("/user/api/v1/base/custom"))
+        mockMvc.perform(get("/user/api/v1/base/custom")
+                        .header("x-language", "en"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.login.welcomeText")
+                        .value("Hi! Welcome to Yuanjing Wanwu Intelligent Body Platform"))
+                .andExpect(jsonPath("$.data.login.platformDesc").value(""))
+                .andExpect(jsonPath("$.data.home.title").value("Yuanjing Wanwu Intelligent Body Platform"))
+                .andExpect(jsonPath("$.data.tab.title").value("Yuanjing Wanwu"))
+                .andExpect(jsonPath("$.data.about.copyright").value("© 大模型开源平台"))
                 .andExpect(jsonPath("$.data.loginEmail.email.status").value(false));
 
-        verify(operateService).getSystemCustom("light");
+        mockMvc.perform(get("/user/api/v1/base/custom")
+                        .header("x-language", "en"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.login.welcomeText").value("Custom welcome"))
+                .andExpect(jsonPath("$.data.home.title").value("Custom home"))
+                .andExpect(jsonPath("$.data.tab.title").value("Custom tab"));
+
+        verify(operateService, times(2)).getSystemCustom("light");
     }
 
     @Test
@@ -4534,8 +4549,30 @@ public class WanwuFrontendApiControllerTest {
         email.put("status", false);
         Map<String, Object> loginEmail = new LinkedHashMap<>();
         loginEmail.put("email", email);
+        Map<String, Object> login = new LinkedHashMap<>();
+        login.put("welcomeText", "bff_custom_login_welcome_text");
+        login.put("platformDesc", "bff_custom_login_platform_desc");
+        login.put("loginButtonColor", "#384BF7");
+        Map<String, Object> home = new LinkedHashMap<>();
+        home.put("title", "bff_custom_home_title");
+        Map<String, Object> tab = new LinkedHashMap<>();
+        tab.put("title", "bff_custom_tab_title");
+        Map<String, Object> about = new LinkedHashMap<>();
+        about.put("copyright", "bff_custom_about_copyright");
         Map<String, Object> config = new LinkedHashMap<>();
+        config.put("login", login);
+        config.put("home", home);
+        config.put("tab", tab);
+        config.put("about", about);
         config.put("loginEmail", loginEmail);
+        return config;
+    }
+
+    private Map<String, Object> customPlatformConfig() {
+        Map<String, Object> config = platformConfig();
+        ((Map<String, Object>) config.get("login")).put("welcomeText", "Custom welcome");
+        ((Map<String, Object>) config.get("home")).put("title", "Custom home");
+        ((Map<String, Object>) config.get("tab")).put("title", "Custom tab");
         return config;
     }
 

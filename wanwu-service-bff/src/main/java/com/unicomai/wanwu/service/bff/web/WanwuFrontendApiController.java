@@ -160,6 +160,7 @@ public class WanwuFrontendApiController {
     private static final String[] REQUIRED_USER_IMPORT_FIELDS = {
             "username", "password", "company", "phone", "roleName", "remark"
     };
+    private static final Map<String, Map<String, String>> CUSTOM_I18N = customI18n();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -447,11 +448,15 @@ public class WanwuFrontendApiController {
 
     @GetMapping("/base/custom")
     public FrontendResponse<Map<String, Object>> platformConfig(
+            @RequestHeader(value = "x-language", required = false) String language,
             @RequestParam(value = "mode", required = false) String mode) {
+        Map<String, Object> config;
         if (operateService != null) {
-            return FrontendResponse.ok(operateService.getSystemCustom(defaultIfBlank(mode, "light")));
+            config = operateService.getSystemCustom(defaultIfBlank(mode, "light"));
+        } else {
+            config = iamService.platformConfig();
         }
-        return FrontendResponse.ok(iamService.platformConfig());
+        return FrontendResponse.ok(translateCustomConfig(config, language));
     }
 
     @GetMapping("/model/list")
@@ -3520,6 +3525,74 @@ public class WanwuFrontendApiController {
 
     private String defaultIfBlank(String value, String defaultValue) {
         return isBlank(value) ? defaultValue : value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> translateCustomConfig(Map<String, Object> config, String language) {
+        Object translated = translateCustomValue(config == null ? Collections.<String, Object>emptyMap() : config,
+                customLanguage(language));
+        return translated instanceof Map ? (Map<String, Object>) translated : Collections.<String, Object>emptyMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object translateCustomValue(Object value, String language) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (entry.getKey() != null) {
+                    copy.put(String.valueOf(entry.getKey()), translateCustomValue(entry.getValue(), language));
+                }
+            }
+            return copy;
+        }
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<>();
+            for (Object item : (List<?>) value) {
+                copy.add(translateCustomValue(item, language));
+            }
+            return copy;
+        }
+        if (value instanceof String) {
+            Map<String, String> langs = CUSTOM_I18N.get(value);
+            if (langs == null) {
+                return value;
+            }
+            String translated = langs.get(language);
+            if (translated != null) {
+                return translated;
+            }
+            translated = langs.get("zh");
+            return translated == null ? value : translated;
+        }
+        return value;
+    }
+
+    private String customLanguage(String language) {
+        if (isBlank(language)) {
+            return "zh";
+        }
+        String normalized = language.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("en") ? "en" : "zh";
+    }
+
+    private static Map<String, Map<String, String>> customI18n() {
+        Map<String, Map<String, String>> i18n = new LinkedHashMap<>();
+        i18n.put("bff_custom_home_title", customLangs("元景万悟智能体平台", "Yuanjing Wanwu Intelligent Body Platform"));
+        i18n.put("bff_custom_tab_title", customLangs("元景万悟", "Yuanjing Wanwu"));
+        i18n.put("bff_custom_login_welcome_text", customLangs("嗨！欢迎来到元景万悟智能体平台",
+                "Hi! Welcome to Yuanjing Wanwu Intelligent Body Platform"));
+        i18n.put("bff_custom_about_copyright", customLangs("© 大模型开源平台", null));
+        i18n.put("bff_custom_login_platform_desc", customLangs("", ""));
+        return i18n;
+    }
+
+    private static Map<String, String> customLangs(String zh, String en) {
+        Map<String, String> langs = new LinkedHashMap<>();
+        langs.put("zh", zh);
+        if (en != null) {
+            langs.put("en", en);
+        }
+        return langs;
     }
 
     private Map<String, Object> emptyListResult() {
