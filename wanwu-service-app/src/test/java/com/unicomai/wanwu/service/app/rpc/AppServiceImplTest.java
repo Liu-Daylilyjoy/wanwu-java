@@ -522,8 +522,15 @@ public class AppServiceImplTest {
         hitItem.put("title", "PolicyGuide.txt");
         hitItem.put("knowledgeName", "Policy KB");
         hitItem.put("snippet", "Policy answer comes from the configured knowledge base.");
+        Map<String, Object> rerankScore = new LinkedHashMap<>();
+        rerankScore.put("score", 0.87D);
+        Map<String, Object> rerankOnlyItem = new LinkedHashMap<>();
+        rerankOnlyItem.put("title", "PolicyFaq.txt");
+        rerankOnlyItem.put("QABase", "Policy QA");
+        rerankOnlyItem.put("snippet", "A second hit keeps score compatibility.");
+        rerankOnlyItem.put("rerank_info", Collections.singletonList(rerankScore));
         Map<String, Object> hit = new LinkedHashMap<>();
-        hit.put("searchList", Collections.singletonList(hitItem));
+        hit.put("searchList", Arrays.asList(hitItem, rerankOnlyItem));
         hit.put("score", Collections.singletonList(1.0D));
         hit.put("prompt", "Policy answer comes from the configured knowledge base.");
         when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
@@ -538,8 +545,13 @@ public class AppServiceImplTest {
         chat.setFileInfo(Collections.singletonList(fileInfo));
         RagChatResult result = service.streamRagChat(chat);
 
-        assertEquals(1, result.getSearchList().size());
+        assertEquals(2, result.getSearchList().size());
         assertEquals("PolicyGuide.txt", result.getSearchList().get(0).get("title"));
+        assertEquals(1.0D, result.getSearchList().get(0).get("score"));
+        assertEquals("Policy KB", result.getSearchList().get(0).get("kb_name"));
+        assertEquals("Policy KB", result.getSearchList().get(0).get("user_kb_name"));
+        assertEquals(0.87D, result.getSearchList().get(1).get("score"));
+        assertEquals("Policy QA", result.getSearchList().get(1).get("user_kb_name"));
         assertTrue(result.getResponse().contains("Policy answer comes from the configured knowledge base."));
         List<RagChatRecord> chats = repository.listRagChats("dev-admin", "default-org", created.getRagId(), 10);
         assertEquals(1, chats.size());

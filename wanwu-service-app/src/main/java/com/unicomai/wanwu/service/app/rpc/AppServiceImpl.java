@@ -3996,12 +3996,51 @@ public class AppServiceImpl implements AppService {
         if (hit == null) {
             return searchList;
         }
-        for (Object item : listValue(hit.get("searchList"))) {
+        List<Object> scores = listValue(hit.get("score"));
+        List<Object> items = listValue(hit.get("searchList"));
+        for (int i = 0; i < items.size(); i++) {
+            Object item = items.get(i);
             if (item instanceof Map) {
-                searchList.add(new LinkedHashMap<>(mapValue(item)));
+                Map<String, Object> row = new LinkedHashMap<>(mapValue(item));
+                normalizeRagHitRow(row, scores, i);
+                searchList.add(row);
             }
         }
         return searchList;
+    }
+
+    private void normalizeRagHitRow(Map<String, Object> row, List<Object> scores, int index) {
+        if (!row.containsKey("score")) {
+            Object score = index < scores.size() ? scores.get(index) : null;
+            if (score == null) {
+                score = scoreFromRerankInfo(row);
+            }
+            if (score != null) {
+                row.put("score", score);
+            }
+        }
+        String knowledgeName = firstNonBlank(
+                stringValue(row.get("knowledgeName")),
+                stringValue(row.get("kb_name")),
+                stringValue(row.get("QABase")),
+                stringValue(row.get("knowledgeId")));
+        if (!isBlank(knowledgeName)) {
+            if (isBlank(stringValue(row.get("kb_name")))) {
+                row.put("kb_name", knowledgeName);
+            }
+            if (isBlank(stringValue(row.get("user_kb_name")))) {
+                row.put("user_kb_name", knowledgeName);
+            }
+        }
+    }
+
+    private Object scoreFromRerankInfo(Map<String, Object> row) {
+        List<Object> rerankInfo = listValue(firstPresent(row, "rerank_info", "rerankInfo"));
+        if (rerankInfo.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> first = mapValue(rerankInfo.get(0));
+        return first.get("score");
     }
 
     private String enrichRagResponse(String base,

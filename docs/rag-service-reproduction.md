@@ -17,7 +17,7 @@
 - `UpdatePublishRag` maps to `updateAppVersion(appType=rag)`.
 - `ListPublishRagHistory`, `GetPublishRagDesc`, and `GetPublishRagDescBatch` map to app version queries and return Go-style `historyList`, `version`, `desc`, and `createAt` fields.
 - `OverwriteRagDraft` maps to `rollbackAppVersion(appType=rag)`.
-- `ChatRag` maps to `streamRagChat`, preserving `publish=1` as published mode and forwarding `history` plus `fileInfoList`.
+- `ChatRag` maps to `streamRagChat`, preserving `publish=1` as published mode, forwarding `history` plus `fileInfoList`, and returning Go-compatible normalized `searchList` entries with `score`, `kb_name`, and `user_kb_name`.
 
 This avoids creating a second RAG persistence model. Drafts, configs, snapshots, publish status, and chat records remain owned by `wanwu-service-app`.
 

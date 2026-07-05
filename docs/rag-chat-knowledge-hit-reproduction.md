@@ -15,12 +15,12 @@ Date: 2026-07-01
 - Configured `knowledgebases[].id` values are translated to the Java knowledge-service hit contract as `knowledgeList[].knowledgeId`.
 - The existing `knowledgeBaseConfig.config` object is passed through as `knowledgeMatchParams`, preserving frontend settings such as `topK`, `threshold`, `matchType`, and graph flags.
 - When a knowledge base is configured, Java calls `KnowledgeService.hitKnowledge`; when a QA knowledge base is configured, Java calls `KnowledgeService.hitQaPairs`.
-- The returned `searchList` and `qaSearchList` are placed on `RagChatResult`, and the BFF emits them as AG-UI custom SSE events before the text response.
+- The returned `searchList` and `qaSearchList` are normalized with Go BFF-compatible `score`, `kb_name`, and `user_kb_name` fields, then placed on `RagChatResult`; the BFF emits them as AG-UI custom SSE events before the text response.
 - The deterministic development response is enriched with the returned `prompt` or first hit text so manual smoke tests can see that the configured knowledge path was used.
 
 ## Tests
 
-- `AppServiceImplTest#ragChatReturnsConfiguredKnowledgeHits` verifies config parsing, `id -> knowledgeId` translation, `topK` propagation, response enrichment, and search-list return.
+- `AppServiceImplTest#ragChatReturnsConfiguredKnowledgeHits` verifies config parsing, `id -> knowledgeId` translation, `topK` propagation, response enrichment, search-list return, top-level score propagation, and `rerank_info[0].score` fallback.
 - `WanwuFrontendApiControllerTest#ragChatDraftReturnsAgUiSseAndMapsFrontendRequest` verifies that frontend RAG draft chat emits `rag_search_list` over text/event-stream.
 
 ## Remaining Gap
