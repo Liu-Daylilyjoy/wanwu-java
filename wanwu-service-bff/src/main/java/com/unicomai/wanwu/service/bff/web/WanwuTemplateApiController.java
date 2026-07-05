@@ -294,7 +294,51 @@ public class WanwuTemplateApiController {
                 "Describe the customer issue.",
                 "You are a calm customer support assistant.",
                 "For customer service teams."));
+        appendGoAssistantTemplates(rows);
         return rows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void appendGoAssistantTemplates(List<Map<String, Object>> rows) {
+        InputStream input = getClass().getClassLoader().getResourceAsStream("assistant-template-bundle.json");
+        if (input == null) {
+            return;
+        }
+        try {
+            Map<String, Object> root = JSON.readValue(input, Map.class);
+            for (Object item : listValue(root.get("assistantTemplates"))) {
+                Map<String, Object> template = assistantTemplateFromBundle(mapValue(item));
+                if (!containsTemplate(rows, "assistantTemplateId", text(template, "assistantTemplateId"))) {
+                    rows.add(template);
+                }
+            }
+        } catch (IOException ignored) {
+            // Keep hard-coded development templates available if the generated Go bundle is absent or invalid.
+        } finally {
+            try {
+                input.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private Map<String, Object> assistantTemplateFromBundle(Map<String, Object> source) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        String id = text(source, "assistantTemplateId");
+        item.put("assistantTemplateId", id);
+        item.put("appType", "agentTemplate");
+        item.put("category", text(source, "category"));
+        item.put("avatar", avatar(source.get("avatar")));
+        item.put("name", defaultIfBlank(text(source, "name"), id));
+        item.put("desc", text(source, "desc"));
+        item.put("prologue", text(source, "prologue"));
+        item.put("instructions", text(source, "instructions"));
+        item.put("recommendQuestion", stringList(source.get("recommendQuestion")));
+        item.put("summary", defaultIfBlank(text(source, "summary"), text(source, "desc")));
+        item.put("feature", text(source, "feature"));
+        item.put("scenario", text(source, "scenario"));
+        item.put("workFlowInstruction", text(source, "workFlowInstruction"));
+        return item;
     }
 
     private Map<String, Object> assistantTemplate(String id, String category, String name, String desc,

@@ -494,6 +494,14 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].appType").value("agentTemplate"))
                 .andExpect(jsonPath("$.data.list[0].name").value("Policy Analyst"));
 
+        mockMvc.perform(get("/user/api/v1/assistant/template/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("category", "tourism"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(6))
+                .andExpect(jsonPath("$.data.list[0].assistantTemplateId").value("cultural_tourism_research_agent"));
+
         mockMvc.perform(get("/user/api/v1/assistant/template")
                         .param("assistantTemplateId", "assistant-template-policy"))
                 .andExpect(status().isOk())
@@ -501,10 +509,25 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.prologue").value("I can help read policy documents."))
                 .andExpect(jsonPath("$.data.recommendQuestion[0]").value("What is the goal?"));
 
+        mockMvc.perform(get("/user/api/v1/assistant/template")
+                        .param("assistantTemplateId", "cultural_tourism_research_agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantTemplateId").value("cultural_tourism_research_agent"))
+                .andExpect(jsonPath("$.data.category").value("tourism"))
+                .andExpect(jsonPath("$.data.prologue").value("你好，我是文旅信息检索助手。你可以问我景区玩法、路线、活动、附近酒店餐厅、开放信息和出行注意事项。"))
+                .andExpect(jsonPath("$.data.recommendQuestion[0]").value("帮我检索莫高窟和鸣沙山月牙泉两天一晚玩法"));
+
         mockMvc.perform(post("/user/api/v1/assistant/template")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"assistantTemplateId\":\"assistant-template-policy\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-template-copy-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant/template")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantTemplateId\":\"cultural_tourism_research_agent\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.assistantId").value("assistant-template-copy-001"));
 
@@ -562,8 +585,8 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.workflow_id").value("workflow-template-copy-001"))
                 .andExpect(jsonPath("$.data.workflowId").value("workflow-template-copy-001"));
 
-        verify(appService).createAssistant(any(AssistantCreateCommand.class));
-        verify(appService).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
+        verify(appService, times(2)).createAssistant(any(AssistantCreateCommand.class));
+        verify(appService, times(2)).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
         verify(appService, times(2)).createWorkflow(any(WorkflowCreateCommand.class));
         verify(appService).recordAppTemplateDownload(eq("workflow"), eq("workflow-template-doc-review"));
     }
