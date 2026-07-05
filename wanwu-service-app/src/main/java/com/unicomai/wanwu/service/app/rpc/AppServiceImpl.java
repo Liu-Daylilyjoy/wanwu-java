@@ -5190,7 +5190,8 @@ public class AppServiceImpl implements AppService {
                                                   Map<String, Object> input) {
         String schemaJson = draft == null ? "" : draft.getSchemaJson();
         JsonNode schema = workflowSchema(schemaJson);
-        List<Map<String, Object>> steps = workflowExecutionSteps(workflow, schema, input);
+        WorkflowExecution execution = workflowExecution(workflow, schema, input);
+        List<Map<String, Object>> steps = execution.steps;
         Map<String, Object> nodeOutputs = workflowNodeOutputs(steps);
         List<Map<String, Object>> edges = workflowEdges(schema);
 
@@ -5201,9 +5202,10 @@ public class AppServiceImpl implements AppService {
         output.put("message", "Demo workflow response");
         output.putAll(input);
         output.put("steps", steps);
-        output.put("trace", workflowTrace(workflow, steps, edges));
+        output.put("trace", workflowTrace(workflow, execution, edges));
         output.put("nodeOutputs", nodeOutputs);
         output.put("edges", edges);
+        output.put("edgeEvaluations", execution.edgeEvaluations);
         List<Map<String, Object>> declaredOutputs = workflowDeclaredOutputs(schema);
         for (Map<String, Object> declared : declaredOutputs) {
             String name = stringValue(declared.get("name"));
@@ -5292,12 +5294,36 @@ public class AppServiceImpl implements AppService {
     private List<Map<String, Object>> workflowExecutionSteps(AppRecord workflow,
                                                              JsonNode schema,
                                                              Map<String, Object> input) {
+        return workflowExecution(workflow, schema, input).steps;
+    }
+
+    private WorkflowExecution workflowExecution(AppRecord workflow,
+                                                JsonNode schema,
+                                                Map<String, Object> input) {
         List<Map<String, Object>> nodes = workflowNodes(schema);
+        List<Map<String, Object>> edges = workflowEdges(schema);
         List<Map<String, Object>> steps = new ArrayList<>(nodes.size());
+        List<Map<String, Object>> edgeEvaluations = new ArrayList<>(edges.size());
+        List<Map<String, Object>> skippedNodeIds = new ArrayList<>();
+        if (nodes.isEmpty()) {
+            return new WorkflowExecution(steps, edgeEvaluations, skippedNodeIds);
+        }
+
+        Map<String, Map<String, Object>> nodesById = workflowNodesById(nodes);
+        List<String> runNodeIds = workflowRunNodeIds(nodes, edges, input, edgeEvaluations);
+        if (runNodeIds.isEmpty()) {
+            for (Map<String, Object> node : nodes) {
+                runNodeIds.add(workflowNodeId(node, runNodeIds.size() + 1));
+            }
+        }
+
         int order = 1;
-        for (Map<String, Object> node : nodes) {
+        for (String nodeId : runNodeIds) {
+            Map<String, Object> node = nodesById.get(nodeId);
+            if (node == null) {
+                continue;
+            }
             Map<String, Object> step = new LinkedHashMap<>();
-            String nodeId = defaultIfBlank(textValue(node, "id", "nodeId", "key"), "node-" + order);
             String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
             String name = defaultIfBlank(textValue(node, "name", "label", "title"), nodeId);
             Map<String, Object> nodeOutput = workflowNodeOutput(workflow, nodeId, type, name, input, order);
@@ -5311,7 +5337,324 @@ public class AppServiceImpl implements AppService {
             steps.add(step);
             order++;
         }
-        return steps;
+
+        for (int i = 0; i < nodes.size(); i++) {
+            String nodeId = workflowNodeId(nodes.get(i), i + 1);
+            if (!runNodeIds.contains(nodeId)) {
+                Map<String, Object> skipped = new LinkedHashMap<>();
+                skipped.put("nodeId", nodeId);
+                skipped.put("name", defaultIfBlank(textValue(nodes.get(i), "name", "label", "title"), nodeId));
+                skipped.put("type", defaultIfBlank(textValue(nodes.get(i), "type", "nodeType"), "node"));
+                skippedNodeIds.add(skipped);
+            }
+        }
+        return new WorkflowExecution(steps, edgeEvaluations, skippedNodeIds);
+    }
+
+    private Map<String, Map<String, Object>> workflowNodesById(List<Map<String, Object>> nodes) {
+        Map<String, Map<String, Object>> nodesById = new LinkedHashMap<>();
+        for (int i = 0; i < nodes.size(); i++) {
+            nodesById.put(workflowNodeId(nodes.get(i), i + 1), nodes.get(i));
+        }
+        return nodesById;
+    }
+
+    private List<String> workflowRunNodeIds(List<Map<String, Object>> nodes,
+                                            List<Map<String, Object>> edges,
+                                            Map<String, Object> input,
+                                            List<Map<String, Object>> edgeEvaluations) {
+        List<String> runNodeIds = new ArrayList<>();
+        Map<String, List<Map<String, Object>>> edgesBySource = new LinkedHashMap<>();
+        List<String> targetIds = new ArrayList<>();
+        for (Map<String, Object> edge : edges) {
+            String source = workflowEdgeEndpoint(edge, true);
+            String target = workflowEdgeEndpoint(edge, false);
+            if (!isBlank(target) && !targetIds.contains(target)) {
+                targetIds.add(target);
+            }
+            if (isBlank(source)) {
+                continue;
+            }
+            List<Map<String, Object>> outgoing = edgesBySource.get(source);
+            if (outgoing == null) {
+                outgoing = new ArrayList<>();
+                edgesBySource.put(source, outgoing);
+            }
+            outgoing.add(edge);
+        }
+
+        List<String> queue = new ArrayList<>();
+        for (int i = 0; i < nodes.size(); i++) {
+            String nodeId = workflowNodeId(nodes.get(i), i + 1);
+            if (!targetIds.contains(nodeId)) {
+                queue.add(nodeId);
+            }
+        }
+        if (queue.isEmpty() && !nodes.isEmpty()) {
+            queue.add(workflowNodeId(nodes.get(0), 1));
+        }
+
+        int cursor = 0;
+        while (cursor < queue.size()) {
+            String nodeId = queue.get(cursor++);
+            if (runNodeIds.contains(nodeId)) {
+                continue;
+            }
+            runNodeIds.add(nodeId);
+            List<Map<String, Object>> outgoing = edgesBySource.get(nodeId);
+            if (outgoing == null || outgoing.isEmpty()) {
+                continue;
+            }
+            boolean hasExplicitCondition = workflowHasExplicitCondition(outgoing);
+            for (Map<String, Object> edge : outgoing) {
+                boolean matched = workflowEdgeMatches(edge, input, hasExplicitCondition);
+                edgeEvaluations.add(workflowEdgeEvaluation(edge, matched));
+                String target = workflowEdgeEndpoint(edge, false);
+                if (matched && !isBlank(target) && !runNodeIds.contains(target) && !queue.contains(target)) {
+                    queue.add(target);
+                }
+            }
+        }
+        return runNodeIds;
+    }
+
+    private boolean workflowHasExplicitCondition(List<Map<String, Object>> edges) {
+        for (Map<String, Object> edge : edges) {
+            if (!isBlank(workflowExplicitEdgeCondition(edge))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, Object> workflowEdgeEvaluation(Map<String, Object> edge, boolean matched) {
+        Map<String, Object> evaluation = new LinkedHashMap<>();
+        evaluation.put("edgeId", defaultIfBlank(textValue(edge, "id", "edgeId", "key"), ""));
+        evaluation.put("source", workflowEdgeEndpoint(edge, true));
+        evaluation.put("target", workflowEdgeEndpoint(edge, false));
+        evaluation.put("condition", workflowEdgeCondition(edge));
+        evaluation.put("matched", matched);
+        return evaluation;
+    }
+
+    private String workflowNodeId(Map<String, Object> node, int order) {
+        return defaultIfBlank(textValue(node, "id", "nodeId", "key"), "node-" + order);
+    }
+
+    private String workflowEdgeEndpoint(Map<String, Object> edge, boolean source) {
+        if (source) {
+            return defaultIfBlank(textValue(edge, "source", "sourceNodeId", "from", "fromNodeId"), "");
+        }
+        return defaultIfBlank(textValue(edge, "target", "targetNodeId", "to", "toNodeId"), "");
+    }
+
+    private boolean workflowEdgeMatches(Map<String, Object> edge,
+                                        Map<String, Object> input,
+                                        boolean hasExplicitCondition) {
+        String condition = workflowExplicitEdgeCondition(edge);
+        if (isBlank(condition)) {
+            String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+            if (!isBlank(handle)) {
+                return workflowHandleMatches(edge, input);
+            }
+            return !hasExplicitCondition;
+        }
+        return workflowConditionMatches(condition, input);
+    }
+
+    private String workflowEdgeCondition(Map<String, Object> edge) {
+        String condition = workflowExplicitEdgeCondition(edge);
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        return textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+    }
+
+    private String workflowExplicitEdgeCondition(Map<String, Object> edge) {
+        String condition = textValue(edge, "condition", "expression", "expr", "when", "value", "expected");
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        Map<String, Object> data = mapValue(edge.get("data"));
+        Map<String, Object> nested = mapValue(data.get("condition"));
+        condition = textValue(nested, "condition", "expression", "expr", "when", "value", "expected");
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        return "";
+    }
+
+    private boolean workflowHandleMatches(Map<String, Object> edge, Map<String, Object> input) {
+        String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+        if (isBlank(handle)) {
+            return true;
+        }
+        String normalized = handle.trim().toLowerCase(java.util.Locale.ENGLISH);
+        if ("true".equals(normalized) || "yes".equals(normalized) || "success".equals(normalized)
+                || "approved".equals(normalized)) {
+            return workflowInputTruthy(input);
+        }
+        if ("false".equals(normalized) || "no".equals(normalized) || "fail".equals(normalized)
+                || "failed".equals(normalized) || "rejected".equals(normalized)) {
+            return !workflowInputTruthy(input);
+        }
+        Object branch = firstPresent(input, "branch", "route", "condition", "result", "status");
+        return branch != null && normalized.equals(String.valueOf(branch).trim().toLowerCase(java.util.Locale.ENGLISH));
+    }
+
+    private boolean workflowInputTruthy(Map<String, Object> input) {
+        Object value = firstPresent(input, "approved", "success", "condition", "result", "flag", "pass", "passed");
+        if (value == null) {
+            return false;
+        }
+        return truthy(value);
+    }
+
+    private boolean workflowConditionMatches(String condition, Map<String, Object> input) {
+        String expression = condition.trim();
+        if (isBlank(expression)) {
+            return true;
+        }
+        String lower = expression.toLowerCase(java.util.Locale.ENGLISH);
+        if ("true".equals(lower) || "yes".equals(lower) || "success".equals(lower)) {
+            return true;
+        }
+        if ("false".equals(lower) || "no".equals(lower) || "fail".equals(lower) || "failed".equals(lower)) {
+            return false;
+        }
+        String[] operators = new String[]{"==", "!=", ">=", "<=", "=", ">", "<"};
+        for (String operator : operators) {
+            int index = expression.indexOf(operator);
+            if (index <= 0) {
+                continue;
+            }
+            String left = trimQuotes(expression.substring(0, index).trim());
+            String right = trimQuotes(expression.substring(index + operator.length()).trim());
+            Object actual = workflowInputValue(input, left);
+            return compareCondition(actual, operator, right);
+        }
+        Object actual = workflowInputValue(input, expression);
+        return truthy(actual);
+    }
+
+    private Object workflowInputValue(Map<String, Object> input, String path) {
+        if (isBlank(path)) {
+            return null;
+        }
+        if (input.containsKey(path)) {
+            return input.get(path);
+        }
+        String normalized = path;
+        if (normalized.startsWith("input.")) {
+            normalized = normalized.substring("input.".length());
+        }
+        if (normalized.startsWith("$.")) {
+            normalized = normalized.substring(2);
+        }
+        Object value = input;
+        String[] parts = normalized.split("\\.");
+        for (String part : parts) {
+            if (isBlank(part)) {
+                continue;
+            }
+            Map<String, Object> current = mapValue(value);
+            if (current.isEmpty() && !(value instanceof Map)) {
+                return null;
+            }
+            value = current.get(part);
+            if (value == null) {
+                return null;
+            }
+        }
+        return value;
+    }
+
+    private boolean compareCondition(Object actual, String operator, String expected) {
+        if (">".equals(operator) || "<".equals(operator) || ">=".equals(operator) || "<=".equals(operator)) {
+            Double actualNumber = doubleValue(actual);
+            Double expectedNumber = doubleValue(expected);
+            if (actualNumber == null || expectedNumber == null) {
+                return false;
+            }
+            int comparison = actualNumber.compareTo(expectedNumber);
+            if (">".equals(operator)) {
+                return comparison > 0;
+            }
+            if ("<".equals(operator)) {
+                return comparison < 0;
+            }
+            if (">=".equals(operator)) {
+                return comparison >= 0;
+            }
+            return comparison <= 0;
+        }
+        boolean equal = conditionEquals(actual, expected);
+        return "!=".equals(operator) ? !equal : equal;
+    }
+
+    private boolean conditionEquals(Object actual, String expected) {
+        if (actual == null) {
+            return isBlank(expected) || "null".equalsIgnoreCase(expected);
+        }
+        if (actual instanceof Boolean) {
+            return ((Boolean) actual).booleanValue() == truthy(expected);
+        }
+        Double actualNumber = doubleValue(actual);
+        Double expectedNumber = doubleValue(expected);
+        if (actualNumber != null && expectedNumber != null) {
+            return actualNumber.compareTo(expectedNumber) == 0;
+        }
+        return String.valueOf(actual).equals(expected);
+    }
+
+    private Double doubleValue(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof String && !isBlank((String) value)) {
+            try {
+                return Double.parseDouble(((String) value).trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private Object firstPresent(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                return source.get(key);
+            }
+        }
+        return null;
+    }
+
+    private boolean truthy(Object value) {
+        if (value instanceof Boolean) {
+            return ((Boolean) value).booleanValue();
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue() != 0.0d;
+        }
+        String text = stringValue(value).trim();
+        if (isBlank(text)) {
+            return false;
+        }
+        String lower = text.toLowerCase(java.util.Locale.ENGLISH);
+        return !("false".equals(lower) || "0".equals(lower) || "no".equals(lower)
+                || "fail".equals(lower) || "failed".equals(lower) || "null".equals(lower));
+    }
+
+    private String trimQuotes(String value) {
+        if (value.length() >= 2) {
+            char first = value.charAt(0);
+            char last = value.charAt(value.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                return value.substring(1, value.length() - 1);
+            }
+        }
+        return value;
     }
 
     private Map<String, Object> workflowNodeOutput(AppRecord workflow,
@@ -5384,14 +5727,16 @@ public class AppServiceImpl implements AppService {
     }
 
     private Map<String, Object> workflowTrace(AppRecord workflow,
-                                              List<Map<String, Object>> steps,
+                                              WorkflowExecution execution,
                                               List<Map<String, Object>> edges) {
         Map<String, Object> trace = new LinkedHashMap<>();
         trace.put("workflowId", workflow.getAppId());
         trace.put("workflowName", defaultIfBlank(workflow.getName(), ""));
         trace.put("status", "success");
-        trace.put("nodeCount", steps.size());
+        trace.put("nodeCount", execution.steps.size());
         trace.put("edgeCount", edges.size());
+        trace.put("edgeEvaluations", execution.edgeEvaluations);
+        trace.put("skippedNodeIds", execution.skippedNodeIds);
         return trace;
     }
 
@@ -5655,6 +6000,20 @@ public class AppServiceImpl implements AppService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static class WorkflowExecution {
+        private final List<Map<String, Object>> steps;
+        private final List<Map<String, Object>> edgeEvaluations;
+        private final List<Map<String, Object>> skippedNodeIds;
+
+        private WorkflowExecution(List<Map<String, Object>> steps,
+                                  List<Map<String, Object>> edgeEvaluations,
+                                  List<Map<String, Object>> skippedNodeIds) {
+            this.steps = steps;
+            this.edgeEvaluations = edgeEvaluations;
+            this.skippedNodeIds = skippedNodeIds;
+        }
     }
 
     private static class StatisticQueryContext {

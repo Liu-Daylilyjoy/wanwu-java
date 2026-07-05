@@ -686,6 +686,83 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunFollowsSimpleConditionalEdges() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("ApprovalFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"approved\",\"type\":\"llm\",\"data\":{\"label\":\"Approved Path\"}},"
+                + "{\"id\":\"rejected\",\"type\":\"llm\",\"data\":{\"label\":\"Rejected Path\"}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"id\":\"edge-approved\",\"source\":\"start\",\"target\":\"approved\",\"condition\":\"approved == true\"},"
+                + "{\"id\":\"edge-rejected\",\"source\":\"start\",\"target\":\"rejected\",\"condition\":\"approved == false\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"summary\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("approved", true));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals(2, steps.size());
+        assertEquals("start", steps.get(0).get("nodeId"));
+        assertEquals("approved", steps.get(1).get("nodeId"));
+        assertTrue(String.valueOf(output.get("summary")).contains("Approved Path"));
+
+        Map<String, Object> trace = castMap(output.get("trace"));
+        assertEquals(2, trace.get("nodeCount"));
+        assertTrue(String.valueOf(trace.get("skippedNodeIds")).contains("rejected"));
+
+        List<Map<String, Object>> evaluations = castList(trace.get("edgeEvaluations"));
+        assertEquals(2, evaluations.size());
+        assertEquals("edge-approved", evaluations.get(0).get("edgeId"));
+        assertEquals(Boolean.TRUE, evaluations.get(0).get("matched"));
+        assertEquals("edge-rejected", evaluations.get(1).get("edgeId"));
+        assertEquals(Boolean.FALSE, evaluations.get(1).get("matched"));
+
+        WorkflowCreateCommand handleCreate = new WorkflowCreateCommand();
+        handleCreate.setName("HandleFlow");
+        handleCreate.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"approved\",\"type\":\"llm\",\"data\":{\"label\":\"Approved Path\"}},"
+                + "{\"id\":\"rejected\",\"type\":\"llm\",\"data\":{\"label\":\"Rejected Path\"}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"id\":\"handle-true\",\"source\":\"start\",\"target\":\"approved\",\"sourceHandle\":\"true\"},"
+                + "{\"id\":\"handle-false\",\"source\":\"start\",\"target\":\"rejected\",\"sourceHandle\":\"false\"}"
+                + "]"
+                + "}");
+        handleCreate.setUserId("dev-admin");
+        handleCreate.setOrgId("default-org");
+        WorkflowCreateResult handleCreated = service.createWorkflow(handleCreate);
+
+        WorkflowRunCommand handleRun = new WorkflowRunCommand();
+        handleRun.setWorkflowId(handleCreated.getWorkflowId());
+        handleRun.setUserId("dev-admin");
+        handleRun.setOrgId("default-org");
+        handleRun.setInput(Collections.<String, Object>singletonMap("approved", false));
+
+        List<Map<String, Object>> handleSteps = castList(service.runWorkflow(handleRun).getOutput().get("steps"));
+        assertEquals(2, handleSteps.size());
+        assertEquals("start", handleSteps.get(0).get("nodeId"));
+        assertEquals("rejected", handleSteps.get(1).get("nodeId"));
+    }
+
+    @Test
     public void convertAppTypeMovesWorkflowBetweenWorkflowAndChatflowLists() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
