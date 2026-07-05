@@ -691,7 +691,9 @@ public class WanwuOpenApiControllerTest {
                         .header("Authorization", "Bearer dev-token")
                         .param("modelType", "llm")
                         .param("provider", "OpenAI-API-compatible")
-                        .param("displayName", "OpenAPI"))
+                        .param("displayName", "OpenAPI")
+                        .param("filterScope", "public")
+                        .param("scopeType", "2"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].uuid").value("model-openapi-001"))
@@ -710,6 +712,8 @@ public class WanwuOpenApiControllerTest {
         assertEquals("llm", queryCaptor.getValue().getModelType());
         assertEquals("OpenAI-API-compatible", queryCaptor.getValue().getProvider());
         assertEquals("OpenAPI", queryCaptor.getValue().getDisplayName());
+        assertEquals("public", queryCaptor.getValue().getFilterScope());
+        assertEquals("2", queryCaptor.getValue().getScopeType());
     }
 
     @Test

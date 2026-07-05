@@ -558,7 +558,9 @@ public class WanwuOpenApiController {
             @RequestHeader HttpHeaders headers,
             @RequestParam(value = "modelType", required = false) String modelType,
             @RequestParam(value = "provider", required = false) String provider,
-            @RequestParam(value = "displayName", required = false) String displayName) {
+            @RequestParam(value = "displayName", required = false) String displayName,
+            @RequestParam(value = "filterScope", required = false) String filterScope,
+            @RequestParam(value = "scopeType", required = false) String scopeType) {
         try {
             OpenApiContext ctx = context(headers);
             if (modelService == null) {
@@ -566,7 +568,7 @@ public class WanwuOpenApiController {
             }
             ModelListResult result = modelService.listModels(new ModelListQuery(
                     ctx.userId, ctx.orgId, defaultIfBlank(modelType, ""), defaultIfBlank(provider, ""),
-                    defaultIfBlank(displayName, ""), "", ""));
+                    defaultIfBlank(displayName, ""), defaultIfBlank(filterScope, ""), defaultIfBlank(scopeType, "")));
             return FrontendResponse.ok(openApiModelList(result));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());

@@ -13,6 +13,7 @@ Date: 2026-07-05
 ## Java Reproduction
 
 - `WanwuOpenApiController.listModels` still delegates filtering to `ModelService.listModels` with the OpenAPI user/org context.
+- Java now passes through `modelType`, `provider`, `displayName`, `filterScope`, and `scopeType`.
 - The BFF now maps `ModelListResult` into the Go OpenAPI public field set.
 - Internal fields such as `modelId`, `config`, `tags`, user/org ids, and edit metadata are no longer exposed through the OpenAPI route.
 
@@ -22,4 +23,4 @@ Date: 2026-07-05
 
 ## Remaining Gap
 
-Java currently passes the common OpenAPI filters used by the existing route. Full parity still needs explicit `isActive`, `filterScope`, and `scopeType` query propagation if OpenAPI clients rely on those optional Go parameters.
+Full parity still needs explicit `isActive` query propagation if OpenAPI clients rely on that optional Go parameter; the current Java `ModelListQuery` has no `isActive` carrier field.
