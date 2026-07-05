@@ -213,6 +213,7 @@ public class WanwuOpenApiControllerTest {
         Map<String, Object> ragSearch = new LinkedHashMap<>();
         ragSearch.put("title", "PolicyGuide.txt");
         ragSearch.put("snippet", "Policy hit");
+        ragSearch.put("knowledgeName", "Policy KB");
         ragResult.setSearchList(Collections.singletonList(ragSearch));
         when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(ragResult);
 
@@ -235,7 +236,9 @@ public class WanwuOpenApiControllerTest {
                         .content("{\"uuid\":\"rag-openapi-001\",\"prompt\":\"search me\",\"file_info\":[{\"fileName\":\"note.txt\"}]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.output").value("rag answer"))
-                .andExpect(jsonPath("$.data.searchList[0].title").value("PolicyGuide.txt"));
+                .andExpect(jsonPath("$.data.searchList[0].kb_name").value("Policy KB"))
+                .andExpect(jsonPath("$.data.searchList[0].title").value("PolicyGuide.txt"))
+                .andExpect(jsonPath("$.data.searchList[0].snippet").value("Policy hit"));
 
         mockMvc.perform(post("/service/api/openapi/v1/workflow/run")
                         .header("Authorization", "Bearer dev-token")
@@ -262,6 +265,7 @@ public class WanwuOpenApiControllerTest {
         Map<String, Object> ragSearch = new LinkedHashMap<>();
         ragSearch.put("title", "PolicyGuide.txt");
         ragSearch.put("snippet", "Policy hit");
+        ragSearch.put("knowledgeName", "Policy KB");
         ragResult.setSearchList(Collections.singletonList(ragSearch));
         when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(ragResult);
 
@@ -272,7 +276,7 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(content().string(containsString("data: {\"code\":0")))
-                .andExpect(content().string(containsString("\"searchList\":[{\"title\":\"PolicyGuide.txt\"")))
+                .andExpect(content().string(containsString("\"searchList\":[{\"kb_name\":\"Policy KB\",\"title\":\"PolicyGuide.txt\",\"snippet\":\"Policy hit\"")))
                 .andExpect(content().string(containsString("data: [DONE]")));
     }
 

@@ -1249,14 +1249,29 @@ public class WanwuOpenApiController {
         data.put("msg_id", result == null ? "" : defaultIfBlank(result.getRagId(), ""));
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("output", result == null ? "" : defaultIfBlank(result.getResponse(), ""));
-        output.put("searchList", result == null || result.getSearchList() == null
-                ? Collections.emptyList() : result.getSearchList());
+        output.put("searchList", openApiRagSearchList(result == null ? null : result.getSearchList()));
         output.put("qaSearchList", result == null || result.getQaSearchList() == null
                 ? Collections.emptyList() : result.getQaSearchList());
         data.put("data", output);
         data.put("history", Collections.emptyList());
         data.put("finish", 1);
         return data;
+    }
+
+    private List<Map<String, Object>> openApiRagSearchList(List<Map<String, Object>> searchList) {
+        if (searchList == null || searchList.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> item : searchList) {
+            Map<String, Object> source = objectMap(item);
+            Map<String, Object> target = new LinkedHashMap<>();
+            target.put("kb_name", firstText(source, "kb_name", "kbName", "knowledgeName", "knowledge_name", "user_kb_name"));
+            target.put("title", firstText(source, "title", "docName", "name"));
+            target.put("snippet", firstText(source, "snippet", "content", "text"));
+            result.add(target);
+        }
+        return result;
     }
 
     private String legacyRagSse(Map<String, Object> response) {
