@@ -504,8 +504,7 @@ public class WanwuCallbackApiControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"hello\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data").value("aGVsbG8="));
+                .andExpect(jsonPath("$.code").value(1001));
 
         mockMvc.perform(post("/callback/v1/file/upload/base64")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -531,6 +530,45 @@ public class WanwuCallbackApiControllerTest {
                         .content("{\"input\":\"hello\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].embedding[0]").value(0.0));
+    }
+
+    @Test
+    public void fileCallbacksReadAndUploadBytesWithGoCompatibleFields() throws Exception {
+        String upload = mockMvc.perform(post("/callback/v1/file/upload/base64")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"file\":\"aGVsbG8=\",\"fileName\":\"hello\",\"fileExt\":\"txt\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.url", containsString("/callback/v1/file/")))
+                .andExpect(jsonPath("$.data.uri", containsString("file-upload/file-expire/")))
+                .andExpect(jsonPath("$.data.fileName").value("hello.txt"))
+                .andReturn().getResponse().getContentAsString();
+        String fileId = upload.replaceAll("(?s).*?/callback/v1/file/([^\\\"}]+).*", "$1");
+
+        mockMvc.perform(get("/callback/v1/file/" + fileId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(content().bytes("hello".getBytes(StandardCharsets.UTF_8)));
+
+        mockMvc.perform(post("/callback/v1/file/url/base64")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileUrl\":\"/callback/v1/file/" + fileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value("aGVsbG8="));
+
+        mockMvc.perform(post("/callback/v1/file/url/base64")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileUrl\":\"/callback/v1/file/" + fileId
+                                + "\",\"addPrefix\":true,\"customPrefix\":\"data:text/plain;base64\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value("data:text/plain;base64,aGVsbG8="));
+
+        mockMvc.perform(post("/callback/v1/file/upload/base64")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"file\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg", containsString("file is required")));
     }
 
     @Test

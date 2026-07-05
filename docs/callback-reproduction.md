@@ -49,6 +49,7 @@ This slice is a compatibility shell:
 
 - Routes no longer return `Not Found`.
 - Response envelopes follow the frontend/BFF success shape where Go handlers are frontend-facing.
+- File callbacks now read and upload real bytes through a local Docker-development store: `file/url/base64` supports `fileUrl/addPrefix/customPrefix`, and `file/upload/base64` returns Go-style `url/uri` while retaining Java compatibility ids.
 - Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
 - Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Image outline returns the Go `ImageOutlineExtractResp` shape (`message`, `prompt`, `markdown`, `result`, `mimeType`, `url`, `uri`, `usage`) and stores a local downloadable PNG under `/callback/v1/file/{fileId}` for Docker development.
@@ -58,6 +59,7 @@ This slice is a compatibility shell:
 ## Remaining Gaps
 
 - Provider-specific model execution is still partial; configured OpenAI-compatible chat/embedding/rerank endpoints can proxy, while OCR/ASR/PDF/GUI remain local shells.
+- Callback file upload/download is BFF-local, not MinIO/object-storage-backed yet.
 - Image outline does not call DashScope Qwen image edit or MinIO yet; it returns a deterministic local PNG while preserving the Go response contract and `response_format` validation.
 - Real OCR/ASR/PDF parsing/GUI tasks are not implemented.
 - Real RAG recall and knowledge-base stream search are not implemented.

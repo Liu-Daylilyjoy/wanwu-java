@@ -91,22 +91,35 @@ public class WanwuCallbackApiController {
 
     @PostMapping("/callback/v1/file/url/base64")
     public FrontendResponse<String> fileUrlToBase64(@RequestBody(required = false) Map<String, Object> request) {
-        String value = firstText(request, "url", "fileUrl", "file_url");
-        return FrontendResponse.ok(Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8)));
+        try {
+            return FrontendResponse.ok(callbackFileUrlToBase64(request));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/callback/v1/file/upload/base64")
     public FrontendResponse<Map<String, Object>> uploadBase64(@RequestBody(required = false) Map<String, Object> request) {
-        String fileName = defaultIfBlank(firstText(request, "fileName", "file_name"), "callback-upload.txt");
-        String fileId = "callback-file-" + compactId();
-        writeCallbackFile(fileId, decodeCallbackFileContent(request));
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("fileId", fileId);
-        data.put("file_id", fileId);
-        data.put("fileName", fileName);
-        data.put("file_name", fileName);
-        data.put("path", "/callback/v1/file/" + fileId);
-        return FrontendResponse.ok(data);
+        try {
+            String encoded = firstText(request, "file", "base64", "content");
+            byte[] content = decodeCallbackFileContent(encoded);
+            String fileName = callbackUploadFileName(request, encoded);
+            String fileId = "callback-file-" + compactId() + "-" + safeCallbackFileName(fileName);
+            writeCallbackFile(fileId, content);
+            String url = "/callback/v1/file/" + fileId;
+            String uri = "file-upload/file-expire/" + fileId;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("url", url);
+            data.put("uri", uri);
+            data.put("fileId", fileId);
+            data.put("file_id", fileId);
+            data.put("fileName", fileName);
+            data.put("file_name", fileName);
+            data.put("path", url);
+            return FrontendResponse.ok(data);
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/callback/v1/image/outline")
@@ -1061,10 +1074,87 @@ public class WanwuCallbackApiController {
         return data;
     }
 
-    private byte[] decodeCallbackFileContent(Map<String, Object> request) {
-        String encoded = firstText(request, "file", "base64", "content");
+    private String callbackFileUrlToBase64(Map<String, Object> request) {
+        String fileUrl = firstText(request, "fileUrl", "file_url", "url");
+        if (isBlank(fileUrl)) {
+            throw new IllegalArgumentException("fileUrl is required");
+        }
+        CallbackFileContent file = readCallbackFileUrl(fileUrl);
+        String base64 = Base64.getEncoder().encodeToString(file.bytes);
+        if (!isTruthy(request, "addPrefix") && !isTruthy(request, "add_prefix")) {
+            return base64;
+        }
+        String prefix = firstText(request, "customPrefix", "custom_prefix");
+        if (isBlank(prefix)) {
+            prefix = "data:" + defaultIfBlank(file.contentType, "application/octet-stream") + ";base64";
+        }
+        if (!prefix.contains(",")) {
+            prefix += ",";
+        }
+        return prefix + base64;
+    }
+
+    private CallbackFileContent readCallbackFileUrl(String fileUrl) {
+        String fileId = callbackFileIdFromUrl(fileUrl);
+        if (!isBlank(fileId)) {
+            byte[] bytes = CALLBACK_FILE_STORE.readBytes(fileId);
+            if (bytes.length == 0) {
+                throw new IllegalArgumentException("fileUrl is not readable");
+            }
+            return new CallbackFileContent(bytes, callbackFileMediaType(fileId).toString());
+        }
+        if (!fileUrl.startsWith("http://") && !fileUrl.startsWith("https://")) {
+            throw new IllegalArgumentException("fileUrl must be an HTTP URL or callback file URL");
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(fileUrl).openConnection();
+            connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
+            connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
+            connection.setRequestMethod("GET");
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                throw new IllegalArgumentException("fileUrl returned status " + status);
+            }
+            byte[] bytes = readBytes(connection.getInputStream());
+            if (bytes.length == 0) {
+                throw new IllegalArgumentException("fileUrl is empty");
+            }
+            return new CallbackFileContent(bytes,
+                    defaultIfBlank(connection.getContentType(), "application/octet-stream"));
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("failed to read fileUrl");
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String callbackFileIdFromUrl(String fileUrl) {
+        String value = defaultIfBlank(fileUrl, "").trim();
+        int marker = value.indexOf("/callback/v1/file/");
+        if (marker >= 0) {
+            value = value.substring(marker + "/callback/v1/file/".length());
+        } else if (value.startsWith("callback-file-") || value.startsWith("callback-image-outline-")) {
+            return value;
+        } else {
+            return "";
+        }
+        int query = value.indexOf('?');
+        if (query >= 0) {
+            value = value.substring(0, query);
+        }
+        int hash = value.indexOf('#');
+        if (hash >= 0) {
+            value = value.substring(0, hash);
+        }
+        return value;
+    }
+
+    private byte[] decodeCallbackFileContent(String encoded) {
         if (isBlank(encoded)) {
-            return new byte[0];
+            throw new IllegalArgumentException("file is required");
         }
         int comma = encoded.indexOf(',');
         if (comma >= 0 && encoded.substring(0, comma).toLowerCase().contains("base64")) {
@@ -1074,8 +1164,56 @@ public class WanwuCallbackApiController {
         try {
             return Base64.getDecoder().decode(compact);
         } catch (IllegalArgumentException ignored) {
-            return encoded.getBytes(StandardCharsets.UTF_8);
+            throw new IllegalArgumentException("invalid base64 file");
         }
+    }
+
+    private String callbackUploadFileName(Map<String, Object> request, String encoded) {
+        String fileName = defaultIfBlank(firstText(request, "fileName", "file_name"), compactId());
+        String fileExt = firstText(request, "fileExt", "file_ext");
+        if (isBlank(fileExt)) {
+            fileExt = callbackFileExtensionFromDataUrl(encoded);
+        }
+        if (!isBlank(fileExt)) {
+            fileName += "." + fileExt.replace(".", "");
+        }
+        return safeCallbackFileName(fileName);
+    }
+
+    private String callbackFileExtensionFromDataUrl(String encoded) {
+        if (isBlank(encoded) || !encoded.startsWith("data:")) {
+            return "";
+        }
+        int semicolon = encoded.indexOf(';');
+        if (semicolon < 0) {
+            return "";
+        }
+        String mimeType = encoded.substring("data:".length(), semicolon).toLowerCase();
+        if ("image/png".equals(mimeType)) {
+            return "png";
+        }
+        if ("image/jpeg".equals(mimeType) || "image/jpg".equals(mimeType)) {
+            return "jpg";
+        }
+        if ("image/gif".equals(mimeType)) {
+            return "gif";
+        }
+        if ("image/webp".equals(mimeType)) {
+            return "webp";
+        }
+        if ("text/plain".equals(mimeType)) {
+            return "txt";
+        }
+        return "";
+    }
+
+    private String safeCallbackFileName(String value) {
+        String name = defaultIfBlank(value, "upload.bin")
+                .replace('\\', '_')
+                .replace('/', '_')
+                .replace("..", "_")
+                .trim();
+        return name.isEmpty() ? "upload.bin" : name;
     }
 
     private void writeCallbackFile(String fileId, byte[] content) {
@@ -1099,6 +1237,9 @@ public class WanwuCallbackApiController {
         }
         if (lower.endsWith(".webp")) {
             return MediaType.parseMediaType("image/webp");
+        }
+        if (lower.endsWith(".txt") || lower.endsWith(".text")) {
+            return MediaType.TEXT_PLAIN;
         }
         return MediaType.APPLICATION_OCTET_STREAM;
     }
@@ -1175,5 +1316,15 @@ public class WanwuCallbackApiController {
 
     private String defaultIfBlank(String value, String fallback) {
         return isBlank(value) ? fallback : value;
+    }
+
+    private static class CallbackFileContent {
+        private final byte[] bytes;
+        private final String contentType;
+
+        private CallbackFileContent(byte[] bytes, String contentType) {
+            this.bytes = bytes == null ? new byte[0] : bytes;
+            this.contentType = contentType;
+        }
     }
 }
