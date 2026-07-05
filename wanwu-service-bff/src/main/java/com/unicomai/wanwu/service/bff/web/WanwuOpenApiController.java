@@ -47,6 +47,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -56,6 +57,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -93,6 +95,8 @@ public class WanwuOpenApiController {
     private static final long OAUTH_ACCESS_TOKEN_SECONDS = 86400L;
     private static final long OAUTH_REFRESH_TOKEN_SECONDS = 7L * 24L * 60L * 60L;
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Map<String, OpenApiUploadedFile> OPENAPI_UPLOADS =
+            new ConcurrentHashMap<String, OpenApiUploadedFile>();
     private static final OAuthJwtSupport OAUTH_JWT = new OAuthJwtSupport("wanwu-java", "wanwu-java-oauth-secret");
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
@@ -581,6 +585,20 @@ public class WanwuOpenApiController {
             @RequestParam(value = "file", required = false) MultipartFile file) {
         context(headers);
         return FrontendResponse.ok(uploadBody(file));
+    }
+
+    @GetMapping("/file/download/{fileId:.+}")
+    public ResponseEntity<byte[]> downloadOpenApiFile(@PathVariable("fileId") String fileId) {
+        OpenApiUploadedFile file = OPENAPI_UPLOADS.get(fileId);
+        if (file == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.fileName + "\"")
+                .contentType(MediaType.parseMediaType(
+                        defaultIfBlank(file.contentType, MediaType.APPLICATION_OCTET_STREAM_VALUE)))
+                .contentLength(file.bytes.length)
+                .body(file.bytes);
     }
 
     @PostMapping("/knowledge")
@@ -1454,6 +1472,17 @@ public class WanwuOpenApiController {
     private Map<String, Object> uploadBody(MultipartFile file) {
         String fileName = file == null || file.getOriginalFilename() == null ? "file.bin" : file.getOriginalFilename();
         String fileId = "openapi-file-" + compactId();
+        byte[] bytes = new byte[0];
+        String contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        if (file != null && !file.isEmpty()) {
+            try {
+                bytes = file.getBytes();
+                contentType = defaultIfBlank(file.getContentType(), contentType);
+            } catch (IOException ex) {
+                throw new IllegalArgumentException("file upload failed: " + ex.getMessage());
+            }
+        }
+        OPENAPI_UPLOADS.put(fileId, new OpenApiUploadedFile(fileName, contentType, bytes));
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("fileId", fileId);
         data.put("file_id", fileId);
@@ -1893,6 +1922,18 @@ public class WanwuOpenApiController {
             this.userId = userId;
             this.orgId = orgId;
             this.apiKeyId = apiKeyId;
+        }
+    }
+
+    private static class OpenApiUploadedFile {
+        private final String fileName;
+        private final String contentType;
+        private final byte[] bytes;
+
+        private OpenApiUploadedFile(String fileName, String contentType, byte[] bytes) {
+            this.fileName = fileName;
+            this.contentType = contentType;
+            this.bytes = bytes == null ? new byte[0] : bytes;
         }
     }
 }

@@ -717,6 +717,23 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void openApiUploadDownloadUrlReturnsUploadedBytes() throws Exception {
+        MvcResult upload = mockMvc.perform(multipart("/service/api/openapi/v1/workflow/file/upload")
+                        .file(new MockMultipartFile("file", "workflow-input.txt", "text/plain", "hello openapi".getBytes()))
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String downloadUrl = upload.getResponse().getContentAsString();
+        assertTrue(downloadUrl.startsWith("/service/api/openapi/v1/file/download/openapi-file-"));
+
+        mockMvc.perform(get(downloadUrl))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("workflow-input.txt")))
+                .andExpect(content().bytes("hello openapi".getBytes()));
+    }
+
+    @Test
     public void mcpOpenApiRoutesRejectMissingOrWrongAppKey() throws Exception {
         when(appService.getAppKeyByKey("agent-key"))
                 .thenReturn(appKey("app-key-2", "agent-key", "agent-001", "agent"));
