@@ -744,6 +744,46 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunPropagatesNodeOutputsToLaterNodes() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("ChainedNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"draft\",\"type\":\"llm\",\"data\":{\"label\":\"Draft\","
+                + "\"outputs\":[{\"name\":\"summary\",\"template\":\"Draft {{question}}\"}]}},"
+                + "{\"id\":\"final\",\"type\":\"llm\",\"data\":{\"label\":\"Final\","
+                + "\"outputs\":[{\"name\":\"finalText\",\"template\":\"Final {{summary}}\"}]}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"source\":\"start\",\"target\":\"draft\"},"
+                + "{\"source\":\"draft\",\"target\":\"final\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"finalText\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.singletonMap("question", "hello"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("Final Draft hello", output.get("finalText"));
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals("Draft hello", castMap(steps.get(2).get("input")).get("summary"));
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        assertEquals("Final Draft hello", castMap(nodeOutputs.get("final")).get("finalText"));
+    }
+
+    @Test
     public void workflowRunFollowsSimpleConditionalEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

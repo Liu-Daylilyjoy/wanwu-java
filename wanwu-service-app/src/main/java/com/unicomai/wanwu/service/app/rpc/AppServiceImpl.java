@@ -5357,6 +5357,7 @@ public class AppServiceImpl implements AppService {
         }
 
         int order = 1;
+        Map<String, Object> context = new LinkedHashMap<>(input);
         for (String nodeId : runNodeIds) {
             Map<String, Object> node = nodesById.get(nodeId);
             if (node == null) {
@@ -5365,15 +5366,18 @@ public class AppServiceImpl implements AppService {
             Map<String, Object> step = new LinkedHashMap<>();
             String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
             String name = defaultIfBlank(textValue(node, "name", "label", "title"), nodeId);
-            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, node, nodeId, type, name, input, order);
+            Map<String, Object> nodeInput = new LinkedHashMap<>(context);
+            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, node, nodeId, type, name, nodeInput, order);
             step.put("order", order);
             step.put("nodeId", nodeId);
             step.put("name", name);
             step.put("type", type);
             step.put("status", "success");
-            step.put("input", input);
+            step.put("input", nodeInput);
             step.put("output", nodeOutput);
             steps.add(step);
+            context.put(nodeId, nodeOutput);
+            context.putAll(nodeOutput);
             order++;
         }
 
