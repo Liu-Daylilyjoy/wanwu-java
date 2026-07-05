@@ -6,7 +6,7 @@ Date: 2026-07-01
 
 - Assistant draft lifecycle: create, update base info, update config, delete, copy.
 - App publish lifecycle: publish, unpublish, latest version, version list, update release note/scope, rollback.
-- Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses.
+- Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses; configured assistant knowledge bases now feed the same local `KnowledgeService.hitKnowledge` path used by RAG, and conversation details persist the returned `searchList`.
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
 - RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell with MySQL-persisted chat snapshots, and multipart upload response compatibility.
@@ -41,6 +41,8 @@ RAG draft state is stored in the RAG-specific tables:
 - `rag_snapshots`
 - `rag_chat_records`
 
+Assistant draft and published stream calls use the saved `knowledgeBaseConfig` to call the Java knowledge compatibility service before returning the deterministic local answer. Returned hit cards are normalized with `score`, `kb_name`, and `user_kb_name`, appended as local evidence when available, and stored in the assistant conversation detail `searchList`. Safety input/output replacement still wins: blocked prompts or blocked generated output clear the local search list and return the configured safety reply.
+
 The BFF exposes the original frontend paths under `/user/api/v1/appspace/rag/*`, including list, draft detail, published detail, create, update, config update, copy, and delete. Generic app publish/version endpoints now accept `appType=rag` in addition to Agent-compatible app types. The RAG chat endpoints `/rag/chat/draft` and `/rag/chat` return the AG-UI SSE event sequence consumed by the current frontend, persist each question/answer/search-list snapshot in `rag_chat_records`, and `/rag/upload` accepts multipart `files` and returns `fileList[{fileIndex,fileUrl}]` like the Go BFF.
 
 Workflow and Chatflow draft and snapshot state is stored in Workflow-specific tables:
@@ -69,4 +71,4 @@ The BFF exposes the original frontend paths under `/user/api/v1/appspace/workflo
 - Skill marketplace/custom/acquired skill flows are implemented in the resource service slice, not this app-service slice.
 - Safety guard management, local uploaded-file word import, Agent/RAG local chat input/output replacement, and BFF Model Experience global input/output replacement are implemented for Java's local deterministic streams; Go-equivalent provider token-stream Aho-Corasick interception remains later.
 - Prompt templates now have local resource-center list/detail/copy and deterministic optimize/reason/evaluate SSE compatibility. Assistant and Workflow template square rows are persisted as development marketplace seed data, with read-only Go local template bundles filling the original BFF config templates; real template publication/ranking/governance remains later.
-- RAG chat currently returns a deterministic local answer after validating draft/published RAG existence and persists the local chat snapshot for Docker restart verification. Real vector/rerank retrieval, reasoning frames, provider token streaming, and model generation remain future slices.
+- Assistant and RAG chat currently return deterministic local answers after validating draft/published app existence and enriching from local knowledge hits when configured. Real vector/rerank retrieval, reasoning frames, provider token streaming, and model generation remain future slices.

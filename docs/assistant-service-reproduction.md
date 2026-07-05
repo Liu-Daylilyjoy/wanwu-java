@@ -15,7 +15,7 @@
 - Assistant draft lifecycle: create, update, config update, delete, list, get by ids, info/detail, uuid lookup, and copy.
 - Snapshot lifecycle: publish, latest, list, update latest description, rollback, info, and latest batch.
 - Resource bindings: workflow, MCP, tool, skill, and multi-agent create/delete/enable/config methods map to the existing AppService resource-binding commands.
-- Conversation loop: create, delete, clear, get-or-create by assistant, list, detail list, and local stream map to AppService's persisted development conversation implementation.
+- Conversation loop: create, delete, clear, get-or-create by assistant, list, detail list, and local stream map to AppService's persisted development conversation implementation. AppService now enriches local stream responses from configured knowledge bases through `KnowledgeService.hitKnowledge` and stores the returned `searchList` on conversation details.
 - Custom prompt RPCs map to `McpService` custom prompt CRUD/list/copy.
 - Skill conversation RPCs map to `McpService` skill conversation create/delete/list.
 - WGA config and conversation RPCs map to `AppService` GeneralAgent config/conversation state.
@@ -28,6 +28,7 @@ The service returns Go-style wrapper keys such as `assistantInfos`, `snapshotId`
 - `AssistantServiceImplTest#assistantConfigUpdateMapsCoreProtoFields`
 - `AssistantServiceImplTest#assistantSnapshotCreatePublishesAgentAndReturnsLatestSnapshot`
 - `AssistantServiceImplTest#assistantConversionStreamDelegatesDraftRequest`
+- `AppServiceImplTest#assistantDraftStreamReturnsConfiguredKnowledgeHits`
 - `AssistantServiceImplTest#esCompatibilityShellStoresSearchesAndDeletesJsonDocs`
 - `AssistantServiceImplTest#customPromptCreateDelegatesToMcpService`
 - `AssistantServiceImplTest#updateWgaConfigMapsGoListsToGeneralAgentConfig`

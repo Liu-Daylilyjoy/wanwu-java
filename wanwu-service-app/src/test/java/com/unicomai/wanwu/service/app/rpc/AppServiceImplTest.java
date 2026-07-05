@@ -2185,6 +2185,54 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void assistantDraftStreamReturnsConfiguredKnowledgeHits() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+        AssistantCreateResult created = service.createAssistant(command("KnowledgeAgent", "knowledge desc"));
+
+        AssistantConfigUpdateCommand config = new AssistantConfigUpdateCommand();
+        config.setAssistantId(created.getAssistantId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-001"));
+        service.updateAssistantConfig(config);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "Guide.txt");
+        hitItem.put("knowledgeName", "Guide KB");
+        hitItem.put("snippet", "Configured assistant knowledge answer.");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(hitItem));
+        hit.put("score", Collections.singletonList(0.91D));
+        hit.put("prompt", "Configured assistant knowledge answer.");
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        AssistantConversationStreamResult result = service.streamAssistantConversation(
+                streamCommand(created.getAssistantId(), "", "what is configured?", true));
+
+        assertTrue(result.getResponse().contains("Configured assistant knowledge answer."));
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(result.getConversationId()));
+        Map<String, Object> detail = details.getList().get(0);
+        assertTrue(((String) detail.get("response")).contains("Configured assistant knowledge answer."));
+        List<Map<String, Object>> searchList = (List<Map<String, Object>>) detail.get("searchList");
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.txt", searchList.get(0).get("title"));
+        assertEquals("Guide KB", searchList.get(0).get("kb_name"));
+        assertEquals(0.91D, searchList.get(0).get("score"));
+
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), captor.capture());
+        Map<String, Object> request = captor.getValue();
+        assertEquals("what is configured?", request.get("question"));
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) request.get("knowledgeList");
+        assertEquals("kb-001", knowledgeList.get(0).get("knowledgeId"));
+        assertEquals(5, ((Map<String, Object>) request.get("knowledgeMatchParams")).get("topK"));
+    }
+
+    @Test
     public void draftConversationHistoryReusesOneConversationPerAssistant() {
         AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
         AssistantCreateResult created = service.createAssistant(command("DraftReuseAgent", "draft reuse desc"));

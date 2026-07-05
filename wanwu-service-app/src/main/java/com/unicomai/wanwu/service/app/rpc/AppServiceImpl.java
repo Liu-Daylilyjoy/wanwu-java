@@ -2642,11 +2642,22 @@ public class AppServiceImpl implements AppService {
                 orgId,
                 safetyConfigJson,
                 command.getPrompt());
+        List<Map<String, Object>> searchList = Collections.emptyList();
         String response = sensitiveBlock == null ? deterministicResponse(assistant, command.getPrompt()) : sensitiveBlock.reply;
         if (sensitiveBlock == null) {
+            Map<String, Object> knowledgeHit = hitConfiguredKnowledge(
+                    userId,
+                    orgId,
+                    command.getPrompt(),
+                    config == null ? null : config.getKnowledgeBaseConfigJson(),
+                    false);
+            searchList = hitSearchList(knowledgeHit);
+            response = enrichRagResponse(response, knowledgeHit, searchList,
+                    Collections.<String, Object>emptyMap(), Collections.<Map<String, Object>>emptyList());
             SensitiveBlock outputBlock = matchSensitiveResponse(userId, orgId, safetyConfigJson, response);
             if (outputBlock != null) {
                 response = outputBlock.reply;
+                searchList = Collections.emptyList();
             }
         }
         long now = clock.millis();
@@ -2663,7 +2674,7 @@ public class AppServiceImpl implements AppService {
         message.setSysPrompt(defaultIfBlank(command.getSystemPrompt(), ""));
         message.setResponse(response);
         message.setResponseListJson(toJsonOrNull(Collections.emptyList()));
-        message.setSearchListJson(toJsonOrNull(Collections.emptyList()));
+        message.setSearchListJson(toJsonOrNull(searchList));
         message.setRequestFilesJson(toJsonOrNull(command.getFileInfo() == null
                 ? Collections.emptyList()
                 : command.getFileInfo()));
