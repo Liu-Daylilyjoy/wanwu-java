@@ -162,8 +162,7 @@ public class WanwuFileApiController {
     }
 
     @PostMapping({SERVICE_PREFIX + "/file/upload/direct",
-            USER_PREFIX + "/file/upload/direct",
-            "/service/api/openapi/v1/file/upload/direct"})
+            USER_PREFIX + "/file/upload/direct"})
     public FrontendResponse<Map<String, Object>> directUpload(
             @RequestParam(value = "files", required = false) List<MultipartFile> files,
             @RequestParam(value = "file", required = false) MultipartFile file) {

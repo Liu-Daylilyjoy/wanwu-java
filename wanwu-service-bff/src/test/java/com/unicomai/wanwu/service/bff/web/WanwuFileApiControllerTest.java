@@ -136,6 +136,16 @@ public class WanwuFileApiControllerTest {
                 .andExpect(jsonPath("$.data.fileName").value("flow.json"));
     }
 
+    @Test
+    public void directUploadControllerDoesNotOwnOpenApiRoute() throws Exception {
+        MockMvc mockMvc = mockMvc();
+
+        mockMvc.perform(multipart("/service/api/openapi/v1/file/upload/direct")
+                        .file(new MockMultipartFile("file", "openapi.txt", "text/plain",
+                                "openapi".getBytes(StandardCharsets.UTF_8))))
+                .andExpect(status().isNotFound());
+    }
+
     private MockMvc mockMvc() {
         return MockMvcBuilders
                 .standaloneSetup(new WanwuFileApiController(tempDir))

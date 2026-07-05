@@ -37,6 +37,7 @@ The unchanged frontend calls these through:
 - Merge returns `originalFileName`, stored `fileName`, and frontend-reachable `filePath`.
 - Delete removes stored local files by file id or returned download path.
 - OpenURL aliases reuse the same chunk upload, merge, and clean behavior.
+- OpenAPI direct upload is intentionally not registered here; `/service/api/openapi/v1/file/upload/direct` belongs to `WanwuOpenApiController` so API-key auth and OpenAPI response semantics do not conflict with the normal frontend file controller.
 - Docker nginx now proxies `/service/api/` to the Java BFF.
 
 ## Current Boundary
@@ -49,5 +50,5 @@ This is a development upload loop, not the final Go object storage reproduction:
 
 ## Verification
 
-- `WanwuFileApiControllerTest` covers chunk check/upload/list/merge/download/clean/delete, direct upload, OpenURL upload, proxy upload, and inferpub upload response shapes.
+- `WanwuFileApiControllerTest` covers chunk check/upload/list/merge/download/clean/delete, direct upload, OpenURL upload, proxy upload, inferpub upload response shapes, and the absence of the OpenAPI direct-upload alias on the normal file controller.
 - Docker Compose smoke should verify `/service/api/v1/file/upload/direct` through `http://localhost:3000` after rebuilding both BFF and Web.

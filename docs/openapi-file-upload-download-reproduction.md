@@ -12,6 +12,7 @@ Date: 2026-07-05
 ## Java Reproduction
 
 - `WanwuOpenApiController` returns local OpenAPI download URLs under `/service/api/openapi/v1/file/download/{fileId}`.
+- `POST /service/api/openapi/v1/file/upload/direct` is owned only by `WanwuOpenApiController`; the normal file controller no longer registers this alias, avoiding a duplicate Spring mapping and keeping API-key behavior centralized.
 - Uploaded multipart bytes are stored in a BFF-local in-memory map keyed by the generated `openapi-file-*` id.
 - `GET /service/api/openapi/v1/file/download/{fileId}` now returns the uploaded bytes with an attachment filename and the original content type when available.
 - This closes the Docker development loop for Workflow/Chatflow/OpenAPI direct uploads without introducing MinIO or external object storage.
@@ -19,6 +20,7 @@ Date: 2026-07-05
 ## Verification
 
 - `WanwuOpenApiControllerTest#openApiUploadDownloadUrlReturnsUploadedBytes`
+- `WanwuFileApiControllerTest#directUploadControllerDoesNotOwnOpenApiRoute`
 
 ## Remaining Gap
 
