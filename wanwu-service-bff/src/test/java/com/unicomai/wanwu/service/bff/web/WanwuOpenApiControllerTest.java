@@ -734,6 +734,76 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public void openApiKnowledgeExportFollowsGoAsyncRecordContract() throws Exception {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("exportRecordId", "export-openapi-001");
+        record.put("author", "Admin");
+        record.put("status", 2);
+        record.put("filePath", "/user/api/v1/knowledge/export/file/export-openapi-001/Knowledge_export.zip");
+        record.put("errorMsg", "");
+        record.put("exportTime", "2026-07-05 22:00:00");
+        record.put("knowledgeName", "Knowledge");
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("list", Collections.singletonList(record));
+        page.put("total", 1);
+        page.put("pageNo", 2);
+        page.put("pageSize", 5);
+        when(knowledgeService.listExportRecords(eq("dev-admin"), eq("default-org"), any())).thenReturn(page);
+        Map<String, Object> file = new LinkedHashMap<>();
+        file.put("fileName", "Knowledge_export.zip");
+        file.put("contentType", "application/zip");
+        file.put("content", "zip-content");
+        file.put("contentBase64", "");
+        when(knowledgeService.getExportRecordFile(eq("dev-admin"), eq("default-org"), any())).thenReturn(file);
+
+        mockMvc.perform(post("/service/api/openapi/v1/knowledge/doc/export")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-openapi-001\",\"docIdList\":[\"doc-1\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").isMap())
+                .andExpect(jsonPath("$.data.exportRecordId").doesNotExist())
+                .andExpect(jsonPath("$.data.fileUrl").doesNotExist());
+
+        MvcResult listed = mockMvc.perform(get("/service/api/openapi/v1/knowledge/export/record/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeId", "knowledge-openapi-001")
+                        .param("pageNo", "2")
+                        .param("pageSize", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.pageNo").value(2))
+                .andExpect(jsonPath("$.data.pageSize").value(5))
+                .andExpect(jsonPath("$.data.list[0].exportRecordId").value("export-openapi-001"))
+                .andExpect(jsonPath("$.data.list[0].filePath")
+                        .value("/service/api/openapi/v1/knowledge/export/file/export-openapi-001/Knowledge_export.zip"))
+                .andReturn();
+
+        String filePath = JsonPath.read(listed.getResponse().getContentAsString(), "$.data.list[0].filePath");
+        mockMvc.perform(get(filePath).header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("Knowledge_export.zip")))
+                .andExpect(content().bytes("zip-content".getBytes()));
+
+        ArgumentCaptor<Map> exportCaptor = forClass(Map.class);
+        verify(knowledgeService).exportDocs(eq("dev-admin"), eq("default-org"), exportCaptor.capture());
+        assertEquals("knowledge-openapi-001", exportCaptor.getValue().get("knowledgeId"));
+
+        ArgumentCaptor<Map> listCaptor = forClass(Map.class);
+        verify(knowledgeService).listExportRecords(eq("dev-admin"), eq("default-org"), listCaptor.capture());
+        assertEquals("knowledge-openapi-001", listCaptor.getValue().get("knowledgeId"));
+        assertEquals("2", listCaptor.getValue().get("pageNo"));
+        assertEquals("5", listCaptor.getValue().get("pageSize"));
+
+        ArgumentCaptor<Map> fileCaptor = forClass(Map.class);
+        verify(knowledgeService).getExportRecordFile(eq("dev-admin"), eq("default-org"), fileCaptor.capture());
+        assertEquals("export-openapi-001", fileCaptor.getValue().get("exportRecordId"));
+        assertEquals("Knowledge_export.zip", fileCaptor.getValue().get("fileName"));
+    }
+
+    @Test
     public void mcpOpenApiRoutesRejectMissingOrWrongAppKey() throws Exception {
         when(appService.getAppKeyByKey("agent-key"))
                 .thenReturn(appKey("app-key-2", "agent-key", "agent-001", "agent"));

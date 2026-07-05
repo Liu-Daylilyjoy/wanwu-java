@@ -61,8 +61,10 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -728,8 +730,8 @@ public class WanwuOpenApiController {
             OpenApiContext ctx = context(headers);
             Map<String, Object> safe = body(request);
             authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_EDIT);
-            return FrontendResponse.ok(serviceResult(
-                    knowledgeService.exportDocs(ctx.userId, ctx.orgId, safe)));
+            knowledgeService.exportDocs(ctx.userId, ctx.orgId, safe);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -769,16 +771,45 @@ public class WanwuOpenApiController {
     @GetMapping("/knowledge/export/record/list")
     public FrontendResponse<Map<String, Object>> listKnowledgeExportRecords(
             @RequestHeader HttpHeaders headers,
-            @RequestParam(value = "knowledgeId", required = false) String knowledgeId) {
+            @RequestParam(value = "knowledgeId", required = false) String knowledgeId,
+            @RequestParam(value = "pageNo", required = false) String pageNo,
+            @RequestParam(value = "pageSize", required = false) String pageSize) {
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> safe = new LinkedHashMap<>();
             safe.put("knowledgeId", knowledgeId);
+            safe.put("pageNo", pageNo);
+            safe.put("pageSize", pageSize);
             authKnowledge(ctx, safe, "knowledgeId", KNOWLEDGE_VIEW);
-            return FrontendResponse.ok(serviceResult(
+            return FrontendResponse.ok(openApiExportRecordsResult(
                     knowledgeService.listExportRecords(ctx.userId, ctx.orgId, safe)));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/knowledge/export/file/{exportRecordId}/{fileName:.+}")
+    public ResponseEntity<byte[]> downloadKnowledgeExportRecord(
+            @RequestHeader HttpHeaders headers,
+            @PathVariable("exportRecordId") String exportRecordId,
+            @PathVariable("fileName") String fileName) {
+        try {
+            OpenApiContext ctx = context(headers);
+            Map<String, Object> request = new LinkedHashMap<String, Object>();
+            request.put("exportRecordId", exportRecordId);
+            request.put("fileName", fileName);
+            Map<String, Object> file = serviceResult(
+                    knowledgeService.getExportRecordFile(ctx.userId, ctx.orgId, request));
+            String resolvedName = defaultIfBlank(text(file, "fileName"), fileName);
+            String contentType = defaultIfBlank(text(file, "contentType"), MediaType.APPLICATION_OCTET_STREAM_VALUE);
+            byte[] payload = exportPayload(file);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resolvedName + "\"")
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(payload.length)
+                    .body(payload);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new byte[0]);
         }
     }
 
@@ -1537,6 +1568,43 @@ public class WanwuOpenApiController {
             data.put("knowledge_id", data.get("knowledgeId"));
         }
         return data;
+    }
+
+    private Map<String, Object> openApiExportRecordsResult(Map<String, Object> response) {
+        Map<String, Object> data = new LinkedHashMap<>(serviceResult(response));
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> row : mapList(data.get("list"))) {
+            Map<String, Object> copy = new LinkedHashMap<String, Object>(row);
+            rewriteOpenApiExportFilePath(copy, "filePath");
+            rewriteOpenApiExportFilePath(copy, "fileUrl");
+            rewriteOpenApiExportFilePath(copy, "downloadUrl");
+            rows.add(copy);
+        }
+        if (data.containsKey("list")) {
+            data.put("list", rows);
+        }
+        return data;
+    }
+
+    private void rewriteOpenApiExportFilePath(Map<String, Object> row, String fieldName) {
+        String value = text(row, fieldName);
+        if (isBlank(value)) {
+            return;
+        }
+        String marker = "/knowledge/export/file/";
+        int index = value.indexOf(marker);
+        if (index < 0) {
+            return;
+        }
+        row.put(fieldName, "/service/api/openapi/v1" + value.substring(index));
+    }
+
+    private byte[] exportPayload(Map<String, Object> file) {
+        String base64Content = text(file, "contentBase64");
+        if (!isBlank(base64Content)) {
+            return Base64.getDecoder().decode(base64Content);
+        }
+        return text(file, "content").getBytes(StandardCharsets.UTF_8);
     }
 
     private Map<String, Object> echo(String status, Map<String, Object> request) {
