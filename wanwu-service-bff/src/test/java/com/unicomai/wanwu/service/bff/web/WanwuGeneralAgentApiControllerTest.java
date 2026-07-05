@@ -242,8 +242,9 @@ public class WanwuGeneralAgentApiControllerTest {
                         .param("threadId", threadId)
                         .param("runId", runId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.fileCount").value(1))
-                .andExpect(jsonPath("$.data.files[0].name").value("answer.md"));
+                .andExpect(jsonPath("$.data.fileCount").value(2))
+                .andExpect(jsonPath("$.data.files[0].name").value("answer.md"))
+                .andExpect(jsonPath("$.data.files[1].name").value("metadata.json"));
 
         mockMvc.perform(get("/service/api/v1/general/agent/conversation/workspace/preview")
                         .param("threadId", threadId)
@@ -255,9 +256,10 @@ public class WanwuGeneralAgentApiControllerTest {
         mockMvc.perform(get("/service/api/v1/general/agent/conversation/workspace/download")
                         .param("threadId", threadId)
                         .param("runId", runId)
-                        .param("path", "answer.md"))
+                        .param("path", "metadata.json"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Content-Disposition", containsString("answer.md")));
+                .andExpect(header().string("Content-Disposition", containsString("metadata.json")))
+                .andExpect(content().string(containsString(runId)));
 
         MvcResult skillCreated = mockMvc.perform(post("/service/api/v1/general/agent/skill/conversation")
                         .contentType(MediaType.APPLICATION_JSON)

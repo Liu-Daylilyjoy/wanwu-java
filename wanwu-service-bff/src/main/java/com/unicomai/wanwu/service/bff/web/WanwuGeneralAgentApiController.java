@@ -443,9 +443,11 @@ public class WanwuGeneralAgentApiController {
             @RequestParam(value = "runId", required = false) String runId,
             @RequestParam(value = "path", required = false) String path) {
         UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
-        byte[] bytes = workspaceContent(ctx, threadId, runId).getBytes(StandardCharsets.UTF_8);
+        WorkspaceFile file = workspaceFile(ctx, threadId, runId, path);
+        byte[] bytes = file.content.getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/markdown;charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + file.name + "\"")
+                .contentType(MediaType.parseMediaType(file.mimeType))
                 .body(bytes);
     }
 
@@ -458,9 +460,10 @@ public class WanwuGeneralAgentApiController {
             @RequestParam(value = "runId", required = false) String runId,
             @RequestParam(value = "path", required = false) String path) {
         UserContext ctx = userContext(authorization, headerUserId, headerOrgId);
-        byte[] bytes = workspaceContent(ctx, threadId, runId).getBytes(StandardCharsets.UTF_8);
+        WorkspaceFile file = workspaceFile(ctx, threadId, runId, path);
+        byte[] bytes = file.content.getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"answer.md\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.name + "\"")
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(bytes);
     }
@@ -598,6 +601,7 @@ public class WanwuGeneralAgentApiController {
         String answer = answerText(defaultIfBlank(firstText(request, "agentId"), "General Agent"), prompt,
                 conversation.skillConversation);
         long now = System.currentTimeMillis();
+        List<WorkspaceFile> workspaceFiles = buildWorkspaceFiles(conversation, runId, prompt, answer, now);
 
         List<Map<String, Object>> events = new ArrayList<>();
         events.add(event("type", "RUN_STARTED", "threadId", conversation.threadId, "runId", runId,
@@ -610,7 +614,7 @@ public class WanwuGeneralAgentApiController {
                 "messageId", messageId, "timestamp", timestamp(now + 2)));
         events.add(event("type", "ACTIVITY_SNAPSHOT", "threadId", conversation.threadId, "runId", runId,
                 "messageId", messageId, "activityId", "workspace-" + runId, "activityType", "workspace",
-                "content", workspaceActivity(runId, answer), "timestamp", timestamp(now + 3)));
+                "content", workspaceActivity(runId, workspaceFiles), "timestamp", timestamp(now + 3)));
         events.add(event("type", "RUN_FINISHED", "threadId", conversation.threadId, "runId", runId,
                 "timestamp", timestamp(now + 4)));
 
@@ -620,6 +624,7 @@ public class WanwuGeneralAgentApiController {
         run.createdAt = now;
         run.answer = answer;
         run.events = events;
+        run.workspaceFiles = workspaceFiles;
         conversation.runs.add(0, run);
         conversation.updatedAt = now;
         saveConversation(conversation);
@@ -638,31 +643,39 @@ public class WanwuGeneralAgentApiController {
 
     private Map<String, Object> workspaceInfo(UserContext ctx, String threadId, String runId, String path) {
         RunState run = findRun(ctx, threadId, runId);
-        String answer = run == null ? "" : run.answer;
-        Map<String, Object> file = new LinkedHashMap<>();
-        file.put("name", "answer.md");
-        file.put("path", "answer.md");
-        file.put("type", "file");
-        file.put("mimeType", "text/markdown");
-        file.put("size", answer.getBytes(StandardCharsets.UTF_8).length);
+        List<WorkspaceFile> files = workspaceFiles(run);
+        List<Map<String, Object>> fileNodes = new ArrayList<>();
+        long totalSize = 0L;
+        for (WorkspaceFile file : files) {
+            fileNodes.add(workspaceFileNode(file));
+            totalSize += file.size();
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("threadId", threadId);
         result.put("runId", run == null ? defaultIfBlank(runId, "") : run.runId);
-        result.put("fileCount", run == null ? 0 : 1);
-        result.put("totalSize", file.get("size"));
+        result.put("fileCount", files.size());
+        result.put("totalSize", totalSize);
         result.put("isDisplay", run != null);
         result.put("path", defaultIfBlank(path, ""));
-        result.put("files", run == null ? Collections.emptyList() : Collections.singletonList(file));
+        result.put("files", fileNodes);
         return result;
     }
 
-    private String workspaceContent(UserContext ctx, String threadId, String runId) {
+    private WorkspaceFile workspaceFile(UserContext ctx, String threadId, String runId, String path) {
         RunState run = findRun(ctx, threadId, runId);
-        if (run == null) {
-            return "# Wanwu General Agent\n\nNo workspace file has been generated yet.\n";
+        List<WorkspaceFile> files = workspaceFiles(run);
+        String normalizedPath = normalizeWorkspacePath(defaultIfBlank(path, "answer.md"));
+        for (WorkspaceFile file : files) {
+            if (normalizedPath.equals(file.path)) {
+                return file;
+            }
         }
-        return "# Wanwu General Agent\n\n" + run.answer + "\n";
+        if (!files.isEmpty()) {
+            return files.get(0);
+        }
+        return new WorkspaceFile("answer.md", "answer.md", "text/markdown;charset=UTF-8",
+                "# Wanwu General Agent\n\nNo workspace file has been generated yet.\n");
     }
 
     private RunState findRun(UserContext ctx, String threadId, String runId) {
@@ -840,6 +853,7 @@ public class WanwuGeneralAgentApiController {
             row.put("createdAt", run.createdAt);
             row.put("answer", run.answer);
             row.put("events", run.events);
+            row.put("workspaceFiles", workspaceFileStateList(workspaceFiles(run)));
             result.add(row);
         }
         return result;
@@ -854,9 +868,97 @@ public class WanwuGeneralAgentApiController {
             run.createdAt = longValue(row.get("createdAt"), System.currentTimeMillis());
             run.answer = defaultIfBlank(firstText(row, "answer"), "");
             run.events = mapList(row.get("events"));
+            run.workspaceFiles = workspaceFilesFromState(mapList(row.get("workspaceFiles")));
             runs.add(run);
         }
         return runs;
+    }
+
+    private List<WorkspaceFile> buildWorkspaceFiles(ConversationState conversation, String runId,
+                                                    String prompt, String answer, long createdAt) {
+        List<WorkspaceFile> files = new ArrayList<>();
+        files.add(new WorkspaceFile("answer.md", "answer.md", "text/markdown;charset=UTF-8",
+                "# Wanwu General Agent\n\n" + answer + "\n"));
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("threadId", conversation.threadId);
+        metadata.put("runId", runId);
+        metadata.put("skillConversation", conversation.skillConversation);
+        metadata.put("skillId", conversation.skillId);
+        metadata.put("prompt", defaultIfBlank(prompt, ""));
+        metadata.put("generatedAt", timestamp(createdAt));
+        files.add(new WorkspaceFile("metadata.json", "metadata.json", "application/json;charset=UTF-8",
+                toJson(metadata) + "\n"));
+        return files;
+    }
+
+    private List<WorkspaceFile> workspaceFiles(RunState run) {
+        if (run == null) {
+            return Collections.emptyList();
+        }
+        if (run.workspaceFiles != null && !run.workspaceFiles.isEmpty()) {
+            return run.workspaceFiles;
+        }
+        return Collections.singletonList(new WorkspaceFile("answer.md", "answer.md",
+                "text/markdown;charset=UTF-8", "# Wanwu General Agent\n\n" + run.answer + "\n"));
+    }
+
+    private Map<String, Object> workspaceFileNode(WorkspaceFile file) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("name", file.name);
+        node.put("path", file.path);
+        node.put("type", "file");
+        node.put("mimeType", file.mimeType);
+        node.put("size", file.size());
+        return node;
+    }
+
+    private List<Map<String, Object>> workspaceFileStateList(List<WorkspaceFile> files) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (WorkspaceFile file : files) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("name", file.name);
+            row.put("path", file.path);
+            row.put("mimeType", file.mimeType);
+            row.put("content", file.content);
+            result.add(row);
+        }
+        return result;
+    }
+
+    private List<WorkspaceFile> workspaceFilesFromState(List<Map<String, Object>> rows) {
+        List<WorkspaceFile> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            String path = normalizeWorkspacePath(firstText(row, "path"));
+            if (!hasText(path)) {
+                continue;
+            }
+            result.add(new WorkspaceFile(path, defaultIfBlank(firstText(row, "name"), fileName(path)),
+                    defaultIfBlank(firstText(row, "mimeType"), "application/octet-stream"),
+                    defaultIfBlank(firstText(row, "content"), "")));
+        }
+        return result;
+    }
+
+    private String normalizeWorkspacePath(String path) {
+        String normalized = defaultIfBlank(path, "").replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        List<String> parts = new ArrayList<>();
+        for (String part : normalized.split("/")) {
+            if (!hasText(part) || ".".equals(part) || "..".equals(part)) {
+                continue;
+            }
+            parts.add(part);
+        }
+        return String.join("/", parts);
+    }
+
+    private String fileName(String path) {
+        String normalized = normalizeWorkspacePath(path);
+        int slash = normalized.lastIndexOf('/');
+        return slash >= 0 ? normalized.substring(slash + 1) : normalized;
     }
 
     private void appendQuestionEvent(Map<String, Object> request, String status) {
@@ -1105,12 +1207,16 @@ public class WanwuGeneralAgentApiController {
         return result;
     }
 
-    private Map<String, Object> workspaceActivity(String runId, String answer) {
+    private Map<String, Object> workspaceActivity(String runId, List<WorkspaceFile> files) {
+        long totalSize = 0L;
+        for (WorkspaceFile file : files) {
+            totalSize += file.size();
+        }
         Map<String, Object> content = new LinkedHashMap<>();
         content.put("status", "finished");
         content.put("runId", runId);
-        content.put("fileCount", 1);
-        content.put("totalSize", answer.getBytes(StandardCharsets.UTF_8).length);
+        content.put("fileCount", files.size());
+        content.put("totalSize", totalSize);
         content.put("isDisplay", true);
         return content;
     }
@@ -1344,5 +1450,24 @@ public class WanwuGeneralAgentApiController {
         private long createdAt;
         private String answer;
         private List<Map<String, Object>> events = new ArrayList<>();
+        private List<WorkspaceFile> workspaceFiles = new ArrayList<>();
+    }
+
+    private static final class WorkspaceFile {
+        private final String path;
+        private final String name;
+        private final String mimeType;
+        private final String content;
+
+        private WorkspaceFile(String path, String name, String mimeType, String content) {
+            this.path = path;
+            this.name = name;
+            this.mimeType = mimeType;
+            this.content = content;
+        }
+
+        private long size() {
+            return content.getBytes(StandardCharsets.UTF_8).length;
+        }
     }
 }
