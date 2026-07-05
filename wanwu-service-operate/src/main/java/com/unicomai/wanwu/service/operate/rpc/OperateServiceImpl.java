@@ -150,6 +150,11 @@ public class OperateServiceImpl implements OperateService {
         }
         record.put("clientId", normalizedClientId);
         record.put("updatedAt", now);
+        record.put("visitCount", longValue(record.get("visitCount")) + 1L);
+        Map<String, Object> dailyVisits = mapValue(record.get("dailyVisits"));
+        String today = LocalDate.now().toString();
+        dailyVisits.put(today, longValue(dailyVisits.get(today)) + 1L);
+        record.put("dailyVisits", dailyVisits);
         clientRecords.put(normalizedClientId, record);
         saveRecord(TYPE_CLIENT_RECORD, normalizedClientId, record);
     }
@@ -166,20 +171,26 @@ public class OperateServiceImpl implements OperateService {
         long previousAdditions = additions(clients, previousDates);
         long active = activeClients(clients, currentDates);
         long previousActive = activeClients(clients, previousDates);
+        long browse = browse(clients, currentDates);
+        long previousBrowse = browse(clients, previousDates);
 
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("cumulativeClient", overviewItem(cumulative, periodOverPeriod(cumulative, previousCumulative)));
         overview.put("additionClient", overviewItem(additions, periodOverPeriod(additions, previousAdditions)));
         overview.put("activeClient", overviewItem(active, periodOverPeriod(active, previousActive)));
+        overview.put("browse", overviewItem(browse, periodOverPeriod(browse, previousBrowse)));
 
         Map<LocalDate, Long> newByDate = additionsByDate(clients, currentDates);
         Map<LocalDate, Long> activeByDate = activeByDate(clients, currentDates);
         Map<LocalDate, Long> cumulativeByDate = cumulativeByDate(clients, currentDates);
+        Map<LocalDate, Long> browseByDate = browseByDate(clients, currentDates);
         Map<String, Object> trend = new LinkedHashMap<>();
         trend.put("client", chart("ope_statistic_client_table",
                 line("ope_statistic_cumulative_client_line", currentDates, cumulativeByDate),
                 line("ope_statistic_active_client_line", currentDates, activeByDate),
                 line("ope_statistic_new_client_line", currentDates, newByDate)));
+        trend.put("browse", chart("ope_statistic_browse_table",
+                line("ope_statistic_browse_line", currentDates, browseByDate)));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("overview", overview);
@@ -417,6 +428,35 @@ public class OperateServiceImpl implements OperateService {
         return values;
     }
 
+    private long browse(List<Map<String, Object>> clients, List<LocalDate> dates) {
+        long total = 0L;
+        for (Long value : browseByDate(clients, dates).values()) {
+            total += value;
+        }
+        return total;
+    }
+
+    private Map<LocalDate, Long> browseByDate(List<Map<String, Object>> clients, List<LocalDate> dates) {
+        Map<LocalDate, Long> values = zeroMap(dates);
+        for (Map<String, Object> client : clients) {
+            Map<String, Object> dailyVisits = mapValue(client.get("dailyVisits"));
+            if (dailyVisits.isEmpty()) {
+                LocalDate updatedAt = dateValue(client.get("updatedAt"));
+                if (updatedAt != null && values.containsKey(updatedAt)) {
+                    values.put(updatedAt, values.get(updatedAt) + 1L);
+                }
+                continue;
+            }
+            for (Map.Entry<String, Object> entry : dailyVisits.entrySet()) {
+                LocalDate date = dateValue(entry.getKey());
+                if (date != null && values.containsKey(date)) {
+                    values.put(date, values.get(date) + longValue(entry.getValue()));
+                }
+            }
+        }
+        return values;
+    }
+
     private Map<LocalDate, Long> zeroMap(List<LocalDate> dates) {
         Map<LocalDate, Long> values = new LinkedHashMap<>();
         for (LocalDate date : dates) {
@@ -472,6 +512,28 @@ public class OperateServiceImpl implements OperateService {
             return LocalDate.parse(text.substring(0, 10));
         } catch (RuntimeException ex) {
             return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            return new LinkedHashMap<>((Map<String, Object>) value);
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private long longValue(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (RuntimeException ex) {
+            return 0L;
         }
     }
 

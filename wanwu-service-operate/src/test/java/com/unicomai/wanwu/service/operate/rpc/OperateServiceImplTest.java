@@ -48,6 +48,7 @@ public class OperateServiceImplTest {
     public void clientStatisticUsesRecordedClients() {
         OperateServiceImpl service = new OperateServiceImpl();
         service.addClientRecord("oauth-client-1");
+        service.addClientRecord("oauth-client-1");
 
         String today = LocalDate.now().toString();
         Map<String, Object> statistic = service.getClientStatistic(today, today);
@@ -55,6 +56,7 @@ public class OperateServiceImplTest {
         assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "cumulativeClient").get("value"));
         assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "additionClient").get("value"));
         assertEquals(1.0f, mapAt(mapAt(statistic, "overview"), "activeClient").get("value"));
+        assertEquals(2.0f, mapAt(mapAt(statistic, "overview"), "browse").get("value"));
 
         Map<String, Object> clientChart = mapAt(mapAt(statistic, "trend"), "client");
         assertEquals("ope_statistic_client_table", clientChart.get("tableName"));
@@ -63,6 +65,12 @@ public class OperateServiceImplTest {
         assertEquals(1.0f, listAt(lines.get(0), "items").get(0).get("value"));
         assertEquals(1.0f, listAt(lines.get(1), "items").get(0).get("value"));
         assertEquals(1.0f, listAt(lines.get(2), "items").get(0).get("value"));
+
+        Map<String, Object> browseChart = mapAt(mapAt(statistic, "trend"), "browse");
+        assertEquals("ope_statistic_browse_table", browseChart.get("tableName"));
+        List<Map<String, Object>> browseLines = listAt(browseChart, "lines");
+        assertEquals(1, browseLines.size());
+        assertEquals(2.0f, listAt(browseLines.get(0), "items").get(0).get("value"));
     }
 
     @Test
