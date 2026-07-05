@@ -29,6 +29,7 @@ Date: 2026-07-01
   - Skill conversation create/list/detail/delete/clear/chat/save with deterministic local SSE responses.
 - `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, `/user/api/v1/prompt`, `/user/api/v1/agent/skill`, `/user/api/v1/agent/acquired/skill`, and `/user/api/v1/square/skill`.
 - `wanwu-service-bff` also exposes `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box`, adapting the same MCP Tool data into the Go Workflow editor response shapes.
+- `wanwu-service-bff` exposes the public MCP Server OpenAPI endpoints with app-key validation plus development JSON-RPC `tools/list` and deterministic `tools/call` responses backed by the same MCP Server tool bindings.
 - Docker Compose `full` profile includes `mcp` on ports `8087` and `20887`, and BFF waits for it.
 
 ## Verification
@@ -59,7 +60,7 @@ This slice is a frontend-compatible management loop. It prevents zero-change fro
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
-- Real remote MCP protocol runtime, SSE/streamable proxying, or OpenAPI invocation.
+- Real remote MCP protocol runtime, SSE/streamable proxying, and external OpenAPI invocation beyond the local JSON-RPC development call response.
 - Real Skill package parsing, validation, execution, and package storage.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.

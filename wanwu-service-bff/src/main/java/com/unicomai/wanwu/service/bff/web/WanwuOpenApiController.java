@@ -32,6 +32,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.operate.OperateService;
@@ -105,6 +106,9 @@ public class WanwuOpenApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private OperateService operateService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private McpService mcpService;
+
     private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
     private final Map<String, OAuthCode> oauthCodes = new ConcurrentHashMap<>();
     private final Map<String, OAuthToken> oauthRefreshTokens = new ConcurrentHashMap<>();
@@ -133,11 +137,18 @@ public class WanwuOpenApiController {
     public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
                                   IamService iamService, OpenApiChatflowSessionStore chatflowSessionStore,
                                   OperateService operateService) {
+        this(appService, modelService, knowledgeService, iamService, chatflowSessionStore, operateService, null);
+    }
+
+    public WanwuOpenApiController(AppService appService, ModelService modelService, KnowledgeService knowledgeService,
+                                  IamService iamService, OpenApiChatflowSessionStore chatflowSessionStore,
+                                  OperateService operateService, McpService mcpService) {
         this.appService = appService;
         this.modelService = modelService;
         this.knowledgeService = knowledgeService;
         this.iamService = iamService;
         this.operateService = operateService;
+        this.mcpService = mcpService;
         this.chatflowSessionStore = chatflowSessionStore == null ? new OpenApiChatflowSessionStore() : chatflowSessionStore;
     }
 
@@ -758,7 +769,7 @@ public class WanwuOpenApiController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("jsonrpc", "2.0");
         data.put("id", request == null ? null : request.get("id"));
-        data.put("result", Collections.singletonMap("mcpServerId", defaultIfBlank(appKey.getAppId(), "")));
+        data.put("result", mcpJsonRpcResult(appKey, body(request)));
         return ResponseEntity.ok(data);
     }
 
@@ -1029,6 +1040,73 @@ public class WanwuOpenApiController {
             throw new OpenApiAuthException("invalid appType");
         }
         return appKey;
+    }
+
+    private Map<String, Object> mcpJsonRpcResult(AppKeyInfo appKey, Map<String, Object> request) {
+        String method = text(request, "method");
+        if ("tools/list".equals(method)) {
+            return Collections.<String, Object>singletonMap("tools", mcpToolDescriptors(appKey));
+        }
+        if ("tools/call".equals(method)) {
+            return mcpToolCallResult(appKey, objectMap(request.get("params")));
+        }
+        return Collections.singletonMap("mcpServerId", defaultIfBlank(appKey.getAppId(), ""));
+    }
+
+    private List<Map<String, Object>> mcpToolDescriptors(AppKeyInfo appKey) {
+        List<Map<String, Object>> tools = new ArrayList<>();
+        for (Map<String, Object> tool : mcpServerTools(appKey)) {
+            Map<String, Object> descriptor = new LinkedHashMap<>();
+            descriptor.put("name", defaultIfBlank(text(tool, "methodName"), text(tool, "name")));
+            descriptor.put("description", defaultIfBlank(text(tool, "desc"), text(tool, "description")));
+            Map<String, Object> inputSchema = new LinkedHashMap<>();
+            inputSchema.put("type", "object");
+            inputSchema.put("additionalProperties", true);
+            descriptor.put("inputSchema", inputSchema);
+            tools.add(descriptor);
+        }
+        return tools;
+    }
+
+    private Map<String, Object> mcpToolCallResult(AppKeyInfo appKey, Map<String, Object> params) {
+        String name = firstText(params, "name", "toolName", "methodName");
+        Map<String, Object> arguments = objectMap(params.get("arguments"));
+        Map<String, Object> matched = Collections.emptyMap();
+        for (Map<String, Object> tool : mcpServerTools(appKey)) {
+            String methodName = defaultIfBlank(text(tool, "methodName"), text(tool, "name"));
+            if (name.equals(methodName)) {
+                matched = tool;
+                break;
+            }
+        }
+        String text = "Executed MCP tool " + defaultIfBlank(name, "unknown")
+                + " on server " + defaultIfBlank(appKey.getAppId(), "")
+                + " with arguments " + arguments;
+        if (!matched.isEmpty() && !isBlank(text(matched, "desc"))) {
+            text = text + ". " + text(matched, "desc");
+        }
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "text");
+        content.put("text", text);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("content", Collections.singletonList(content));
+        result.put("isError", matched.isEmpty());
+        return result;
+    }
+
+    private List<Map<String, Object>> mcpServerTools(AppKeyInfo appKey) {
+        if (mcpService == null) {
+            return Collections.emptyList();
+        }
+        try {
+            Map<String, Object> server = mcpService.getMcpServer(
+                    defaultIfBlank(appKey.getUserId(), DEV_ADMIN_ID),
+                    defaultIfBlank(appKey.getOrgId(), DEV_ORG_ID),
+                    defaultIfBlank(appKey.getAppId(), ""));
+            return mapList(server.get("tools"));
+        } catch (RuntimeException ex) {
+            return Collections.emptyList();
+        }
     }
 
     private Map<String, Object> serviceCreateChatflowConversation(OpenApiContext ctx, Map<String, Object> body) {

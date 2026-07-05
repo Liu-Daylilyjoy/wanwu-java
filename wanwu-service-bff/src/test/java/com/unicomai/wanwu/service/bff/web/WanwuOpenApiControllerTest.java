@@ -25,6 +25,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.operate.OperateService;
@@ -70,10 +71,11 @@ public class WanwuOpenApiControllerTest {
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final IamService iamService = mock(IamService.class);
     private final OperateService operateService = mock(OperateService.class);
+    private final McpService mcpService = mock(McpService.class);
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new WanwuOpenApiController(
                     appService, modelService, knowledgeService, iamService, new OpenApiChatflowSessionStore(),
-                    operateService))
+                    operateService, mcpService))
             .build();
 
     @Test
@@ -464,6 +466,16 @@ public class WanwuOpenApiControllerTest {
         when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any())).thenReturn(hit);
         when(appService.getAppKeyByKey("app-key"))
                 .thenReturn(appKey("app-key-1", "app-key", "mcpserver-001", "mcpserver"));
+        Map<String, Object> serverTool = new LinkedHashMap<>();
+        serverTool.put("methodName", "get_weather");
+        serverTool.put("desc", "Get weather by city");
+        serverTool.put("type", "custom");
+        serverTool.put("id", "tool-weather");
+        Map<String, Object> mcpServer = new LinkedHashMap<>();
+        mcpServer.put("mcpServerId", "mcpserver-001");
+        mcpServer.put("tools", Collections.singletonList(serverTool));
+        when(mcpService.getMcpServer(eq("dev-admin"), eq("default-org"), eq("mcpserver-001")))
+                .thenReturn(mcpServer);
 
         mockMvc.perform(get("/service/api/openapi/v1/model/list")
                         .header("Authorization", "Bearer dev-token")
@@ -533,6 +545,24 @@ public class WanwuOpenApiControllerTest {
                         .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-call-1\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.mcpServerId").value("mcpserver-001"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "app-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-list-1\",\"method\":\"tools/list\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.tools[0].name").value("get_weather"))
+                .andExpect(jsonPath("$.result.tools[0].description").value("Get weather by city"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "app-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-call-2\",\"method\":\"tools/call\","
+                                + "\"params\":{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Hangzhou\"}}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.content[0].type").value("text"))
+                .andExpect(jsonPath("$.result.content[0].text").value(containsString("get_weather")))
+                .andExpect(jsonPath("$.result.content[0].text").value(containsString("Hangzhou")));
 
         verify(knowledgeService).createKnowledge(eq("dev-admin"), eq("default-org"), any());
         verify(knowledgeService).selectKnowledge(eq("dev-admin"), eq("default-org"), any());
