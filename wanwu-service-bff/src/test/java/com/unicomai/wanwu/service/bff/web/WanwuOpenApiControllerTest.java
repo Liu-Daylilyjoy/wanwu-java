@@ -207,6 +207,11 @@ public class WanwuOpenApiControllerTest {
         assistantResult.setConversationId("conversation-openapi-001");
         assistantResult.setDetailId("detail-openapi-001");
         assistantResult.setResponse("assistant answer");
+        Map<String, Object> assistantSearch = new LinkedHashMap<>();
+        assistantSearch.put("title", "AgentPolicy.txt");
+        assistantSearch.put("snippet", "Agent policy hit");
+        assistantSearch.put("knowledgeName", "Agent KB");
+        assistantResult.setSearchList(Collections.singletonList(assistantSearch));
         when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
                 .thenReturn(assistantResult);
 
@@ -230,6 +235,9 @@ public class WanwuOpenApiControllerTest {
                         .content("{\"uuid\":\"assistant-openapi-001\",\"conversation_id\":\"conversation-openapi-001\",\"query\":\"hi\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response").value("assistant answer"))
+                .andExpect(jsonPath("$.search_list[0].kb_name").value("Agent KB"))
+                .andExpect(jsonPath("$.search_list[0].title").value("AgentPolicy.txt"))
+                .andExpect(jsonPath("$.search_list[0].snippet").value("Agent policy hit"))
                 .andExpect(jsonPath("$.finish").value(1));
 
         mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
@@ -249,7 +257,13 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("workflow answer"));
 
-        verify(appService).streamAssistantConversation(any(AssistantConversationStreamCommand.class));
+        ArgumentCaptor<AssistantConversationStreamCommand> assistantCaptor =
+                forClass(AssistantConversationStreamCommand.class);
+        verify(appService).streamAssistantConversation(assistantCaptor.capture());
+        assertEquals("assistant-openapi-001", assistantCaptor.getValue().getAssistantId());
+        assertEquals("conversation-openapi-001", assistantCaptor.getValue().getConversationId());
+        assertEquals("hi", assistantCaptor.getValue().getPrompt());
+        assertEquals(false, assistantCaptor.getValue().isDraft());
         ArgumentCaptor<RagChatCommand> ragCaptor = forClass(RagChatCommand.class);
         verify(appService).streamRagChat(ragCaptor.capture());
         assertEquals("rag-openapi-001", ragCaptor.getValue().getRagId());
@@ -257,6 +271,68 @@ public class WanwuOpenApiControllerTest {
         assertEquals(false, ragCaptor.getValue().isDraft());
         assertEquals(1, ragCaptor.getValue().getFileInfo().size());
         verify(appService).runWorkflow(any(WorkflowRunCommand.class));
+    }
+
+    @Test
+    public void agentOpenApiStreamReturnsLegacySseWithSearchList() throws Exception {
+        AssistantConversationStreamResult assistantResult = new AssistantConversationStreamResult();
+        assistantResult.setConversationId("conversation-openapi-stream-001");
+        assistantResult.setDetailId("detail-openapi-stream-001");
+        assistantResult.setResponse("assistant stream answer");
+        Map<String, Object> assistantSearch = new LinkedHashMap<>();
+        assistantSearch.put("title", "StreamPolicy.txt");
+        assistantSearch.put("snippet", "Stream hit");
+        assistantSearch.put("knowledgeName", "Stream KB");
+        assistantResult.setSearchList(Collections.singletonList(assistantSearch));
+        when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
+                .thenReturn(assistantResult);
+
+        mockMvc.perform(post("/service/api/openapi/v1/agent/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"assistant-openapi-stream-001\",\"query\":\"hi\",\"stream\":true,\"file_info\":[{\"fileName\":\"note.txt\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("data: {\"code\":0")))
+                .andExpect(content().string(containsString("\"conversation_id\":\"conversation-openapi-stream-001\"")))
+                .andExpect(content().string(containsString("\"search_list\":[{\"kb_name\":\"Stream KB\",\"title\":\"StreamPolicy.txt\",\"snippet\":\"Stream hit\"")))
+                .andExpect(content().string(containsString("data: [DONE]")));
+
+        ArgumentCaptor<AssistantConversationStreamCommand> assistantCaptor =
+                forClass(AssistantConversationStreamCommand.class);
+        verify(appService).streamAssistantConversation(assistantCaptor.capture());
+        assertEquals("assistant-openapi-stream-001", assistantCaptor.getValue().getAssistantId());
+        assertEquals("hi", assistantCaptor.getValue().getPrompt());
+        assertEquals(false, assistantCaptor.getValue().isDraft());
+        assertEquals(1, assistantCaptor.getValue().getFileInfo().size());
+    }
+
+    @Test
+    public void draftAgentOpenApiUsesDraftConversationAndSse() throws Exception {
+        AssistantConversationStreamResult assistantResult = new AssistantConversationStreamResult();
+        assistantResult.setConversationId("conversation-draft-openapi-001");
+        assistantResult.setDetailId("detail-draft-openapi-001");
+        assistantResult.setResponse("draft answer");
+        when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
+                .thenReturn(assistantResult);
+
+        mockMvc.perform(post("/service/api/openapi/v1/agent/chat/draft")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"assistant-draft-openapi-001\",\"query\":\"draft hi\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"response\":\"draft answer\"")))
+                .andExpect(content().string(containsString("\"conversation_id\":\"conversation-draft-openapi-001\"")))
+                .andExpect(content().string(containsString("data: [DONE]")));
+
+        ArgumentCaptor<AssistantConversationStreamCommand> assistantCaptor =
+                forClass(AssistantConversationStreamCommand.class);
+        verify(appService).streamAssistantConversation(assistantCaptor.capture());
+        assertEquals("assistant-draft-openapi-001", assistantCaptor.getValue().getAssistantId());
+        assertEquals("draft hi", assistantCaptor.getValue().getPrompt());
+        assertEquals("", assistantCaptor.getValue().getConversationId());
+        assertEquals(true, assistantCaptor.getValue().isDraft());
     }
 
     @Test

@@ -2213,6 +2213,8 @@ public class AppServiceImplTest {
                 streamCommand(created.getAssistantId(), "", "what is configured?", true));
 
         assertTrue(result.getResponse().contains("Configured assistant knowledge answer."));
+        assertEquals(1, result.getSearchList().size());
+        assertEquals("Guide.txt", result.getSearchList().get(0).get("title"));
         AssistantConversationPageResult details = service.listAssistantConversationDetails(
                 conversationDetailQuery(result.getConversationId()));
         Map<String, Object> detail = details.getList().get(0);

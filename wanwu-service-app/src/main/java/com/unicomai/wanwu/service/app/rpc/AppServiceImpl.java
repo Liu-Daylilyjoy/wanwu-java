@@ -2692,6 +2692,7 @@ public class AppServiceImpl implements AppService {
         result.setDetailId(detailId);
         result.setPrompt(command.getPrompt());
         result.setResponse(response);
+        result.setSearchList(searchList);
         result.setCreatedAt(now);
         return result;
     }

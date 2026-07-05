@@ -382,25 +382,50 @@ public class WanwuOpenApiController {
         }
     }
 
-    @PostMapping({"/agent/chat", "/agent/chat/draft"})
-    public ResponseEntity<Map<String, Object>> chatAgent(
+    @PostMapping("/agent/chat")
+    public ResponseEntity<?> chatAgent(
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
+        return chatAgentInternal(headers, request, false, false);
+    }
+
+    @PostMapping("/agent/chat/draft")
+    public ResponseEntity<?> draftChatAgent(
+            @RequestHeader HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> request) {
+        return chatAgentInternal(headers, request, true, true);
+    }
+
+    private ResponseEntity<?> chatAgentInternal(HttpHeaders headers,
+                                                Map<String, Object> request,
+                                                boolean draft,
+                                                boolean forceStream) {
         long startedAt = System.currentTimeMillis();
         try {
             OpenApiContext ctx = context(headers);
             Map<String, Object> body = body(request);
+            List<Map<String, Object>> fileInfo = mapList(body.get("file_info"));
+            if (fileInfo.size() > 1) {
+                throw new IllegalArgumentException("file_info only supports one file");
+            }
             AssistantConversationStreamCommand command = new AssistantConversationStreamCommand();
             command.setAssistantId(text(body, "uuid"));
             command.setConversationId(text(body, "conversation_id"));
             command.setPrompt(defaultIfBlank(text(body, "query"), text(body, "prompt")));
-            command.setDraft(false);
-            command.setFileInfo(mapList(body.get("file_info")));
+            command.setDraft(draft);
+            command.setFileInfo(fileInfo);
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
-            recordAppStatistic(ctx, command.getAssistantId(), AGENT_APP_TYPE, true, false, startedAt);
-            return ResponseEntity.ok(openApiAgentChat(result));
+            boolean stream = forceStream || booleanValue(body.get("stream"), false);
+            Map<String, Object> response = openApiAgentChat(result);
+            recordAppStatistic(ctx, command.getAssistantId(), AGENT_APP_TYPE, true, stream, startedAt);
+            if (stream) {
+                return ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(legacyOpenApiSse(response));
+            }
+            return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(errorBody(ex.getMessage()));
         }
@@ -429,7 +454,7 @@ public class WanwuOpenApiController {
             if (stream) {
                 return ResponseEntity.ok()
                         .contentType(MediaType.TEXT_EVENT_STREAM)
-                        .body(legacyRagSse(response));
+                        .body(legacyOpenApiSse(response));
             }
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
@@ -1348,7 +1373,7 @@ public class WanwuOpenApiController {
         data.put("message", "success");
         data.put("response", result == null ? "" : defaultIfBlank(result.getResponse(), ""));
         data.put("gen_file_url_list", Collections.emptyList());
-        data.put("search_list", Collections.emptyList());
+        data.put("search_list", openApiRagSearchList(result == null ? null : result.getSearchList()));
         data.put("history", Collections.emptyList());
         data.put("usage", usage());
         data.put("finish", 1);
@@ -1391,7 +1416,7 @@ public class WanwuOpenApiController {
         return result;
     }
 
-    private String legacyRagSse(Map<String, Object> response) {
+    private String legacyOpenApiSse(Map<String, Object> response) {
         return "data: " + toJson(response) + "\n\n"
                 + "data: [DONE]\n\n";
     }

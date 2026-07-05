@@ -6,7 +6,7 @@ Date: 2026-07-01
 
 - Assistant draft lifecycle: create, update base info, update config, delete, copy.
 - App publish lifecycle: publish, unpublish, latest version, version list, update release note/scope, rollback.
-- Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses; configured assistant knowledge bases now feed the same local `KnowledgeService.hitKnowledge` path used by RAG, and conversation details persist the returned `searchList`.
+- Conversations: draft/published conversation create/list/detail/delete/clear and deterministic local SSE responses; configured assistant knowledge bases now feed the same local `KnowledgeService.hitKnowledge` path used by RAG, conversation details persist the returned `searchList`, and OpenAPI Agent chat can expose it as Go-style `search_list`.
 - OpenURL: app URL create/update/delete/status/list and public agent conversation compatibility.
 - API keys and app keys: local persisted lifecycle matching the frontend management flows.
 - RAG app lifecycle: create/update/delete/copy/list, draft config save/read, publish/unpublish/version list/version update/rollback, published detail read, draft/published AG-UI chat shell with MySQL-persisted chat snapshots, and multipart upload response compatibility.

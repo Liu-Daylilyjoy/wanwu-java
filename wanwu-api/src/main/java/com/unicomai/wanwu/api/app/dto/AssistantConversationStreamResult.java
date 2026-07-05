@@ -1,6 +1,8 @@
 package com.unicomai.wanwu.api.app.dto;
 
 import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
 
 public class AssistantConversationStreamResult implements Serializable {
 
@@ -11,6 +13,7 @@ public class AssistantConversationStreamResult implements Serializable {
     private String detailId;
     private String prompt;
     private String response;
+    private List<Map<String, Object>> searchList;
     private long createdAt;
 
     public String getAssistantId() {
@@ -51,6 +54,14 @@ public class AssistantConversationStreamResult implements Serializable {
 
     public void setResponse(String response) {
         this.response = response;
+    }
+
+    public List<Map<String, Object>> getSearchList() {
+        return searchList;
+    }
+
+    public void setSearchList(List<Map<String, Object>> searchList) {
+        this.searchList = searchList;
     }
 
     public long getCreatedAt() {
