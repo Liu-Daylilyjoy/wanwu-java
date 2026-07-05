@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class IamServiceImpl implements IamService {
@@ -43,6 +44,10 @@ public class IamServiceImpl implements IamService {
     private static final String TYPE_CUSTOM_TAB = "custom_tab";
     private static final String TYPE_CUSTOM_LOGIN = "custom_login";
     private static final String TYPE_CUSTOM_HOME = "custom_home";
+    private static final int MAX_BATCH_CREATE_USERS_LIMIT = 500;
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9\\u4e00-\\u9fa5_().]+$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
+    private static final String PASSWORD_SPECIALS = "!@#$%^&*()_+-=[]{};':\"\\|,.<>/?";
     private static final List<String> APP_PERMISSIONS = Arrays.asList("app", "app.rag", "app.workflow", "app.agent");
     private static final List<String> IMPLEMENTED_FRONTEND_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
             "permission",
@@ -255,6 +260,10 @@ public class IamServiceImpl implements IamService {
         request.put("userId", "batch-user-" + seq);
         request.put("username", defaultText(singletonMap("fileName", fileName), "fileName", "batch-user-" + seq));
         request.put("nickname", "Imported User " + seq);
+        request.put("password", "Imported1!");
+        request.put("company", "Wanwu Java");
+        request.put("phone", "13800000003");
+        request.put("roleIds", Collections.singletonList("app"));
         Map<String, Object> result = importUsers(operatorUserId, operatorOrgId, Collections.singletonList(request));
         result.put("fileName", defaultText(singletonMap("fileName", fileName), "fileName", ""));
         result.put("fileSize", fileSize);
@@ -268,12 +277,13 @@ public class IamServiceImpl implements IamService {
         if (importedUsers == null || importedUsers.isEmpty()) {
             throw new IllegalArgumentException("no valid user data");
         }
+        if (importedUsers.size() > MAX_BATCH_CREATE_USERS_LIMIT) {
+            throw new IllegalArgumentException("batch user import cannot exceed 500 rows");
+        }
         java.util.ArrayList<Map<String, Object>> created = new java.util.ArrayList<>();
         for (Map<String, Object> row : importedUsers) {
             Map<String, Object> request = importedUserRequest(row, operatorOrgId);
-            if (!Strings.hasText(defaultText(request, "username", ""))) {
-                continue;
-            }
+            validateImportedUser(request);
             created.add(createUser(operatorUserId, operatorOrgId, request));
         }
         if (created.isEmpty()) {
@@ -823,6 +833,11 @@ public class IamServiceImpl implements IamService {
         result.put("language", language());
         result.put("avatar", avatar("", ""));
         result.put("passwordVersion", 0);
+        String password = defaultText(request, "password", "");
+        if (Strings.hasText(password)) {
+            validatePassword(password);
+            result.put("passwordHash", passwordHash(password));
+        }
         result.put("orgs", userOrgRoles(defaultText(request, "orgId", operatorOrgId), extractRoleIds(request)));
         return result;
     }
@@ -832,11 +847,12 @@ public class IamServiceImpl implements IamService {
         String username = defaultText(row, "username", defaultText(row, "userName", ""));
         request.put("username", username);
         request.put("nickname", defaultText(row, "nickname", username));
+        request.put("password", defaultText(row, "password", ""));
         request.put("phone", defaultText(row, "phone", ""));
         request.put("email", defaultText(row, "email", ""));
         request.put("gender", defaultText(row, "gender", ""));
         request.put("remark", defaultText(row, "remark", ""));
-        request.put("company", defaultText(row, "company", "Wanwu Java"));
+        request.put("company", defaultText(row, "company", ""));
         request.put("orgId", operatorOrgId);
         Object roleIds = firstPresent(row, "roleIds", "roles", "roleId");
         if (roleIds != null) {
@@ -846,6 +862,35 @@ public class IamServiceImpl implements IamService {
             request.put("roleIds", Collections.singletonList(roleIdForName(roleName)));
         }
         return request;
+    }
+
+    private void validateImportedUser(Map<String, Object> request) {
+        String username = defaultText(request, "username", "");
+        validateUsername(username);
+        try {
+            validatePassword(defaultText(request, "password", ""));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("username " + username + ": " + ex.getMessage());
+        }
+        String phone = defaultText(request, "phone", "");
+        if (Strings.hasText(phone) && !PHONE_PATTERN.matcher(phone).matches()) {
+            throw new IllegalArgumentException("phone " + phone + ": phone number format is invalid");
+        }
+        if (!Strings.hasText(defaultText(request, "company", ""))) {
+            throw new IllegalArgumentException("username " + username + ": company is empty");
+        }
+    }
+
+    private void validateUsername(String username) {
+        if (!Strings.hasText(username) || username.length() < 2 || username.length() > 20) {
+            throw new IllegalArgumentException("username length must be 2-20 characters");
+        }
+        if (username.charAt(0) == '_') {
+            throw new IllegalArgumentException("username cannot start with underscore");
+        }
+        if (!USERNAME_PATTERN.matcher(username).matches()) {
+            throw new IllegalArgumentException("username can only contain Chinese, English, numbers, underscores and parentheses");
+        }
     }
 
     private String roleIdForName(String roleName) {
@@ -1183,11 +1228,11 @@ public class IamServiceImpl implements IamService {
         boolean hasSpecial = false;
         for (int i = 0; i < password.length(); i++) {
             char c = password.charAt(i);
-            if (Character.isLetter(c)) {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
                 hasLetter = true;
-            } else if (Character.isDigit(c)) {
+            } else if (c >= '0' && c <= '9') {
                 hasNumber = true;
-            } else {
+            } else if (PASSWORD_SPECIALS.indexOf(c) >= 0) {
                 hasSpecial = true;
             }
         }

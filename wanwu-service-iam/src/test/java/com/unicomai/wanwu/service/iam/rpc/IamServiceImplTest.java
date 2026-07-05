@@ -269,9 +269,11 @@ public class IamServiceImplTest {
     public void importUsersCreatesOneRecordForEachParsedRow() {
         Map<String, Object> imported = service.importUsers("dev-admin", "default-org", java.util.Arrays.asList(
                 map("username", "batchAlice", "nickname", "Batch Alice", "company", "Wanwu Java",
-                        "phone", "13800000001", "remark", "from csv", "roleIds", java.util.Collections.singletonList("app")),
+                        "password", "Password1!", "phone", "13800000001", "remark", "from csv",
+                        "roleIds", java.util.Collections.singletonList("app")),
                 map("username", "batchBob", "company", "Wanwu Java",
-                        "phone", "13800000002", "roleIds", java.util.Collections.singletonList("app"))));
+                        "password", "Password2!", "phone", "13800000002",
+                        "roleIds", java.util.Collections.singletonList("app"))));
 
         assertEquals(2, imported.get("total"));
         assertEquals(2, imported.get("successCount"));
@@ -281,6 +283,28 @@ public class IamServiceImplTest {
         Map user = (Map) ((List) service.listUsers("default-org", "batchBob", 1, 10).get("list")).get(0);
         assertEquals("batchBob", user.get("username"));
         assertEquals("batchBob", user.get("nickname"));
+        assertFalse(service.getUserInfo(String.valueOf(user.get("userId")), "default-org").containsKey("passwordHash"));
+    }
+
+    @Test
+    public void importUsersRejectsRowsThatDoNotMatchGoBatchPolicy() {
+        assertThrows(IllegalArgumentException.class, () -> service.importUsers("dev-admin", "default-org",
+                java.util.Collections.singletonList(map("username", "_bad", "password", "Password1!",
+                        "company", "Wanwu Java", "phone", "13800000001", "roleIds", java.util.Collections.singletonList("app")))));
+        assertThrows(IllegalArgumentException.class, () -> service.importUsers("dev-admin", "default-org",
+                java.util.Collections.singletonList(map("username", "goodName", "password", "weak",
+                        "company", "Wanwu Java", "phone", "13800000001", "roleIds", java.util.Collections.singletonList("app")))));
+        assertThrows(IllegalArgumentException.class, () -> service.importUsers("dev-admin", "default-org",
+                java.util.Collections.singletonList(map("username", "goodName", "password", "Password1!",
+                        "company", "Wanwu Java", "phone", "12345", "roleIds", java.util.Collections.singletonList("app")))));
+        java.util.List<Map<String, Object>> tooMany = new java.util.ArrayList<Map<String, Object>>();
+        for (int i = 0; i < 501; i++) {
+            tooMany.add(map("username", "batch" + i, "password", "Password1!",
+                    "company", "Wanwu Java", "phone", "13800000001",
+                    "roleIds", java.util.Collections.singletonList("app")));
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> service.importUsers("dev-admin", "default-org", tooMany));
     }
 
     @Test

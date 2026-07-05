@@ -1504,7 +1504,9 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).importUsers(anyString(), anyString(), importedUsers.capture());
         assertEquals(2, importedUsers.getValue().size());
         assertEquals("carol", ((Map) importedUsers.getValue().get(0)).get("username"));
+        assertEquals("Password1!", ((Map) importedUsers.getValue().get(0)).get("password"));
         assertEquals("Wanwu Java", ((Map) importedUsers.getValue().get(0)).get("company"));
+        assertEquals("13800000001", ((Map) importedUsers.getValue().get(0)).get("phone"));
         assertEquals("app", ((Map) importedUsers.getValue().get(0)).get("roleName"));
         verify(iamService).updateUser(anyString(), anyString(), any(Map.class));
         verify(iamService).updateUserStatus(anyString(), anyString(), any(Map.class));
@@ -1519,6 +1521,40 @@ public class WanwuFrontendApiControllerTest {
         verify(iamService).updateOrganization(anyString(), anyString(), any(Map.class));
         verify(iamService).updateOrganizationStatus(anyString(), anyString(), any(Map.class));
         verify(iamService).deleteOrganization(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    public void batchUserImportAcceptsGoChineseTemplateHeadersAndRejectsMissingHeaders() throws Exception {
+        when(iamService.importUsers(anyString(), anyString(), any(List.class)))
+                .thenReturn(map("total", 1, "successCount", 1, "failCount", 0));
+
+        mockMvc.perform(multipart("/user/api/v1/user/batch")
+                        .file(new MockMultipartFile("file", "users.csv", "text/csv",
+                                ("\u7528\u6237\u540d,\u5bc6\u7801,\u5355\u4f4d,\u7535\u8bdd,\u89d2\u8272,\u5907\u6ce8\n"
+                                        + "zhangsan,Password1!,Wanwu Java,13800000003,app,imported")
+                                        .getBytes(StandardCharsets.UTF_8)))
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1));
+
+        ArgumentCaptor<List> importedUsers = forClass(List.class);
+        verify(iamService).importUsers(anyString(), anyString(), importedUsers.capture());
+        Map row = (Map) importedUsers.getValue().get(0);
+        assertEquals("zhangsan", row.get("username"));
+        assertEquals("Password1!", row.get("password"));
+        assertEquals("Wanwu Java", row.get("company"));
+        assertEquals("13800000003", row.get("phone"));
+        assertEquals("app", row.get("roleName"));
+        assertEquals("imported", row.get("remark"));
+
+        mockMvc.perform(multipart("/user/api/v1/user/batch")
+                        .file(new MockMultipartFile("file", "users.csv", "text/csv",
+                                ("username,password,company\nzhangsan,Password1!,Wanwu Java")
+                                        .getBytes(StandardCharsets.UTF_8)))
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg", containsString("missing phone")));
     }
 
     @Test

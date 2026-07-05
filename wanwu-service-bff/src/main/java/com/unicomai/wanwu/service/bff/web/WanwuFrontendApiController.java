@@ -156,6 +156,10 @@ public class WanwuFrontendApiController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
     private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
+    private static final int MAX_BATCH_CREATE_USERS_LIMIT = 500;
+    private static final String[] REQUIRED_USER_IMPORT_FIELDS = {
+            "username", "password", "company", "phone", "roleName", "remark"
+    };
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private IamService iamService;
@@ -3341,17 +3345,21 @@ public class WanwuFrontendApiController {
     private List<Map<String, Object>> parseImportedUsers(String table) {
         List<Map<String, Object>> result = new ArrayList<>();
         if (isBlank(table)) {
-            return result;
+            throw new IllegalArgumentException("no valid user data");
         }
         String[] lines = table.replace("\r\n", "\n").replace('\r', '\n').split("\n");
         if (lines.length == 0) {
-            return result;
+            throw new IllegalArgumentException("no valid user data");
         }
         char delimiter = lines[0].indexOf('\t') >= 0 ? '\t' : ',';
         List<String> headers = splitDelimitedLine(lines[0], delimiter);
+        ensureUserImportHeaders(headers);
         for (int i = 1; i < lines.length; i++) {
             if (isBlank(lines[i])) {
                 continue;
+            }
+            if (result.size() >= MAX_BATCH_CREATE_USERS_LIMIT) {
+                throw new IllegalArgumentException("batch user import cannot exceed 500 rows");
             }
             List<String> values = splitDelimitedLine(lines[i], delimiter);
             Map<String, Object> row = new LinkedHashMap<>();
@@ -3365,7 +3373,25 @@ public class WanwuFrontendApiController {
                 result.add(row);
             }
         }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException("no valid user data");
+        }
         return result;
+    }
+
+    private void ensureUserImportHeaders(List<String> headers) {
+        java.util.HashSet<String> keys = new java.util.HashSet<>();
+        for (String header : headers) {
+            String key = userImportKey(header);
+            if (!isBlank(key)) {
+                keys.add(key);
+            }
+        }
+        for (String required : REQUIRED_USER_IMPORT_FIELDS) {
+            if (!keys.contains(required)) {
+                throw new IllegalArgumentException("user import header invalid: missing " + required);
+            }
+        }
     }
 
     private List<String> splitDelimitedLine(String line, char delimiter) {
@@ -3395,32 +3421,32 @@ public class WanwuFrontendApiController {
     }
 
     private String userImportKey(String header) {
-        String key = defaultIfBlank(header, "").toLowerCase(Locale.ROOT)
+        String key = defaultIfBlank(header, "").replace("\uFEFF", "").toLowerCase(Locale.ROOT)
                 .replace("_", "")
                 .replace("-", "")
                 .replace(" ", "");
-        if ("username".equals(key) || "user".equals(key) || "account".equals(key)) {
+        if ("username".equals(key) || "user".equals(key) || "account".equals(key) || "\u7528\u6237\u540d".equals(key)) {
             return "username";
         }
         if ("nickname".equals(key) || "name".equals(key)) {
             return "nickname";
         }
-        if ("password".equals(key)) {
+        if ("password".equals(key) || "\u5bc6\u7801".equals(key)) {
             return "password";
         }
         if ("email".equals(key)) {
             return "email";
         }
-        if ("phone".equals(key) || "mobile".equals(key) || "telephone".equals(key)) {
+        if ("phone".equals(key) || "mobile".equals(key) || "telephone".equals(key) || "\u7535\u8bdd".equals(key)) {
             return "phone";
         }
-        if ("company".equals(key) || "unit".equals(key) || "organization".equals(key)) {
+        if ("company".equals(key) || "unit".equals(key) || "organization".equals(key) || "\u5355\u4f4d".equals(key)) {
             return "company";
         }
-        if ("role".equals(key) || "rolename".equals(key)) {
+        if ("role".equals(key) || "rolename".equals(key) || "\u89d2\u8272".equals(key)) {
             return "roleName";
         }
-        if ("remark".equals(key) || "note".equals(key) || "comment".equals(key)) {
+        if ("remark".equals(key) || "note".equals(key) || "comment".equals(key) || "\u5907\u6ce8".equals(key)) {
             return "remark";
         }
         if ("gender".equals(key)) {

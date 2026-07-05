@@ -45,5 +45,5 @@ This is not the final Go-equivalent IAM relational model. It gives Docker Compos
 
 - Normalize IAM users, roles, orgs, role bindings, and org memberships into relational tables matching Go semantics.
 - Persist password hashes, token version timestamps, invitation workflows, and email verification state.
-- Implement real Excel import rows and failures instead of one deterministic imported development user.
+- Normalize imported users into Go-equivalent relational IAM tables and add exact per-row failure payloads; the current Java route already parses uploaded CSV/TSV/XLSX rows, validates Go-style batch policies, and stores users through the JSON compatibility table.
 - Add audit logs and permission enforcement beyond current frontend route exposure.

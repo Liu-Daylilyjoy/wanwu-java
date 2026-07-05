@@ -69,12 +69,13 @@ This slice provides a Docker development IAM repository. After the MySQL persist
 - Deletion removes non-built-in development records.
 - The built-in `admin` and `app` accounts remain protected seed records.
 - Role permissions are normalized from either string arrays or frontend route/permission maps.
-- `user/batch` parses uploaded CSV/TSV text or `.xlsx` sheet data using the existing local parser, maps `username/password/company/phone/role/remark` style headers into IAM user rows, and creates one persisted user per imported row.
+- `user/batch` parses uploaded CSV/TSV text or `.xlsx` sheet data using the existing local parser, maps both Go's localized template headers (`用户名/密码/单位/电话/角色/备注`) and English `username/password/company/phone/role/remark` aliases into IAM user rows, enforces the Go 500-row limit, and creates one persisted user per imported row.
+- Imported users now pass Go-style username, password, phone, and non-empty company validation before IAM writes them. Initial import passwords are stored as hashes on the user record and hidden from frontend read models.
 
 ## Remaining Gaps
 
 - Normalized Go-equivalent IAM relational tables are still missing; the current durable boundary is a JSON compatibility table.
-- Real password hashing, reset rules, and login policy are not reproduced.
-- Go-equivalent strict Excel header localization, username/password/phone policy validation, and per-row import error reporting are not reproduced.
+- Real production password hashing, email verification, reset policy, and login risk controls are not reproduced; the development hash is intentionally local and deterministic.
+- Exact Go Excel parser behavior and localized i18n error text are not fully reproduced; the Java path covers the frontend-visible header mapping, row cap, and validation semantics.
 - Hierarchical organization constraints and cross-org permission checks are minimal.
 - Audit logs, invitation workflow, and notification side effects are not reproduced.
