@@ -310,7 +310,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 }
             }
         }
-        appendDocInfoHits(question, safe, searchList, scores, topK, threshold);
+        appendDocInfoHits(question, safe, searchList, scores, threshold);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
         return knowledgeHitResult(question, searchList, scores, useGraph);
     }
@@ -2946,10 +2946,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private void appendDocInfoHits(String question, Map<String, Object> request, List<Map<String, Object>> searchList,
-                                   List<Double> scores, int topK, double threshold) {
-        if (searchList.size() >= topK) {
-            return;
-        }
+                                   List<Double> scores, double threshold) {
         for (Object raw : list(request.get("docInfoList"))) {
             Map<String, Object> docInfo = map(raw);
             String docName = defaultIfBlank(string(docInfo.get("docName")), string(docInfo.get("fileName")));
@@ -2963,9 +2960,6 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
             searchList.add(toUploadedDocHitInfo(docName, snippet, score));
             scores.add(score);
-            if (searchList.size() >= topK) {
-                return;
-            }
         }
     }
 

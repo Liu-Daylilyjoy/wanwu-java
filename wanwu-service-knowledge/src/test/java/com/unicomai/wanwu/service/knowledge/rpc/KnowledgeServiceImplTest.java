@@ -595,6 +595,26 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitRanksDocInfoFallbackWithSegmentCandidates() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Upload Ranking KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-low", "Existing.txt",
+                        "This existing segment does not contain the query."));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Upload Ranking");
+        map(request.get("knowledgeMatchParams")).put("topK", 1);
+        request.put("docInfoList", Collections.singletonList(docInfo("doc-upload", "Upload Ranking.pdf")));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals("Upload Ranking.pdf", searchList.get(0).get("title"));
+        assertEquals(0.80D, ((List<Double>) hit.get("score")).get(0));
+    }
+
+    @Test
     public void docChildSegmentsFollowFrontendAndGoContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Child KB", 0)).get("knowledgeId");
