@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -103,6 +104,22 @@ public class IamServiceImplTest {
         assertEquals("user", result.getUserCategory());
         assertFalse((Boolean) result.getOrgPermission().get("isAdmin"));
         assertEquals(java.util.Arrays.asList("app", "app.rag", "app.workflow", "app.agent"), permissions(result.getOrgPermission()));
+    }
+
+    @Test
+    public void passwordChangeRequiresOldPasswordAndNewPasswordForNextLogin() {
+        assertEquals("dev-admin", service.login(new LoginCommand("admin", "encrypted", "dev-captcha", "1234")).getUid());
+
+        service.changeUserPassword("dev-admin", "old-password", "New-password1!");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.login(new LoginCommand("admin", "encrypted", "dev-captcha", "1234")));
+        assertEquals("dev-admin", service.login(new LoginCommand("admin", "New-password1!", "dev-captcha", "1234")).getUid());
+        assertThrows(IllegalArgumentException.class,
+                () -> service.changeUserPassword("dev-admin", "wrong-password", "Next-password2!"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.adminChangeUserPassword("dev-admin", "dev-app", "weak"));
+        assertFalse(service.getUserInfo("dev-admin", "default-org").containsKey("passwordHash"));
     }
 
     @Test

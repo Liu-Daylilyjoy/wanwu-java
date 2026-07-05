@@ -19,10 +19,14 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -147,6 +151,10 @@ public class IamServiceImpl implements IamService {
         if (!Strings.hasText(command.getPassword()) || !Strings.hasText(command.getCode())) {
             throw new IllegalArgumentException("Password and captcha code are required");
         }
+        Map<String, Object> user = existingUser(account.uid);
+        if (!passwordMatches(user, command.getPassword())) {
+            throw new IllegalArgumentException("Invalid development password");
+        }
 
         LoginResult result = new LoginResult();
         result.setUid(account.uid);
@@ -211,18 +219,21 @@ public class IamServiceImpl implements IamService {
 
     @Override
     public synchronized void changeUserPassword(String userId, String oldPassword, String newPassword) {
-        if (!Strings.hasText(newPassword)) {
-            throw new IllegalArgumentException("newPassword is required");
+        Map<String, Object> user = existingUser(userId);
+        if (!Strings.hasText(oldPassword)) {
+            throw new IllegalArgumentException("oldPassword is required");
         }
-        touchPassword(existingUser(userId));
+        if (!passwordMatches(user, oldPassword)) {
+            throw new IllegalArgumentException("oldPassword is incorrect");
+        }
+        validatePassword(newPassword);
+        touchPassword(user, newPassword);
     }
 
     @Override
     public synchronized void adminChangeUserPassword(String operatorUserId, String userId, String password) {
-        if (!Strings.hasText(password)) {
-            throw new IllegalArgumentException("password is required");
-        }
-        touchPassword(existingUser(userId));
+        validatePassword(password);
+        touchPassword(existingUser(userId), password);
     }
 
     @Override
@@ -1143,12 +1154,60 @@ public class IamServiceImpl implements IamService {
         return organization == null ? DEFAULT_ORG.getName() : String.valueOf(organization.get("name"));
     }
 
-    private void touchPassword(Map<String, Object> user) {
+    private void touchPassword(Map<String, Object> user, String password) {
         int version = intValue(user.get("passwordVersion"), 0) + 1;
+        user.put("passwordHash", passwordHash(password));
         user.put("passwordVersion", version);
         user.put("passwordChangedAt", CREATED_AT);
         user.put("updatedAt", CREATED_AT);
         saveRecord(TYPE_USER, String.valueOf(user.get("userId")), user);
+    }
+
+    private boolean passwordMatches(Map<String, Object> user, String password) {
+        String hash = defaultText(user, "passwordHash", "");
+        if (!Strings.hasText(hash)) {
+            return Strings.hasText(password);
+        }
+        return hash.equals(passwordHash(password));
+    }
+
+    private void validatePassword(String password) {
+        if (!Strings.hasText(password)) {
+            throw new IllegalArgumentException("password is required");
+        }
+        if (password.length() < 8 || password.length() > 20) {
+            throw new IllegalArgumentException("password length must be 8-20 characters");
+        }
+        boolean hasLetter = false;
+        boolean hasNumber = false;
+        boolean hasSpecial = false;
+        for (int i = 0; i < password.length(); i++) {
+            char c = password.charAt(i);
+            if (Character.isLetter(c)) {
+                hasLetter = true;
+            } else if (Character.isDigit(c)) {
+                hasNumber = true;
+            } else {
+                hasSpecial = true;
+            }
+        }
+        if (!hasLetter || !hasNumber || !hasSpecial) {
+            throw new IllegalArgumentException("password must contain letters, numbers and special characters");
+        }
+    }
+
+    private String passwordHash(String password) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest((password == null ? "" : password).getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            for (byte item : bytes) {
+                builder.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private String idFrom(Map<String, Object> request, String... keys) {
@@ -1223,7 +1282,9 @@ public class IamServiceImpl implements IamService {
     }
 
     private Map<String, Object> copy(Map<String, Object> source) {
-        return new LinkedHashMap<>(source);
+        Map<String, Object> result = new LinkedHashMap<>(source);
+        result.remove("passwordHash");
+        return result;
     }
 
     private Map<String, Object> emailToggle(boolean status) {
