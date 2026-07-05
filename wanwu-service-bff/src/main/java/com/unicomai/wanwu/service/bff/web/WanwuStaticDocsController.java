@@ -30,7 +30,11 @@ public class WanwuStaticDocsController {
 
     private static final String DOCS_PREFIX = "/user/api/v1/static/docs";
     private static final String MANUAL_PREFIX = "/user/api/v1/static/manual";
+    private static final String LOGO_PREFIX = "/user/api/v1/static/logo";
+    private static final String ICON_PREFIX = "/user/api/v1/static/icon";
     private static final String MANUAL_CLASSPATH_PREFIX = "static/manual/";
+    private static final String LOGO_CLASSPATH_PREFIX = "static/logo/";
+    private static final String ICON_CLASSPATH_PREFIX = "static/icon/";
     private static final String XLSX_CONTENT_TYPE =
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -56,11 +60,27 @@ public class WanwuStaticDocsController {
 
     @GetMapping(MANUAL_PREFIX + "/**")
     public ResponseEntity<byte[]> downloadManualResource(HttpServletRequest request) {
-        String path = manualResourcePath(request);
+        return downloadClasspathResource(request, MANUAL_PREFIX, MANUAL_CLASSPATH_PREFIX);
+    }
+
+    @GetMapping(LOGO_PREFIX + "/**")
+    public ResponseEntity<byte[]> downloadLogoResource(HttpServletRequest request) {
+        return downloadClasspathResource(request, LOGO_PREFIX, LOGO_CLASSPATH_PREFIX);
+    }
+
+    @GetMapping(ICON_PREFIX + "/**")
+    public ResponseEntity<byte[]> downloadIconResource(HttpServletRequest request) {
+        return downloadClasspathResource(request, ICON_PREFIX, ICON_CLASSPATH_PREFIX);
+    }
+
+    private ResponseEntity<byte[]> downloadClasspathResource(HttpServletRequest request,
+                                                             String apiPrefix,
+                                                             String classpathPrefix) {
+        String path = staticResourcePath(request, apiPrefix);
         if (path == null) {
             return ResponseEntity.notFound().build();
         }
-        Resource resource = new ClassPathResource(MANUAL_CLASSPATH_PREFIX + path);
+        Resource resource = new ClassPathResource(classpathPrefix + path);
         if (!resource.exists() || !resource.isReadable()) {
             return ResponseEntity.notFound().build();
         }
@@ -85,8 +105,8 @@ public class WanwuStaticDocsController {
                 .body(body);
     }
 
-    private static String manualResourcePath(HttpServletRequest request) {
-        String prefix = MANUAL_PREFIX + "/";
+    private static String staticResourcePath(HttpServletRequest request, String apiPrefix) {
+        String prefix = apiPrefix + "/";
         String requestUri = request.getRequestURI();
         int index = requestUri.indexOf(prefix);
         if (index < 0) {

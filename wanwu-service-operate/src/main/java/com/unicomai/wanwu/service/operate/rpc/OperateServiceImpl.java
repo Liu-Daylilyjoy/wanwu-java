@@ -31,7 +31,10 @@ public class OperateServiceImpl implements OperateService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
-    private static final String DEFAULT_MODE = "default";
+    private static final String MODE_LIGHT = "light";
+    private static final String MODE_DARK = "dark";
+    private static final String LEGACY_DEFAULT_MODE = "default";
+    private static final String DEFAULT_MODE = MODE_LIGHT;
     private static final String TYPE_CUSTOM_TAB = "system_custom_tab";
     private static final String TYPE_CUSTOM_LOGIN = "system_custom_login";
     private static final String TYPE_CUSTOM_HOME = "system_custom_home";
@@ -118,14 +121,14 @@ public class OperateServiceImpl implements OperateService {
     @Override
     public synchronized Map<String, Object> getSystemCustom(String mode) {
         String normalizedMode = normalizeMode(mode, null);
-        Map<String, Object> login = defaultLogin();
-        login.putAll(customRecord(customLogins.get(normalizedMode), "background", "logo"));
+        Map<String, Object> login = defaultLogin(normalizedMode);
+        login.putAll(customRecord(customByMode(customLogins, normalizedMode), "background", "logo"));
 
-        Map<String, Object> home = defaultHome();
-        home.putAll(customRecord(customHomes.get(normalizedMode), "logo"));
+        Map<String, Object> home = defaultHome(normalizedMode);
+        home.putAll(customRecord(customByMode(customHomes, normalizedMode), "logo"));
 
-        Map<String, Object> tab = defaultTab();
-        tab.putAll(customRecord(customTabs.get(normalizedMode), "logo"));
+        Map<String, Object> tab = defaultTab(normalizedMode);
+        tab.putAll(customRecord(customByMode(customTabs, normalizedMode), "logo"));
 
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("login", login);
@@ -298,59 +301,97 @@ public class OperateServiceImpl implements OperateService {
 
     private String normalizeMode(String mode, Map<String, Object> request) {
         if (Strings.hasText(mode)) {
-            return mode.trim();
+            return normalizeCustomMode(mode);
         }
         String requestMode = firstText(request, "mode", "theme");
-        return Strings.hasText(requestMode) ? requestMode : DEFAULT_MODE;
+        return normalizeCustomMode(requestMode);
     }
 
-    private Map<String, Object> defaultLogin() {
+    private String normalizeCustomMode(String mode) {
+        String value = Strings.hasText(mode) ? mode.trim() : DEFAULT_MODE;
+        return LEGACY_DEFAULT_MODE.equals(value) ? MODE_LIGHT : value;
+    }
+
+    private Map<String, Object> customByMode(Map<String, Map<String, Object>> records, String mode) {
+        Map<String, Object> record = records.get(mode);
+        if ((record == null || record.isEmpty()) && MODE_LIGHT.equals(mode)) {
+            record = records.get(LEGACY_DEFAULT_MODE);
+        }
+        return record;
+    }
+
+    private Map<String, Object> defaultLogin(String mode) {
         Map<String, Object> login = new LinkedHashMap<>();
-        login.put("logo", Collections.emptyMap());
-        login.put("background", Collections.emptyMap());
-        login.put("loginButtonColor", "#5983FF");
-        login.put("welcomeText", "");
-        login.put("platformDesc", "Wanwu Java development environment");
+        if (MODE_DARK.equals(mode)) {
+            login.put("logo", Collections.emptyMap());
+            login.put("background", Collections.emptyMap());
+            login.put("loginButtonColor", "");
+            login.put("welcomeText", "");
+            login.put("platformDesc", "");
+            return login;
+        }
+        login.put("logo", staticAvatar("/v1/static/logo/login_logo.png"));
+        login.put("background", staticAvatar("/v1/static/logo/login_bg.jpg"));
+        login.put("loginButtonColor", "#384BF7");
+        login.put("welcomeText", "bff_custom_login_welcome_text");
+        login.put("platformDesc", "bff_custom_login_platform_desc");
         return login;
     }
 
-    private Map<String, Object> defaultHome() {
+    private Map<String, Object> defaultHome(String mode) {
         Map<String, Object> home = new LinkedHashMap<>();
-        home.put("logo", Collections.emptyMap());
-        home.put("title", "Wanwu Java");
-        home.put("backgroundColor", "#F7F8FA");
+        if (MODE_DARK.equals(mode)) {
+            home.put("logo", Collections.emptyMap());
+            home.put("title", "");
+            home.put("backgroundColor", "");
+            return home;
+        }
+        home.put("logo", staticAvatar("/v1/static/logo/title_logo.png"));
+        home.put("title", "bff_custom_home_title");
+        home.put("backgroundColor", "linear-gradient(1deg,#fff 42%,#fff 0,#ebedfe 98%,#eef0ff 0)");
         return home;
     }
 
-    private Map<String, Object> defaultTab() {
+    private Map<String, Object> defaultTab(String mode) {
         Map<String, Object> tab = new LinkedHashMap<>();
-        tab.put("logo", Collections.emptyMap());
-        tab.put("title", "Wanwu Java");
+        if (MODE_DARK.equals(mode)) {
+            tab.put("logo", Collections.emptyMap());
+            tab.put("title", "");
+            return tab;
+        }
+        tab.put("logo", staticAvatar("/v1/static/logo/tab_logo.png"));
+        tab.put("title", "bff_custom_tab_title");
         return tab;
     }
 
     private Map<String, Object> defaultAbout() {
         Map<String, Object> about = new LinkedHashMap<>();
-        about.put("version", "0.1.0-SNAPSHOT");
-        about.put("copyright", "");
-        about.put("logoPath", "");
+        about.put("version", "v0.1.0");
+        about.put("copyright", "bff_custom_about_copyright");
+        about.put("logoPath", "/v1/static/logo/about_logo.png");
         return about;
     }
 
     private Map<String, Object> defaultIcon() {
         Map<String, Object> defaultIcon = new LinkedHashMap<>();
-        defaultIcon.put("agentIcon", "");
-        defaultIcon.put("ragIcon", "");
-        defaultIcon.put("workflowIcon", "");
-        defaultIcon.put("chatflowIcon", "");
-        defaultIcon.put("modelIcon", "");
-        defaultIcon.put("knowledgeIcon", "");
-        defaultIcon.put("toolIcon", "");
-        defaultIcon.put("mcpIcon", "");
-        defaultIcon.put("promptIcon", "");
-        defaultIcon.put("skillIcon", "");
+        defaultIcon.put("agentIcon", "/v1/static/icon/agent-default-icon.png");
+        defaultIcon.put("ragIcon", "/v1/static/icon/rag-default-icon.png");
+        defaultIcon.put("workflowIcon", "/v1/static/icon/workflow-default-icon.png");
+        defaultIcon.put("chatflowIcon", "/v1/static/icon/chatflow-default-icon.png");
+        defaultIcon.put("modelIcon", "/v1/static/icon/model-default-icon.png");
+        defaultIcon.put("knowledgeIcon", "/v1/static/icon/knowledge-default-icon.png");
+        defaultIcon.put("toolIcon", "/v1/static/icon/custom-tool-default-icon.png");
+        defaultIcon.put("mcpIcon", "/v1/static/icon/mcp-custom-default-icon.png");
+        defaultIcon.put("promptIcon", "/v1/static/icon/prompt-default-icon.png");
+        defaultIcon.put("skillIcon", "/v1/static/icon/skill-default-icon.png");
         defaultIcon.put("safetyIcon", "");
         return defaultIcon;
+    }
+
+    private Map<String, Object> staticAvatar(String path) {
+        Map<String, Object> avatar = new LinkedHashMap<>();
+        avatar.put("path", path);
+        return avatar;
     }
 
     private Map<String, Object> emailToggle(boolean enabled) {

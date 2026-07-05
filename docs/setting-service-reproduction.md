@@ -31,6 +31,7 @@ Date: 2026-07-03
 - `wanwu-service-bff` writes setting updates to `OperateService` and reads `/user/api/v1/base/custom` from `OperateService`, with the zero-change frontend response shape preserved.
 - `POST /user/api/v1/avatar` now stores uploaded images in BFF-local development storage using Go-style `custom-upload/avatar/{prefix}/{id}.ext` keys and returns `/v1/cache/avatar/{key}` paths. `/user/api/v1/cache/avatar/**` serves both normal avatar cache paths and setting-page `custom/` cache paths, so the unchanged frontend `avatarSrc()` helper can preview uploaded platform assets.
 - `OperateService` normalizes setting-page avatar maps to Go-style custom cache paths (`/v1/cache/avatar/custom/{key}`) on write and readback, including legacy Java download paths already stored in the compatibility repository.
+- The Go BFF light-mode YAML seed is reproduced in Java: `/base/custom` defaults to `light`, `default` remains a compatibility alias, the light theme returns Go static logo paths/colors/default-icon paths, and the classpath static controller serves `/user/api/v1/static/logo/**` plus `/user/api/v1/static/icon/**` from the copied Go assets.
 - `docker-compose.yml` includes `wanwu-service-operate` in the `full` profile and makes BFF wait for it before becoming healthy.
 - The admin development account now exposes the `setting` permission so the zero-change frontend can display the platform setting tab inside `web/src/views/permission/index.vue`.
 
@@ -53,8 +54,8 @@ Date: 2026-07-03
 Executed in Docker with Java 8:
 
 - `mvn -q -pl wanwu-service-bff,wanwu-service-operate -am "-Dtest=WanwuFrontendApiControllerTest,OperateServiceImplTest" -DfailIfNoTests=false test`
-- BFF contract tests: `WanwuFrontendApiControllerTest` covers all three setting write routes, `/base/custom`, and the admin login permission shape; `WanwuCommonApiControllerTest` covers Go-style avatar upload keys plus normal and custom cache avatar readback.
-- Operate service test: `OperateServiceImplTest` covers setting config write/readback, custom avatar path normalization, mode isolation, and non-empty field merge behavior.
+- BFF contract tests: `WanwuFrontendApiControllerTest` covers all three setting write routes, `/base/custom`, and the admin login permission shape; `WanwuCommonApiControllerTest` covers Go-style avatar upload keys plus normal and custom cache avatar readback; `WanwuStaticDocsControllerTest` covers logo/default-icon static resources.
+- Operate service test: `OperateServiceImplTest` covers setting config write/readback, custom avatar path normalization, Go light-theme seed/default alias, dark-mode empty shell, mode isolation, and non-empty field merge behavior.
 
 Frontend-entry smoke target:
 
@@ -62,6 +63,7 @@ Frontend-entry smoke target:
 - `POST /custom/tab`, `/custom/login`, and `/custom/home` return `code: 0`.
 - `GET /base/custom` returns the custom tab/login/home values written through the setting routes.
 - `POST /avatar` returns `/v1/cache/avatar/...`; `GET /cache/avatar/...` and `GET /cache/avatar/custom/...` both serve the uploaded image from the Java development store.
+- `GET /static/logo/login_logo.png`, `/static/logo/login_bg.jpg`, and `/static/icon/agent-default-icon.png` return the copied Go assets.
 
 ## Current Boundary
 
@@ -70,4 +72,5 @@ This slice is a frontend-compatible platform setting loop. It prevents the zero-
 It does not yet implement:
 
 - MinIO/object-storage lifecycle parity for uploaded setting assets.
-- Full Go light/dark theme seed config from YAML; Java accepts mode-specific records but only seeds the default development shell.
+- Runtime i18n expansion for the `bff_custom_*` seed text keys; Java currently returns the same keys that Go reads from YAML before i18n translation.
+- Full product theme governance beyond the Go light seed and dark-mode empty shell.

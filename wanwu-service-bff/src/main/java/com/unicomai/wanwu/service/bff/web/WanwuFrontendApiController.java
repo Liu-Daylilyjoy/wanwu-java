@@ -446,9 +446,10 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping("/base/custom")
-    public FrontendResponse<Map<String, Object>> platformConfig() {
+    public FrontendResponse<Map<String, Object>> platformConfig(
+            @RequestParam(value = "mode", required = false) String mode) {
         if (operateService != null) {
-            return FrontendResponse.ok(operateService.getSystemCustom("default"));
+            return FrontendResponse.ok(operateService.getSystemCustom(defaultIfBlank(mode, "light")));
         }
         return FrontendResponse.ok(iamService.platformConfig());
     }

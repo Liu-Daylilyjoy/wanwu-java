@@ -44,8 +44,27 @@ public class OperateServiceImplTest {
                 mapAt(mapAt(merged, "login"), "logo").get("path"));
 
         Map<String, Object> dark = service.getSystemCustom("dark");
-        assertEquals("Wanwu Java", mapAt(dark, "tab").get("title"));
+        assertEquals("", mapAt(dark, "tab").get("title"));
         assertTrue(mapAt(mapAt(dark, "login"), "logo").isEmpty());
+    }
+
+    @Test
+    public void systemCustomConfigSeedsGoLightThemeAndDefaultAlias() {
+        OperateServiceImpl service = new OperateServiceImpl();
+
+        Map<String, Object> light = service.getSystemCustom("light");
+        assertEquals("/v1/static/logo/login_bg.jpg", mapAt(mapAt(light, "login"), "background").get("path"));
+        assertEquals("/v1/static/logo/login_logo.png", mapAt(mapAt(light, "login"), "logo").get("path"));
+        assertEquals("#384BF7", mapAt(light, "login").get("loginButtonColor"));
+        assertEquals("bff_custom_home_title", mapAt(light, "home").get("title"));
+        assertEquals("/v1/static/logo/title_logo.png", mapAt(mapAt(light, "home"), "logo").get("path"));
+        assertEquals("bff_custom_tab_title", mapAt(light, "tab").get("title"));
+        assertEquals("/v1/static/logo/tab_logo.png", mapAt(mapAt(light, "tab"), "logo").get("path"));
+        assertEquals("v0.1.0", mapAt(light, "about").get("version"));
+        assertEquals("/v1/static/icon/agent-default-icon.png", mapAt(light, "defaultIcon").get("agentIcon"));
+
+        Map<String, Object> defaultAlias = service.getSystemCustom("default");
+        assertEquals(mapAt(light, "home").get("title"), mapAt(defaultAlias, "home").get("title"));
     }
 
     @Test

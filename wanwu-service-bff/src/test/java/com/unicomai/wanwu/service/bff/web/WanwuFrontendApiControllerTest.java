@@ -287,14 +287,14 @@ public class WanwuFrontendApiControllerTest {
 
     @Test
     public void baseCustomReadsOperatePlatformConfig() throws Exception {
-        when(operateService.getSystemCustom("default")).thenReturn(platformConfig());
+        when(operateService.getSystemCustom("light")).thenReturn(platformConfig());
 
         mockMvc.perform(get("/user/api/v1/base/custom"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.loginEmail.email.status").value(false));
 
-        verify(operateService).getSystemCustom("default");
+        verify(operateService).getSystemCustom("light");
     }
 
     @Test

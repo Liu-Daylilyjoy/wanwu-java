@@ -79,6 +79,26 @@ public class WanwuStaticDocsControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    public void logoAndDefaultIconResourcesAreServedFromClasspath() throws Exception {
+        MockMvc mockMvc = mockMvc();
+
+        mockMvc.perform(get("/user/api/v1/static/logo/login_logo.png"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("image/png")))
+                .andExpect(result -> assertTrue(result.getResponse().getContentAsByteArray().length > 100));
+        mockMvc.perform(get("/user/api/v1/static/logo/login_bg.jpg"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("image/jpeg")))
+                .andExpect(result -> assertTrue(result.getResponse().getContentAsByteArray().length > 100));
+        mockMvc.perform(get("/user/api/v1/static/icon/agent-default-icon.png"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("image/png")))
+                .andExpect(result -> assertTrue(result.getResponse().getContentAsByteArray().length > 100));
+        mockMvc.perform(get("/user/api/v1/static/icon/..%2Fapplication.yml"))
+                .andExpect(status().isNotFound());
+    }
+
     private void assertCsv(MockMvc mockMvc, String name, String expectedText) throws Exception {
         mockMvc.perform(get("/user/api/v1/static/docs/" + name))
                 .andExpect(status().isOk())

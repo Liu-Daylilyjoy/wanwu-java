@@ -64,7 +64,7 @@ public class WanwuSettingApiController {
 
     private String mode(Map<String, Object> request) {
         if (request == null || request.get("mode") == null || String.valueOf(request.get("mode")).trim().isEmpty()) {
-            return "default";
+            return "light";
         }
         return String.valueOf(request.get("mode"));
     }
