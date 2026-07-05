@@ -89,6 +89,24 @@ public class WanwuWorkflowApiController {
         }
     }
 
+    @GetMapping({"/api/workflow_api/get_process", "/api/workflow/get_process"})
+    public FrontendResponse<Map<String, Object>> workflowProcess(
+            @RequestHeader(value = "x-user-id", required = false) String userId,
+            @RequestHeader(value = "x-org-id", required = false) String orgId,
+            @RequestParam Map<String, String> request) {
+        try {
+            String workflowId = workflowId(request);
+            String runId = defaultIfBlank(request.get("execute_id"), request.get("executeId"));
+            return FrontendResponse.ok(appService.getWorkflowRunProcess(
+                    defaultIfBlank(userId, DEV_USER_ID),
+                    defaultIfBlank(orgId, DEV_ORG_ID),
+                    workflowId,
+                    runId));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
     @GetMapping("/workflow/openapi_schema")
     public FrontendResponse<Map<String, Object>> openapiSchema(
             @RequestHeader(value = "x-user-id", required = false) String userId,

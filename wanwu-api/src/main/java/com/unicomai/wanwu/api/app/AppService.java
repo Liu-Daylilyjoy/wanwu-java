@@ -180,6 +180,8 @@ public interface AppService {
 
     WorkflowRunResult runWorkflow(WorkflowRunCommand command);
 
+    Map<String, Object> getWorkflowRunProcess(String userId, String orgId, String workflowId, String runId);
+
     void convertAppType(AppTypeConvertCommand command);
 
     WorkflowCreateResult createChatflow(WorkflowCreateCommand command);

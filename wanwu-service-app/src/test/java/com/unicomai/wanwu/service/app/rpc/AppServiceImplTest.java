@@ -731,7 +731,8 @@ public class AppServiceImplTest {
         run.setOrgId("default-org");
         run.setInput(Collections.singletonMap("question", "hello"));
 
-        Map<String, Object> output = service.runWorkflow(run).getOutput();
+        WorkflowRunResult runResult = service.runWorkflow(run);
+        Map<String, Object> output = runResult.getOutput();
 
         assertEquals("Summary for hello", output.get("summary"));
         assertEquals("hello", output.get("answer"));
@@ -741,6 +742,15 @@ public class AppServiceImplTest {
         assertEquals("Summary for hello", llmOutput.get("summary"));
         assertEquals("hello", llmOutput.get("answer"));
         assertEquals(0.91d, llmOutput.get("score"));
+
+        Map<String, Object> process = service.getWorkflowRunProcess("dev-admin", "default-org",
+                created.getWorkflowId(), runResult.getRunId());
+        assertEquals(2, process.get("executeStatus"));
+        assertEquals(runResult.getRunId(), process.get("executeId"));
+        List<Map<String, Object>> nodeResults = castList(process.get("nodeResults"));
+        assertEquals("llm", nodeResults.get(1).get("nodeId"));
+        assertTrue(String.valueOf(nodeResults.get(1).get("output")).contains("Summary for hello"));
+        assertEquals("900001", nodeResults.get(nodeResults.size() - 1).get("nodeId"));
     }
 
     @Test

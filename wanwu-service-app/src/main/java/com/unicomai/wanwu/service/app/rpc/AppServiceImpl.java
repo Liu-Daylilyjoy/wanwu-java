@@ -1809,6 +1809,40 @@ public class AppServiceImpl implements AppService {
     }
 
     @Override
+    public Map<String, Object> getWorkflowRunProcess(String userId, String orgId, String workflowId, String runId) {
+        String safeUserId = defaultIfBlank(userId, DEV_USER_ID);
+        String safeOrgId = defaultIfBlank(orgId, DEV_ORG_ID);
+        if (isBlank(workflowId)) {
+            throw new IllegalArgumentException("workflow id is required");
+        }
+        WorkflowRunRecord record = workflowRunRecord(safeUserId, safeOrgId, workflowId, runId);
+        if (record == null) {
+            throw new IllegalArgumentException("workflow run not found");
+        }
+
+        Map<String, Object> output = jsonObject(record.getOutputJson());
+        String safeRunId = defaultIfBlank(record.getRunId(), runId);
+        List<Map<String, Object>> nodeResults = workflowProcessNodeResults(output, safeRunId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("workFlowId", workflowId);
+        data.put("workflow_id", workflowId);
+        data.put("workflowId", workflowId);
+        data.put("executeId", safeRunId);
+        data.put("execute_id", safeRunId);
+        data.put("executeStatus", "success".equals(record.getStatus()) ? 2 : 3);
+        data.put("status", record.getStatus());
+        data.put("nodeResults", nodeResults);
+        data.put("rate", "100");
+        data.put("exeHistoryStatus", "success".equals(record.getStatus()) ? 2 : 3);
+        data.put("workflowExeCost", String.valueOf(record.getCostMillis()));
+        data.put("logID", safeRunId);
+        data.put("nodeEvents", workflowProcessNodeEvents(nodeResults));
+        data.put("lastNodeID", nodeResults.isEmpty() ? "" : nodeResults.get(nodeResults.size() - 1).get("nodeId"));
+        data.put("projectId", safeOrgId);
+        return data;
+    }
+
+    @Override
     public Map<String, Object> listChatflowApplications(ChatflowApplicationListQuery query) {
         if (query == null || isBlank(query.getWorkflowId())) {
             throw new IllegalArgumentException("chatflow workflow id is required");
@@ -5195,6 +5229,111 @@ public class AppServiceImpl implements AppService {
         schema.put("nodes", Collections.emptyList());
         schema.put("edges", Collections.emptyList());
         return toJsonOrNull(schema);
+    }
+
+    private WorkflowRunRecord workflowRunRecord(String userId, String orgId, String workflowId, String runId) {
+        List<WorkflowRunRecord> records = applicationRepository.listWorkflowRuns(userId, orgId, workflowId, 50);
+        if (records.isEmpty()) {
+            return null;
+        }
+        if (isBlank(runId)) {
+            return records.get(0);
+        }
+        for (WorkflowRunRecord record : records) {
+            if (runId.equals(record.getRunId())) {
+                return record;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> jsonObject(String json) {
+        if (isBlank(json)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception ex) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private List<Map<String, Object>> workflowProcessNodeResults(Map<String, Object> output, String runId) {
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (Object item : listValue(output.get("steps"))) {
+            Map<String, Object> step = mapValue(item);
+            if (step.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("nodeId", stringValue(step.get("nodeId")));
+            node.put("NodeType", defaultIfBlank(stringValue(step.get("type")), "Node"));
+            node.put("NodeName", defaultIfBlank(stringValue(step.get("name")), stringValue(step.get("nodeId"))));
+            node.put("nodeStatus", "success".equals(stringValue(step.get("status"))) ? 2 : 3);
+            node.put("errorInfo", "");
+            node.put("input", jsonString(step.get("input")));
+            node.put("output", jsonString(step.get("output")));
+            node.put("items", jsonString(step.get("output")));
+            node.put("raw_output", jsonString(step.get("output")));
+            node.put("nodeExeCost", "0");
+            node.put("errorLevel", "");
+            node.put("logVersion", 1);
+            node.put("extra", "");
+            node.put("executeId", runId);
+            results.add(node);
+        }
+        if (!workflowHasEndProcessNode(results)) {
+            Map<String, Object> end = new LinkedHashMap<>();
+            end.put("nodeId", "900001");
+            end.put("NodeType", "End");
+            end.put("NodeName", "End");
+            end.put("nodeStatus", 2);
+            end.put("errorInfo", "");
+            end.put("input", jsonString(output));
+            end.put("output", jsonString(output));
+            end.put("items", jsonString(output));
+            end.put("raw_output", jsonString(output));
+            end.put("nodeExeCost", "0");
+            end.put("errorLevel", "");
+            end.put("logVersion", 1);
+            end.put("extra", "");
+            end.put("executeId", runId);
+            results.add(end);
+        }
+        return results;
+    }
+
+    private boolean workflowHasEndProcessNode(List<Map<String, Object>> nodeResults) {
+        for (Map<String, Object> node : nodeResults) {
+            if ("End".equals(stringValue(node.get("NodeType"))) || "900001".equals(stringValue(node.get("nodeId")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<Map<String, Object>> workflowProcessNodeEvents(List<Map<String, Object>> nodeResults) {
+        List<Map<String, Object>> events = new ArrayList<>();
+        int index = 1;
+        for (Map<String, Object> node : nodeResults) {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("id", "event-" + index);
+            event.put("type", 2);
+            event.put("node_title", defaultIfBlank(stringValue(node.get("NodeName")), stringValue(node.get("nodeId"))));
+            event.put("data", stringValue(node.get("output")));
+            event.put("node_icon", "");
+            event.put("node_id", stringValue(node.get("nodeId")));
+            event.put("schema_node_id", stringValue(node.get("nodeId")));
+            events.add(event);
+            index++;
+        }
+        return events;
+    }
+
+    private String jsonString(Object value) {
+        String json = toJsonOrNull(value);
+        return json == null ? "" : json;
     }
 
     private void saveRagChat(String userId, String orgId, RagChatCommand command, RagChatResult result) {

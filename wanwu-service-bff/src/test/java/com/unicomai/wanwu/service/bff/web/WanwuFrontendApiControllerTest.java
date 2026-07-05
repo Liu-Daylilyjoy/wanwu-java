@@ -1282,6 +1282,14 @@ public class WanwuFrontendApiControllerTest {
         workflowApiRun.setCostMillis(25L);
         when(appService.runWorkflow(any(WorkflowRunCommand.class)))
                 .thenReturn(workflowApiRun);
+        Map<String, Object> workflowProcess = new LinkedHashMap<>();
+        workflowProcess.put("workFlowId", "workflow-001");
+        workflowProcess.put("executeId", "workflow-run-001");
+        workflowProcess.put("executeStatus", 2);
+        workflowProcess.put("nodeResults", Collections.singletonList(
+                map("nodeId", "900001", "NodeType", "End", "output", "{\"answer\":\"ok\"}")));
+        when(appService.getWorkflowRunProcess(eq("dev-admin"), eq("default-org"),
+                eq("workflow-001"), eq("workflow-run-001"))).thenReturn(workflowProcess);
 
         workflowApiMvc.perform(get("/workflow/api/workflow/parameter")
                         .header("x-user-id", "dev-admin")
@@ -1318,8 +1326,21 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.costMillis").value(25))
                 .andExpect(jsonPath("$.data.output.answer").value("ok"));
 
+        workflowApiMvc.perform(get("/workflow/api/api/workflow_api/get_process")
+                        .header("x-user-id", "dev-admin")
+                        .header("x-org-id", "default-org")
+                        .param("workflow_id", "workflow-001")
+                        .param("execute_id", "workflow-run-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.workFlowId").value("workflow-001"))
+                .andExpect(jsonPath("$.data.executeId").value("workflow-run-001"))
+                .andExpect(jsonPath("$.data.executeStatus").value(2))
+                .andExpect(jsonPath("$.data.nodeResults[0].nodeId").value("900001"));
+
         org.mockito.ArgumentCaptor<WorkflowRunCommand> runCaptor = forClass(WorkflowRunCommand.class);
         verify(appService).runWorkflow(runCaptor.capture());
+        verify(appService).getWorkflowRunProcess("dev-admin", "default-org", "workflow-001", "workflow-run-001");
         assertEquals("workflow-001", runCaptor.getValue().getWorkflowId());
         assertEquals("hello", runCaptor.getValue().getInput().get("question"));
         assertEquals("dev-admin", runCaptor.getValue().getUserId());
