@@ -553,6 +553,29 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitRanksAllCandidatesBeforeApplyingTopK() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Ranking KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-low", "RankingGuide.txt",
+                        "This paragraph mentions general platform usage."));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-high", "Guide.txt",
+                        "Ranking signal should win even when imported later."));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Ranking");
+        map(request.get("knowledgeMatchParams")).put("topK", 1);
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.txt", searchList.get(0).get("title"));
+        assertEquals("Ranking signal should win even when imported later.", searchList.get(0).get("snippet"));
+        assertEquals(1.0D, ((List<Double>) hit.get("score")).get(0));
+    }
+
+    @Test
     public void docChildSegmentsFollowFrontendAndGoContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Child KB", 0)).get("knowledgeId");

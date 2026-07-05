@@ -307,13 +307,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     }
                     searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score, question));
                     scores.add(score);
-                    if (searchList.size() >= topK) {
-                        return knowledgeHitResult(question, searchList, scores, useGraph);
-                    }
                 }
             }
         }
         appendDocInfoHits(question, safe, searchList, scores, topK, threshold);
+        sortAndLimitKnowledgeHits(searchList, scores, topK);
         return knowledgeHitResult(question, searchList, scores, useGraph);
     }
 
@@ -2970,6 +2968,35 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    private void sortAndLimitKnowledgeHits(List<Map<String, Object>> searchList, List<Double> scores, int topK) {
+        if (searchList.isEmpty()) {
+            return;
+        }
+        List<KnowledgeHitRank> ranks = new ArrayList<KnowledgeHitRank>();
+        for (int i = 0; i < searchList.size(); i++) {
+            double score = i < scores.size() && scores.get(i) != null ? scores.get(i) : 0D;
+            ranks.add(new KnowledgeHitRank(searchList.get(i), score, i));
+        }
+        Collections.sort(ranks, new java.util.Comparator<KnowledgeHitRank>() {
+            @Override
+            public int compare(KnowledgeHitRank left, KnowledgeHitRank right) {
+                int scoreCompare = Double.compare(right.score, left.score);
+                if (scoreCompare != 0) {
+                    return scoreCompare;
+                }
+                return Integer.compare(left.order, right.order);
+            }
+        });
+        searchList.clear();
+        scores.clear();
+        int limit = Math.min(topK, ranks.size());
+        for (int i = 0; i < limit; i++) {
+            KnowledgeHitRank rank = ranks.get(i);
+            searchList.add(rank.row);
+            scores.add(rank.score);
+        }
+    }
+
     private boolean qaMetaContains(QaPairState pair, String expected) {
         for (Map<String, Object> meta : pair.metaDataList) {
             for (Object value : meta.values()) {
@@ -3650,6 +3677,18 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private boolean parent;
         private int childNum;
         private List<ChildSegmentState> childSegments = new ArrayList<ChildSegmentState>();
+    }
+
+    private static final class KnowledgeHitRank {
+        private final Map<String, Object> row;
+        private final double score;
+        private final int order;
+
+        private KnowledgeHitRank(Map<String, Object> row, double score, int order) {
+            this.row = row;
+            this.score = score;
+            this.order = order;
+        }
     }
 
     private static final class ChildSegmentState {
