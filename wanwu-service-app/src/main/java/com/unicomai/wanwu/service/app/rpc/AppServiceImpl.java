@@ -5510,17 +5510,145 @@ public class AppServiceImpl implements AppService {
     }
 
     private String workflowExplicitEdgeCondition(Map<String, Object> edge) {
-        String condition = textValue(edge, "condition", "expression", "expr", "when", "value", "expected");
+        String condition = workflowConditionExpression(edge.get("condition"));
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        condition = workflowConditionText(edge, "condition", "expression", "expr", "when", "value", "expected");
         if (!isBlank(condition)) {
             return condition;
         }
         Map<String, Object> data = mapValue(edge.get("data"));
+        condition = workflowConditionExpression(data.get("condition"));
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        condition = workflowConditionExpression(data.get("conditions"));
+        if (!isBlank(condition)) {
+            return condition;
+        }
         Map<String, Object> nested = mapValue(data.get("condition"));
-        condition = textValue(nested, "condition", "expression", "expr", "when", "value", "expected");
+        condition = workflowConditionText(nested, "condition", "expression", "expr", "when", "value", "expected");
+        if (!isBlank(condition)) {
+            return condition;
+        }
+        condition = workflowConditionText(data, "condition", "expression", "expr", "when", "value", "expected");
         if (!isBlank(condition)) {
             return condition;
         }
         return "";
+    }
+
+    private String workflowConditionExpression(Object value) {
+        Map<String, Object> condition = mapValue(value);
+        if (!condition.isEmpty()) {
+            String expression = workflowConditionExpression(condition);
+            if (!isBlank(expression)) {
+                return expression;
+            }
+        }
+        List<Object> conditions = listValue(value);
+        if (conditions.isEmpty()) {
+            return "";
+        }
+        List<String> expressions = new ArrayList<>();
+        for (Object item : conditions) {
+            String expression = workflowConditionExpression(item);
+            if (!isBlank(expression)) {
+                expressions.add(expression);
+            }
+        }
+        return joinWorkflowConditions(expressions, " && ");
+    }
+
+    private String workflowConditionExpression(Map<String, Object> condition) {
+        if (condition.isEmpty()) {
+            return "";
+        }
+        String expression = workflowConditionText(condition, "condition", "expression", "expr", "when");
+        if (!isBlank(expression)) {
+            return expression;
+        }
+        String nestedExpression = workflowConditionExpression(condition.get("condition"));
+        if (!isBlank(nestedExpression)) {
+            return nestedExpression;
+        }
+        nestedExpression = workflowConditionExpression(condition.get("conditions"));
+        if (!isBlank(nestedExpression)) {
+            return nestedExpression;
+        }
+        String left = textValue(condition, "field", "key", "name", "variable", "param", "parameter", "left", "source", "path", "input");
+        if (isBlank(left)) {
+            return "";
+        }
+        String operator = workflowConditionOperator(textValue(condition, "operator", "op", "compare", "comparator", "operation"));
+        Object expected = firstPresent(condition, "value", "expected", "right", "target");
+        return left + " " + operator + " " + workflowConditionLiteral(expected);
+    }
+
+    private String joinWorkflowConditions(List<String> expressions, String delimiter) {
+        if (expressions.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String expression : expressions) {
+            if (builder.length() > 0) {
+                builder.append(delimiter);
+            }
+            builder.append(expression);
+        }
+        return builder.toString();
+    }
+
+    private String workflowConditionText(Map<String, Object> condition, String... keys) {
+        for (String key : keys) {
+            Object value = condition.get(key);
+            if (value != null && !(value instanceof Map) && !(value instanceof List)
+                    && !isBlank(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return "";
+    }
+
+    private String workflowConditionOperator(String operator) {
+        if (isBlank(operator)) {
+            return "==";
+        }
+        String normalized = operator.trim().toLowerCase(java.util.Locale.ENGLISH).replace('_', ' ').replace('-', ' ');
+        if ("eq".equals(normalized) || "equals".equals(normalized) || "equal".equals(normalized)
+                || "is".equals(normalized) || "=".equals(normalized)) {
+            return "==";
+        }
+        if ("neq".equals(normalized) || "ne".equals(normalized) || "not equals".equals(normalized)
+                || "not equal".equals(normalized) || "!=".equals(normalized) || "<>".equals(normalized)) {
+            return "!=";
+        }
+        if ("gte".equals(normalized) || "ge".equals(normalized) || "greater than or equal".equals(normalized)
+                || "greater or equal".equals(normalized) || ">=".equals(normalized)) {
+            return ">=";
+        }
+        if ("lte".equals(normalized) || "le".equals(normalized) || "less than or equal".equals(normalized)
+                || "less or equal".equals(normalized) || "<=".equals(normalized)) {
+            return "<=";
+        }
+        if ("gt".equals(normalized) || "greater than".equals(normalized) || ">".equals(normalized)) {
+            return ">";
+        }
+        if ("lt".equals(normalized) || "less than".equals(normalized) || "<".equals(normalized)) {
+            return "<";
+        }
+        if ("not contains".equals(normalized) || "does not contain".equals(normalized)) {
+            return "not contains";
+        }
+        if ("contains".equals(normalized) || "contain".equals(normalized)) {
+            return "contains";
+        }
+        return operator.trim();
+    }
+
+    private String workflowConditionLiteral(Object value) {
+        return value == null ? "null" : String.valueOf(value);
     }
 
     private boolean workflowHandleMatches(Map<String, Object> edge, Map<String, Object> input) {
@@ -5561,7 +5689,25 @@ public class AppServiceImpl implements AppService {
         if ("false".equals(lower) || "no".equals(lower) || "fail".equals(lower) || "failed".equals(lower)) {
             return false;
         }
-        String[] operators = new String[]{"==", "!=", ">=", "<=", "=", ">", "<"};
+        String[] orParts = expression.split("\\s+\\|\\|\\s+");
+        if (orParts.length > 1) {
+            for (String part : orParts) {
+                if (workflowConditionMatches(part, input)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        String[] andParts = expression.split("\\s+&&\\s+");
+        if (andParts.length > 1) {
+            for (String part : andParts) {
+                if (!workflowConditionMatches(part, input)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        String[] operators = new String[]{"not contains", "contains", "==", "!=", ">=", "<=", "=", ">", "<"};
         for (String operator : operators) {
             int index = expression.indexOf(operator);
             if (index <= 0) {
@@ -5609,6 +5755,12 @@ public class AppServiceImpl implements AppService {
     }
 
     private boolean compareCondition(Object actual, String operator, String expected) {
+        if ("contains".equals(operator) || "not contains".equals(operator)) {
+            boolean contains = actual != null
+                    && String.valueOf(actual).toLowerCase(java.util.Locale.ENGLISH)
+                    .contains(defaultIfBlank(expected, "").toLowerCase(java.util.Locale.ENGLISH));
+            return "not contains".equals(operator) ? !contains : contains;
+        }
         if (">".equals(operator) || "<".equals(operator) || ">=".equals(operator) || "<=".equals(operator)) {
             Double actualNumber = doubleValue(actual);
             Double expectedNumber = doubleValue(expected);

@@ -772,6 +772,50 @@ public class AppServiceImplTest {
         assertEquals(2, handleSteps.size());
         assertEquals("start", handleSteps.get(0).get("nodeId"));
         assertEquals("rejected", handleSteps.get(1).get("nodeId"));
+
+        WorkflowCreateCommand objectCreate = new WorkflowCreateCommand();
+        objectCreate.setName("ObjectConditionFlow");
+        objectCreate.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"high\",\"type\":\"llm\",\"data\":{\"label\":\"High Value\"}},"
+                + "{\"id\":\"low\",\"type\":\"llm\",\"data\":{\"label\":\"Low Value\"}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"id\":\"object-high\",\"source\":\"start\",\"target\":\"high\","
+                + "\"data\":{\"condition\":{\"conditions\":["
+                + "{\"field\":\"score\",\"operator\":\"gte\",\"value\":80},"
+                + "{\"field\":\"tags\",\"operator\":\"contains\",\"value\":\"vip\"}"
+                + "]}}},"
+                + "{\"id\":\"object-low\",\"source\":\"start\",\"target\":\"low\","
+                + "\"data\":{\"condition\":{\"field\":\"score\",\"operator\":\"lt\",\"value\":80}}}"
+                + "]"
+                + "}");
+        objectCreate.setUserId("dev-admin");
+        objectCreate.setOrgId("default-org");
+        WorkflowCreateResult objectCreated = service.createWorkflow(objectCreate);
+
+        Map<String, Object> objectInput = new LinkedHashMap<>();
+        objectInput.put("score", 90);
+        objectInput.put("tags", "vip customer");
+        WorkflowRunCommand objectRun = new WorkflowRunCommand();
+        objectRun.setWorkflowId(objectCreated.getWorkflowId());
+        objectRun.setUserId("dev-admin");
+        objectRun.setOrgId("default-org");
+        objectRun.setInput(objectInput);
+
+        Map<String, Object> objectOutput = service.runWorkflow(objectRun).getOutput();
+        List<Map<String, Object>> objectSteps = castList(objectOutput.get("steps"));
+        assertEquals(2, objectSteps.size(), String.valueOf(objectOutput));
+        assertEquals("start", objectSteps.get(0).get("nodeId"));
+        assertEquals("high", objectSteps.get(1).get("nodeId"));
+
+        Map<String, Object> objectTrace = castMap(objectOutput.get("trace"));
+        List<Map<String, Object>> objectEvaluations = castList(objectTrace.get("edgeEvaluations"));
+        assertEquals("score >= 80 && tags contains vip", objectEvaluations.get(0).get("condition"));
+        assertEquals(Boolean.TRUE, objectEvaluations.get(0).get("matched"));
+        assertEquals("score < 80", objectEvaluations.get(1).get("condition"));
+        assertEquals(Boolean.FALSE, objectEvaluations.get(1).get("matched"));
     }
 
     @Test
