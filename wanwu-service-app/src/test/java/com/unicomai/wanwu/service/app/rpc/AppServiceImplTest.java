@@ -698,6 +698,52 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunMapsDeclaredNodeOutputsFromSchemaTemplates() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("TemplateNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"start\",\"data\":{\"label\":\"Start\"}},"
+                + "{\"id\":\"llm\",\"type\":\"llm\",\"data\":{\"label\":\"Draft\","
+                + "\"outputs\":["
+                + "{\"name\":\"summary\",\"template\":\"Summary for {{question}}\"},"
+                + "{\"name\":\"answer\",\"source\":\"question\"},"
+                + "{\"name\":\"score\",\"value\":0.91}"
+                + "]}}"
+                + "],"
+                + "\"edges\":[{\"source\":\"start\",\"target\":\"llm\"}],"
+                + "\"outputs\":["
+                + "{\"name\":\"summary\",\"type\":\"string\"},"
+                + "{\"name\":\"answer\",\"type\":\"string\"},"
+                + "{\"name\":\"score\",\"type\":\"number\"}"
+                + "]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.singletonMap("question", "hello"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("Summary for hello", output.get("summary"));
+        assertEquals("hello", output.get("answer"));
+        assertEquals(0.91d, output.get("score"));
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        Map<String, Object> llmOutput = castMap(nodeOutputs.get("llm"));
+        assertEquals("Summary for hello", llmOutput.get("summary"));
+        assertEquals("hello", llmOutput.get("answer"));
+        assertEquals(0.91d, llmOutput.get("score"));
+    }
+
+    @Test
     public void workflowRunFollowsSimpleConditionalEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

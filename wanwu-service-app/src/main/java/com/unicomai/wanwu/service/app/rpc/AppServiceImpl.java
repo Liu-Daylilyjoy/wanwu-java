@@ -5365,7 +5365,7 @@ public class AppServiceImpl implements AppService {
             Map<String, Object> step = new LinkedHashMap<>();
             String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
             String name = defaultIfBlank(textValue(node, "name", "label", "title"), nodeId);
-            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, nodeId, type, name, input, order);
+            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, node, nodeId, type, name, input, order);
             step.put("order", order);
             step.put("nodeId", nodeId);
             step.put("name", name);
@@ -5849,6 +5849,7 @@ public class AppServiceImpl implements AppService {
     }
 
     private Map<String, Object> workflowNodeOutput(AppRecord workflow,
+                                                   Map<String, Object> node,
                                                    String nodeId,
                                                    String type,
                                                    String name,
@@ -5864,22 +5865,182 @@ public class AppServiceImpl implements AppService {
         if (lowerType.contains("start") || lowerType.contains("input")) {
             output.putAll(input);
             output.put("text", input.isEmpty() ? "" : String.valueOf(input));
-            return output;
-        }
-        if (lowerType.contains("end") || lowerType.contains("output")) {
+        } else if (lowerType.contains("end") || lowerType.contains("output")) {
             output.put("result", input);
             output.put("text", defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name);
-            return output;
+        } else {
+            String source = input.isEmpty() ? "input" : String.valueOf(input);
+            if (source.length() > 120) {
+                source = source.substring(0, 120);
+            }
+            String text = defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name + " with " + source;
+            output.put("text", text);
+            output.put("result", text);
+            output.put("response", text);
         }
-        String source = input.isEmpty() ? "input" : String.valueOf(input);
-        if (source.length() > 120) {
-            source = source.substring(0, 120);
-        }
-        String text = defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name + " with " + source;
-        output.put("text", text);
-        output.put("result", text);
-        output.put("response", text);
+        output.putAll(workflowDeclaredNodeOutputs(node, input, output));
         return output;
+    }
+
+    private Map<String, Object> workflowDeclaredNodeOutputs(Map<String, Object> node,
+                                                            Map<String, Object> input,
+                                                            Map<String, Object> baseOutput) {
+        Map<String, Object> declared = new LinkedHashMap<>();
+        workflowCollectNodeOutputMap(declared, mapValue(node.get("output")), input, baseOutput);
+        workflowCollectNodeOutputMap(declared, mapValue(node.get("outputs")), input, baseOutput);
+        for (Object item : listValue(node.get("outputs"))) {
+            workflowCollectNodeOutputDeclaration(declared, mapValue(item), input, baseOutput);
+        }
+
+        Map<String, Object> data = mapValue(node.get("data"));
+        workflowCollectNodeOutputMap(declared, mapValue(data.get("output")), input, baseOutput);
+        workflowCollectNodeOutputMap(declared, mapValue(data.get("outputs")), input, baseOutput);
+        for (Object item : listValue(data.get("outputs"))) {
+            workflowCollectNodeOutputDeclaration(declared, mapValue(item), input, baseOutput);
+        }
+        return declared;
+    }
+
+    private void workflowCollectNodeOutputMap(Map<String, Object> target,
+                                              Map<String, Object> outputs,
+                                              Map<String, Object> input,
+                                              Map<String, Object> baseOutput) {
+        for (Map.Entry<String, Object> entry : outputs.entrySet()) {
+            if (isBlank(entry.getKey())) {
+                continue;
+            }
+            target.put(entry.getKey(), workflowResolveNodeValue(entry.getValue(), input, baseOutput));
+        }
+    }
+
+    private void workflowCollectNodeOutputDeclaration(Map<String, Object> target,
+                                                      Map<String, Object> declaration,
+                                                      Map<String, Object> input,
+                                                      Map<String, Object> baseOutput) {
+        if (declaration.isEmpty()) {
+            return;
+        }
+        String name = textValue(declaration, "name", "key", "field", "variable");
+        if (isBlank(name)) {
+            return;
+        }
+        Object raw = firstPresent(declaration, "value", "default", "example");
+        if (raw == null) {
+            String source = workflowConditionText(declaration, "source", "from", "path", "input");
+            if (!isBlank(source)) {
+                raw = workflowContextValue(source, input, baseOutput);
+            }
+        }
+        if (raw == null) {
+            raw = workflowConditionText(declaration, "template", "text", "content", "expression");
+        }
+        if (raw == null || (raw instanceof String && isBlank(String.valueOf(raw)))) {
+            raw = firstPresent(input, name);
+        }
+        if (raw == null) {
+            raw = firstPresent(baseOutput, name);
+        }
+        if (raw == null) {
+            raw = workflowDefaultValue(textValue(declaration, "type", "valueType"));
+        }
+        target.put(name, workflowResolveNodeValue(raw, input, baseOutput));
+    }
+
+    private Object workflowResolveNodeValue(Object raw,
+                                            Map<String, Object> input,
+                                            Map<String, Object> baseOutput) {
+        if (!(raw instanceof String)) {
+            return raw;
+        }
+        String text = String.valueOf(raw);
+        String placeholder = workflowSinglePlaceholder(text);
+        if (!isBlank(placeholder)) {
+            Object value = workflowContextValue(placeholder, input, baseOutput);
+            if (value != null) {
+                return value;
+            }
+        }
+        return workflowRenderTemplate(text, input, baseOutput);
+    }
+
+    private String workflowSinglePlaceholder(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}") && trimmed.indexOf("{{", 2) < 0) {
+            return trimmed.substring(2, trimmed.length() - 2).trim();
+        }
+        if (trimmed.startsWith("${") && trimmed.endsWith("}") && trimmed.indexOf("${", 2) < 0) {
+            return trimmed.substring(2, trimmed.length() - 1).trim();
+        }
+        return "";
+    }
+
+    private Object workflowContextValue(String path,
+                                        Map<String, Object> input,
+                                        Map<String, Object> baseOutput) {
+        String normalized = trimQuotes(path == null ? "" : path.trim());
+        if (isBlank(normalized)) {
+            return null;
+        }
+        if (normalized.startsWith("node.")) {
+            return workflowInputValue(baseOutput, normalized.substring("node.".length()));
+        }
+        if (normalized.startsWith("output.")) {
+            return workflowInputValue(baseOutput, normalized.substring("output.".length()));
+        }
+        if (normalized.startsWith("input.")) {
+            return workflowInputValue(input, normalized.substring("input.".length()));
+        }
+        Object value = workflowInputValue(input, normalized);
+        return value == null ? workflowInputValue(baseOutput, normalized) : value;
+    }
+
+    private String workflowRenderTemplate(String template,
+                                          Map<String, Object> input,
+                                          Map<String, Object> baseOutput) {
+        String rendered = template == null ? "" : template;
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            rendered = workflowReplaceTemplateValue(rendered, entry.getKey(), "input", entry.getValue());
+            rendered = workflowReplaceTemplateValue(rendered, entry.getKey(), "", entry.getValue());
+        }
+        for (Map.Entry<String, Object> entry : baseOutput.entrySet()) {
+            rendered = workflowReplaceTemplateValue(rendered, entry.getKey(), "node", entry.getValue());
+            rendered = workflowReplaceTemplateValue(rendered, entry.getKey(), "output", entry.getValue());
+            if (!input.containsKey(entry.getKey())) {
+                rendered = workflowReplaceTemplateValue(rendered, entry.getKey(), "", entry.getValue());
+            }
+        }
+        return rendered;
+    }
+
+    private String workflowReplaceTemplateValue(String template, String key, String prefix, Object value) {
+        if (isBlank(key)) {
+            return template;
+        }
+        String replacement = value == null ? "" : String.valueOf(value);
+        String path = isBlank(prefix) ? key : prefix + "." + key;
+        return template
+                .replace("{{" + path + "}}", replacement)
+                .replace("${" + path + "}", replacement);
+    }
+
+    private Object workflowDefaultValue(String type) {
+        String normalized = defaultIfBlank(type, "string").toLowerCase(java.util.Locale.ENGLISH);
+        if ("integer".equals(normalized) || "int".equals(normalized) || "long".equals(normalized)) {
+            return 0;
+        }
+        if ("number".equals(normalized) || "float".equals(normalized) || "double".equals(normalized)) {
+            return 0.0d;
+        }
+        if ("boolean".equals(normalized) || "bool".equals(normalized)) {
+            return true;
+        }
+        if ("array".equals(normalized) || "list".equals(normalized)) {
+            return Collections.emptyList();
+        }
+        if ("object".equals(normalized) || "map".equals(normalized)) {
+            return Collections.emptyMap();
+        }
+        return "";
     }
 
     private Map<String, Object> workflowNodeOutputs(List<Map<String, Object>> steps) {
