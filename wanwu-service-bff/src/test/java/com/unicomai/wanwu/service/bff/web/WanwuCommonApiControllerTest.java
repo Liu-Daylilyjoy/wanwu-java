@@ -13,10 +13,12 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -175,7 +177,17 @@ public class WanwuCommonApiControllerTest {
 
     @Test
     public void guestEmailAuthRoutesReturnDevelopmentContracts() throws Exception {
-        MockMvc mockMvc = mockMvc();
+        IamService iamService = mock(IamService.class);
+        when(iamService.listUsers(eq("default-org"), eq(""), eq(1), eq(1000)))
+                .thenReturn(users("registered-user", "tester", "tester@example.local"));
+        MockMvc mockMvc = mockMvc(iamService);
+
+        mockMvc.perform(post("/user/api/v1/base/register/email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"tester\",\"email\":\"tester@example.local\",\"code\":\"000000\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg", containsString("email code")));
 
         mockMvc.perform(post("/user/api/v1/base/register/email/code")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -183,13 +195,17 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.sent").value(true))
-                .andExpect(jsonPath("$.data.email").value("tester@example.local"));
+                .andExpect(jsonPath("$.data.email").value("tester@example.local"))
+                .andExpect(jsonPath("$.data.code").value("123456"));
         mockMvc.perform(post("/user/api/v1/base/register/email")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"tester\",\"email\":\"tester@example.local\",\"code\":\"123456\"}"))
+                        .content("{\"username\":\"tester\",\"email\":\"tester@example.local\","
+                                + "\"password\":\"Tester-pass1!\",\"code\":\"123456\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.registered").value(true))
                 .andExpect(jsonPath("$.data.username").value("tester"));
+        verify(iamService).createUser(eq("dev-admin"), eq("default-org"), anyMap());
+
         mockMvc.perform(post("/user/api/v1/base/password/email/code")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"tester@example.local\"}"))
@@ -197,9 +213,12 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(jsonPath("$.data.sent").value(true));
         mockMvc.perform(post("/user/api/v1/base/password/email")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"tester@example.local\",\"code\":\"123456\",\"password\":\"x\"}"))
+                        .content("{\"email\":\"tester@example.local\",\"code\":\"123456\","
+                                + "\"password\":\"Reset-pass1!\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.reset").value(true));
+        verify(iamService).adminChangeUserPassword(eq("dev-admin"), eq("registered-user"), eq("Reset-pass1!"));
+
         mockMvc.perform(post("/user/api/v1/base/login/email")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"admin\",\"password\":\"x\",\"key\":\"dev-captcha\",\"code\":\"1234\"}"))
@@ -220,15 +239,22 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(jsonPath("$.data.uid").value("dev-admin"))
                 .andExpect(jsonPath("$.data.username").value("admin"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[31].perm").value("wga.wanwu_bot"));
+        mockMvc.perform(post("/user/api/v1/user/login/email/code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"app@example.local\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sent").value(true));
         mockMvc.perform(put("/user/api/v1/user/login")
                         .header("Authorization", "Bearer dev-token-app")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"x\",\"newPassword\":\"y\",\"email\":\"app@example.local\",\"code\":\"123456\"}"))
+                        .content("{\"oldPassword\":\"x\",\"newPassword\":\"App-pass1!\","
+                                + "\"email\":\"app@example.local\",\"code\":\"123456\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.uid").value("dev-app"))
                 .andExpect(jsonPath("$.data.token").value("dev-token-app"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("app"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("app.agent"));
+        verify(iamService).changeUserPassword(eq("dev-app"), eq("x"), eq("App-pass1!"));
     }
 
     private MockMvc mockMvc() {
@@ -265,5 +291,14 @@ public class WanwuCommonApiControllerTest {
         body.put("orgId", "default-org");
         body.put("orgName", "Default Organization");
         return body;
+    }
+
+    private Map<String, Object> users(String userId, String username, String email) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> item = user(userId, username, username, "zh", "", "");
+        item.put("email", email);
+        result.put("list", Collections.singletonList(item));
+        result.put("total", 1);
+        return result;
     }
 }

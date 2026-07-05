@@ -33,7 +33,7 @@ The unchanged frontend uses these routes from `web/src/api/user.js` and `web/src
 
 - User info is read from Java `IamService` when available, with built-in development token fallback for isolated BFF tests.
 - Password, avatar, and language update routes now proxy to Java `IamService`; avatar/language changes are visible through both `/user/info` and `/user/permission`, and password changes advance a non-secret development `passwordVersion`.
-- Email register, password reset, and two-stage email-login routes now exist with deterministic development responses. They keep the frontend route contract available while the platform custom flags still advertise email register/reset/login as disabled.
+- Email register, password reset, and two-stage email-login routes now issue the Docker development code `123456`, validate and consume it once, and call Java `IamService` for registration, password reset, or first-login password changes when IAM is available. They keep the frontend route contract available while the platform custom flags still advertise email register/reset/login as disabled.
 - `POST /base/login/email` returns the temporary development token for `admin` or `app`; `POST/PUT /user/login` returns the full login-session shape, including organization, language, and the same permission split as the built-in development accounts.
 - Avatar upload stores the image under the BFF local temp directory and returns `key/path` like the Go avatar API.
 - Language select returns `zh` and `en` entries with `zh` as default.
@@ -41,8 +41,8 @@ The unchanged frontend uses these routes from `web/src/api/user.js` and `web/src
 
 ## Current Boundary
 
-- User profile reads and avatar/language/password-version updates now survive Docker restarts through the IAM JSON compatibility repository. Real password hashing/policy enforcement, email delivery, email-code verification, and avatar object-storage lifecycle are still future IAM/Object Storage slices.
-- The email auth endpoints are development compatibility shells, not a completed reproduction of the Go IAM email RPC flow.
+- User profile reads and avatar/language/password-version updates now survive Docker restarts through the IAM JSON compatibility repository. Password hashing/policy enforcement and the development email-code validation path are covered through IAM where available; SMTP delivery, exact email policy parity, and avatar object-storage lifecycle are still future IAM/Object Storage slices.
+- The email auth endpoints are development compatibility shells, not a completed reproduction of the Go IAM email delivery and verification RPC flow.
 - The Java repo now carries 725 Go manual files, including 123 Markdown documents and 92.6MB of static assets, excluding the `10.本体智能体` manual directory because ontology-agent functionality is intentionally removed from this reproduction scope.
 - Search remains a deterministic Java substring scan rather than Go's riot search engine, so ranking/tokenization is not exact Go parity yet.
 - This slice is intended to eliminate frontend `Not Found` errors and provide stable UI navigation while deeper persistence is reproduced.

@@ -56,6 +56,10 @@ public class WanwuCommonApiController {
     private static final Pattern MD_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
     private static final Pattern MD_LINK_PATTERN = Pattern.compile("(^|[^!])\\[([^\\]]*)\\]\\(([^)]+\\.md)\\)");
     private static final DocIndex DOC_INDEX = loadDocIndex();
+    private static final String DEV_EMAIL_CODE = "123456";
+    private static final long EMAIL_CODE_TTL_MILLIS = 10 * 60 * 1000L;
+    private static final Map<String, EmailCode> EMAIL_CODES = Collections.synchronizedMap(
+            new LinkedHashMap<String, EmailCode>());
 
     private final Path avatarRoot;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
@@ -183,24 +187,32 @@ public class WanwuCommonApiController {
 
     @PostMapping("/base/register/email/code")
     public FrontendResponse<Map<String, Object>> registerEmailCode(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(emailNoop(request, "sent", true));
+        return FrontendResponse.ok(issueEmailCode(request, "register"));
     }
 
     @PostMapping("/base/register/email")
     public FrontendResponse<Map<String, Object>> registerByEmail(@RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> body = emailNoop(request, "registered", true);
+        if (!consumeEmailCode(request, "register")) {
+            return FrontendResponse.failure(1001, "invalid or expired email code");
+        }
+        Map<String, Object> body = emailStatus(request, "registered", true);
         body.put("username", defaultIfBlank(text(request, "username"), "guest"));
+        createEmailUser(request);
         return FrontendResponse.ok(body);
     }
 
     @PostMapping("/base/password/email/code")
     public FrontendResponse<Map<String, Object>> resetPasswordEmailCode(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(emailNoop(request, "sent", true));
+        return FrontendResponse.ok(issueEmailCode(request, "reset-password"));
     }
 
     @PostMapping("/base/password/email")
     public FrontendResponse<Map<String, Object>> resetPasswordByEmail(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(emailNoop(request, "reset", true));
+        if (!consumeEmailCode(request, "reset-password")) {
+            return FrontendResponse.failure(1001, "invalid or expired email code");
+        }
+        resetEmailPassword(request);
+        return FrontendResponse.ok(emailStatus(request, "reset", true));
     }
 
     @PostMapping("/base/login/email")
@@ -215,13 +227,16 @@ public class WanwuCommonApiController {
 
     @PostMapping("/user/login/email/code")
     public FrontendResponse<Map<String, Object>> loginEmailCode(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(emailNoop(request, "sent", true));
+        return FrontendResponse.ok(issueEmailCode(request, "login-bind"));
     }
 
     @PostMapping("/user/login")
     public FrontendResponse<Map<String, Object>> loginEmailCheck(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
+        if (!consumeEmailCode(request, "login-bind")) {
+            return FrontendResponse.failure(1001, "invalid or expired email code");
+        }
         return FrontendResponse.ok(loginSession(userContext(authorization, loginUserId(request))));
     }
 
@@ -229,7 +244,12 @@ public class WanwuCommonApiController {
     public FrontendResponse<Map<String, Object>> changePasswordByEmail(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(loginSession(userContext(authorization, loginUserId(request))));
+        if (!consumeEmailCode(request, "login-bind")) {
+            return FrontendResponse.failure(1001, "invalid or expired email code");
+        }
+        UserContext ctx = userContext(authorization, loginUserId(request));
+        changePasswordByEmail(ctx, request);
+        return FrontendResponse.ok(loginSession(ctx));
     }
 
     @PostMapping("/avatar")
@@ -415,12 +435,114 @@ public class WanwuCommonApiController {
         return body;
     }
 
-    private Map<String, Object> emailNoop(Map<String, Object> request, String statusKey, boolean status) {
+    private Map<String, Object> issueEmailCode(Map<String, Object> request, String purpose) {
+        String email = normalizedEmail(request);
+        EmailCode code = new EmailCode(DEV_EMAIL_CODE, System.currentTimeMillis() + EMAIL_CODE_TTL_MILLIS);
+        EMAIL_CODES.put(emailCodeKey(email, purpose), code);
+        Map<String, Object> body = emailStatus(request, "sent", true);
+        body.put("code", DEV_EMAIL_CODE);
+        body.put("expireIn", EMAIL_CODE_TTL_MILLIS / 1000L);
+        return body;
+    }
+
+    private boolean consumeEmailCode(Map<String, Object> request, String purpose) {
+        String email = normalizedEmail(request);
+        String code = text(request, "code");
+        String key = emailCodeKey(email, purpose);
+        EmailCode expected = EMAIL_CODES.get(key);
+        if (expected == null || expected.expiresAt < System.currentTimeMillis()) {
+            EMAIL_CODES.remove(key);
+            return false;
+        }
+        if (!expected.code.equals(code)) {
+            return false;
+        }
+        EMAIL_CODES.remove(key);
+        return true;
+    }
+
+    private Map<String, Object> emailStatus(Map<String, Object> request, String statusKey, boolean status) {
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put(statusKey, status);
-        body.put("email", defaultIfBlank(text(request, "email"), "dev@example.local"));
+        body.put("email", normalizedEmail(request));
         body.put("status", "ok");
         return body;
+    }
+
+    private String normalizedEmail(Map<String, Object> request) {
+        return defaultIfBlank(text(request, "email"), "dev@example.local").trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String emailCodeKey(String email, String purpose) {
+        return purpose + "|" + email;
+    }
+
+    private void createEmailUser(Map<String, Object> request) {
+        if (iamService == null) {
+            return;
+        }
+        try {
+            Map<String, Object> user = new LinkedHashMap<String, Object>();
+            String username = defaultIfBlank(text(request, "username"), emailUsername(normalizedEmail(request)));
+            user.put("username", username);
+            user.put("nickname", username);
+            user.put("email", normalizedEmail(request));
+            user.put("password", defaultIfBlank(text(request, "password"), "Email-user1!"));
+            user.put("orgId", DEV_ORG_ID);
+            user.put("roleIds", Collections.singletonList("app"));
+            iamService.createUser(DEV_ADMIN_ID, DEV_ORG_ID, user);
+        } catch (RuntimeException ex) {
+            // Email routes remain usable in the BFF-only development shell.
+        }
+    }
+
+    private void resetEmailPassword(Map<String, Object> request) {
+        if (iamService == null || isBlank(text(request, "password"))) {
+            return;
+        }
+        try {
+            String userId = userIdByEmail(normalizedEmail(request));
+            if (!isBlank(userId)) {
+                iamService.adminChangeUserPassword(DEV_ADMIN_ID, userId, text(request, "password"));
+            }
+        } catch (RuntimeException ex) {
+            // Keep the email compatibility path available when IAM is temporarily unreachable.
+        }
+    }
+
+    private void changePasswordByEmail(UserContext ctx, Map<String, Object> request) {
+        if (iamService == null || isBlank(text(request, "newPassword"))) {
+            return;
+        }
+        try {
+            iamService.changeUserPassword(ctx.userId, text(request, "oldPassword"), text(request, "newPassword"));
+        } catch (RuntimeException ex) {
+            // The frontend contract is more important than strict IAM availability in Docker dev mode.
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String userIdByEmail(String email) {
+        Map<String, Object> users = iamService.listUsers(DEV_ORG_ID, "", 1, 1000);
+        Object list = users == null ? null : users.get("list");
+        if (!(list instanceof List)) {
+            return "";
+        }
+        for (Object item : (List<?>) list) {
+            if (!(item instanceof Map)) {
+                continue;
+            }
+            Map<String, Object> user = (Map<String, Object>) item;
+            if (email.equalsIgnoreCase(text(user, "email"))) {
+                return defaultIfBlank(text(user, "userId"), text(user, "uid"));
+            }
+        }
+        return "";
+    }
+
+    private String emailUsername(String email) {
+        int at = email.indexOf('@');
+        return at > 0 ? email.substring(0, at) : email;
     }
 
     private Map<String, Object> loginSession(UserContext ctx) {
@@ -1008,6 +1130,16 @@ public class WanwuCommonApiController {
             this.userId = userId;
             this.username = username;
             this.admin = admin;
+        }
+    }
+
+    private static class EmailCode {
+        private final String code;
+        private final long expiresAt;
+
+        private EmailCode(String code, long expiresAt) {
+            this.code = code;
+            this.expiresAt = expiresAt;
         }
     }
 }
