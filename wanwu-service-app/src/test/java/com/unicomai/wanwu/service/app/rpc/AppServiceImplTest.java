@@ -794,6 +794,64 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("GoTemplateFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"110001\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Draft\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"llmParam\":[{\"name\":\"prompt\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"Draft {{input}}\"}}}]}}},"
+                + "{\"id\":\"120001\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Concat\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110001\",\"name\":\"output\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"Final {{String1}}\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"120001\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110001\"},"
+                + "{\"sourceNodeID\":\"110001\",\"targetNodeID\":\"120001\"},"
+                + "{\"sourceNodeID\":\"120001\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "hello"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("Final Draft hello", output.get("output"), String.valueOf(output));
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals(4, steps.size());
+        assertEquals("Start", steps.get(0).get("name"));
+        assertEquals("Draft", steps.get(1).get("name"));
+        assertEquals("Draft hello", castMap(steps.get(1).get("output")).get("output"));
+        assertEquals("Draft hello", castMap(steps.get(2).get("input")).get("String1"));
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        assertEquals("Final Draft hello", castMap(nodeOutputs.get("120001")).get("output"));
+        assertEquals("Final Draft hello", castMap(nodeOutputs.get("900001")).get("output"));
+    }
+
+    @Test
     public void workflowRunFollowsSimpleConditionalEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

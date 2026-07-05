@@ -5502,10 +5502,10 @@ public class AppServiceImpl implements AppService {
             if (node == null) {
                 continue;
             }
-            Map<String, Object> step = new LinkedHashMap<>();
             String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
-            String name = defaultIfBlank(textValue(node, "name", "label", "title"), nodeId);
-            Map<String, Object> nodeInput = new LinkedHashMap<>(context);
+            String name = workflowNodeName(node, nodeId);
+            Map<String, Object> step = new LinkedHashMap<>();
+            Map<String, Object> nodeInput = workflowNodeInput(node, context);
             Map<String, Object> nodeOutput = workflowNodeOutput(workflow, node, nodeId, type, name, nodeInput, order);
             step.put("order", order);
             step.put("nodeId", nodeId);
@@ -5525,7 +5525,7 @@ public class AppServiceImpl implements AppService {
             if (!runNodeIds.contains(nodeId)) {
                 Map<String, Object> skipped = new LinkedHashMap<>();
                 skipped.put("nodeId", nodeId);
-                skipped.put("name", defaultIfBlank(textValue(nodes.get(i), "name", "label", "title"), nodeId));
+                skipped.put("name", workflowNodeName(nodes.get(i), nodeId));
                 skipped.put("type", defaultIfBlank(textValue(nodes.get(i), "type", "nodeType"), "node"));
                 skippedNodeIds.add(skipped);
             }
@@ -5625,9 +5625,9 @@ public class AppServiceImpl implements AppService {
 
     private String workflowEdgeEndpoint(Map<String, Object> edge, boolean source) {
         if (source) {
-            return defaultIfBlank(textValue(edge, "source", "sourceNodeId", "from", "fromNodeId"), "");
+            return defaultIfBlank(textValue(edge, "source", "sourceNodeId", "sourceNodeID", "from", "fromNodeId", "fromNodeID"), "");
         }
-        return defaultIfBlank(textValue(edge, "target", "targetNodeId", "to", "toNodeId"), "");
+        return defaultIfBlank(textValue(edge, "target", "targetNodeId", "targetNodeID", "to", "toNodeId", "toNodeID"), "");
     }
 
     private boolean workflowEdgeMatches(Map<String, Object> edge,
@@ -5635,7 +5635,8 @@ public class AppServiceImpl implements AppService {
                                         boolean hasExplicitCondition) {
         String condition = workflowExplicitEdgeCondition(edge);
         if (isBlank(condition)) {
-            String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+            String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label",
+                    "sourcePortID", "targetPortID", "sourcePortId", "targetPortId");
             if (!isBlank(handle)) {
                 return workflowHandleMatches(edge, input);
             }
@@ -5649,7 +5650,8 @@ public class AppServiceImpl implements AppService {
         if (!isBlank(condition)) {
             return condition;
         }
-        return textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+        return textValue(edge, "sourceHandle", "targetHandle", "handle", "label",
+                "sourcePortID", "targetPortID", "sourcePortId", "targetPortId");
     }
 
     private String workflowExplicitEdgeCondition(Map<String, Object> edge) {
@@ -5795,11 +5797,15 @@ public class AppServiceImpl implements AppService {
     }
 
     private boolean workflowHandleMatches(Map<String, Object> edge, Map<String, Object> input) {
-        String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label");
+        String handle = textValue(edge, "sourceHandle", "targetHandle", "handle", "label",
+                "sourcePortID", "targetPortID", "sourcePortId", "targetPortId");
         if (isBlank(handle)) {
             return true;
         }
         String normalized = handle.trim().toLowerCase(java.util.Locale.ENGLISH);
+        if ("default".equals(normalized)) {
+            return !workflowInputTruthy(input);
+        }
         if ("true".equals(normalized) || "yes".equals(normalized) || "success".equals(normalized)
                 || "approved".equals(normalized)) {
             return workflowInputTruthy(input);
@@ -5991,6 +5997,120 @@ public class AppServiceImpl implements AppService {
         return value;
     }
 
+    private String workflowNodeName(Map<String, Object> node, String nodeId) {
+        String name = textValue(node, "name", "label", "title");
+        if (!isBlank(name)) {
+            return name;
+        }
+        Map<String, Object> data = mapValue(node.get("data"));
+        name = textValue(data, "name", "label", "title");
+        if (!isBlank(name)) {
+            return name;
+        }
+        Map<String, Object> nodeMeta = mapValue(data.get("nodeMeta"));
+        return defaultIfBlank(textValue(nodeMeta, "title", "subTitle", "name"), nodeId);
+    }
+
+    private Map<String, Object> workflowNodeInput(Map<String, Object> node, Map<String, Object> context) {
+        Map<String, Object> input = new LinkedHashMap<>(context);
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        workflowCollectNodeInputs(input, listValue(inputs.get("inputParameters")), context);
+        return input;
+    }
+
+    private void workflowCollectNodeInputs(Map<String, Object> target,
+                                           List<Object> parameters,
+                                           Map<String, Object> context) {
+        for (Object item : parameters) {
+            Map<String, Object> parameter = mapValue(item);
+            String name = textValue(parameter, "name", "key", "field", "variable");
+            if (isBlank(name)) {
+                continue;
+            }
+            Object raw = firstPresent(parameter, "input", "value", "default");
+            target.put(name, workflowResolveConfiguredInput(raw, context));
+        }
+    }
+
+    private Object workflowResolveConfiguredInput(Object raw, Map<String, Object> context) {
+        Map<String, Object> value = mapValue(raw);
+        if (!value.isEmpty()) {
+            if (value.containsKey("value")) {
+                return workflowResolveConfiguredInput(value.get("value"), context);
+            }
+            String type = defaultIfBlank(textValue(value, "type"), "").toLowerCase(java.util.Locale.ENGLISH);
+            if ("literal".equals(type)) {
+                return workflowResolveNodeValue(value.get("content"), context, context);
+            }
+            if ("ref".equals(type)) {
+                return workflowResolveReferenceValue(value.get("content"), context);
+            }
+            if (value.containsKey("content") && value.size() <= 3) {
+                return workflowResolveNodeValue(value.get("content"), context, context);
+            }
+        }
+        return workflowResolveNodeValue(raw, context, context);
+    }
+
+    private Object workflowResolveReferenceValue(Object rawContent, Map<String, Object> context) {
+        Map<String, Object> content = mapValue(rawContent);
+        if (content.isEmpty()) {
+            return null;
+        }
+        String blockId = textValue(content, "blockID", "blockId", "nodeId", "nodeID", "id");
+        String name = textValue(content, "name", "key", "field", "path");
+        if (!isBlank(blockId) && !isBlank(name)) {
+            Object value = workflowContextValue(blockId + "." + name, context, context);
+            if (value != null) {
+                return value;
+            }
+        }
+        if (!isBlank(name)) {
+            return workflowContextValue(name, context, context);
+        }
+        return null;
+    }
+
+    private Object workflowConfiguredParam(Map<String, Object> node,
+                                           String groupName,
+                                           String paramName,
+                                           Map<String, Object> input) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        Object group = inputs.get(groupName);
+        for (Object item : listValue(group)) {
+            Map<String, Object> parameter = mapValue(item);
+            if (paramName.equals(textValue(parameter, "name", "key", "field", "variable"))) {
+                return workflowResolveConfiguredInput(firstPresent(parameter, "input", "value", "default"), input);
+            }
+        }
+        Map<String, Object> groupMap = mapValue(group);
+        if (groupMap.containsKey(paramName)) {
+            return workflowResolveConfiguredInput(groupMap.get(paramName), input);
+        }
+        return null;
+    }
+
+    private String workflowConfiguredText(Map<String, Object> node,
+                                          Map<String, Object> input,
+                                          String... keys) {
+        Object raw = firstPresent(node, keys);
+        if (raw == null) {
+            Map<String, Object> data = mapValue(node.get("data"));
+            raw = firstPresent(data, keys);
+            if (raw == null) {
+                Map<String, Object> inputs = mapValue(data.get("inputs"));
+                raw = firstPresent(inputs, keys);
+            }
+        }
+        if (raw == null) {
+            return "";
+        }
+        Object value = workflowResolveConfiguredInput(raw, input);
+        return value == null ? "" : String.valueOf(value);
+    }
+
     private Map<String, Object> workflowNodeOutput(AppRecord workflow,
                                                    Map<String, Object> node,
                                                    String nodeId,
@@ -6005,12 +6125,38 @@ public class AppServiceImpl implements AppService {
         output.put("order", order);
         output.put("input", input);
         String lowerType = type.toLowerCase(java.util.Locale.ENGLISH);
-        if (lowerType.contains("start") || lowerType.contains("input")) {
+        if (workflowIsStartNode(type, lowerType)) {
             output.putAll(input);
             output.put("text", input.isEmpty() ? "" : String.valueOf(input));
-        } else if (lowerType.contains("end") || lowerType.contains("output")) {
-            output.put("result", input);
-            output.put("text", defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name);
+        } else if (workflowIsEndNode(type, lowerType)) {
+            Object result = firstPresent(input, "output", "result", "text", "response");
+            if (result == null) {
+                result = input;
+            }
+            output.put("output", result);
+            output.put("result", result);
+            output.put("text", result == input
+                    ? defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name
+                    : String.valueOf(result));
+        } else if (workflowIsLlmNode(type, lowerType)) {
+            String prompt = workflowLlmPrompt(node, input);
+            String text = defaultIfBlank(prompt, defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name);
+            output.put("prompt", prompt);
+            output.put("text", text);
+            output.put("result", text);
+            output.put("response", text);
+            output.put("output", text);
+        } else if (workflowIsConcatNode(type, lowerType)) {
+            String text = workflowConcatText(node, input);
+            output.put("text", text);
+            output.put("result", text);
+            output.put("response", text);
+            output.put("output", text);
+        } else if (workflowIsMergeNode(type, lowerType)) {
+            Map<String, Object> merged = workflowMergeOutputs(node, input);
+            output.putAll(merged);
+            output.put("text", String.valueOf(merged));
+            output.put("result", merged);
         } else {
             String source = input.isEmpty() ? "input" : String.valueOf(input);
             if (source.length() > 120) {
@@ -6020,9 +6166,87 @@ public class AppServiceImpl implements AppService {
             output.put("text", text);
             output.put("result", text);
             output.put("response", text);
+            output.put("output", text);
         }
         output.putAll(workflowDeclaredNodeOutputs(node, input, output));
         return output;
+    }
+
+    private boolean workflowIsStartNode(String type, String lowerType) {
+        return "1".equals(type) || "start".equals(lowerType) || lowerType.contains("start")
+                || "input".equals(lowerType);
+    }
+
+    private boolean workflowIsEndNode(String type, String lowerType) {
+        return "2".equals(type) || "end".equals(lowerType) || lowerType.contains("end")
+                || "output".equals(lowerType);
+    }
+
+    private boolean workflowIsLlmNode(String type, String lowerType) {
+        return "3".equals(type) || lowerType.contains("llm") || lowerType.contains("model");
+    }
+
+    private boolean workflowIsConcatNode(String type, String lowerType) {
+        return "15".equals(type) || lowerType.contains("concat") || lowerType.contains("template")
+                || lowerType.contains("string");
+    }
+
+    private boolean workflowIsMergeNode(String type, String lowerType) {
+        return "32".equals(type) || lowerType.contains("merge") || lowerType.contains("variable")
+                || lowerType.contains("assign");
+    }
+
+    private String workflowLlmPrompt(Map<String, Object> node, Map<String, Object> input) {
+        Object prompt = workflowConfiguredParam(node, "llmParam", "prompt", input);
+        if (prompt == null) {
+            prompt = workflowConfiguredParam(node, "llmParam", "systemPrompt", input);
+        }
+        if (prompt != null) {
+            return String.valueOf(prompt);
+        }
+        return workflowConfiguredText(node, input, "prompt", "template", "text", "content", "expression");
+    }
+
+    private String workflowConcatText(Map<String, Object> node, Map<String, Object> input) {
+        Object value = workflowConfiguredParam(node, "concatParams", "concatResult", input);
+        if (value != null) {
+            return String.valueOf(value);
+        }
+        String text = workflowConfiguredText(node, input, "template", "text", "content", "expression");
+        if (!isBlank(text)) {
+            return text;
+        }
+        return String.valueOf(input);
+    }
+
+    private Map<String, Object> workflowMergeOutputs(Map<String, Object> node, Map<String, Object> input) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        for (Object item : listValue(inputs.get("mergeGroups"))) {
+            Map<String, Object> group = mapValue(item);
+            String name = textValue(group, "name", "key", "field", "variable");
+            if (isBlank(name)) {
+                continue;
+            }
+            Object value = workflowFirstAvailableMergeValue(listValue(group.get("variables")), input);
+            result.put(name, value == null ? "" : value);
+        }
+        return result;
+    }
+
+    private Object workflowFirstAvailableMergeValue(List<Object> variables, Map<String, Object> input) {
+        Object fallback = null;
+        for (Object item : variables) {
+            Object value = workflowResolveConfiguredInput(item, input);
+            if (fallback == null) {
+                fallback = value;
+            }
+            if (value != null && !isBlank(String.valueOf(value))) {
+                return value;
+            }
+        }
+        return fallback;
     }
 
     private Map<String, Object> workflowDeclaredNodeOutputs(Map<String, Object> node,
@@ -6075,13 +6299,16 @@ public class AppServiceImpl implements AppService {
             }
         }
         if (raw == null) {
-            raw = workflowConditionText(declaration, "template", "text", "content", "expression");
-        }
-        if (raw == null || (raw instanceof String && isBlank(String.valueOf(raw)))) {
-            raw = firstPresent(input, name);
+            String template = workflowConditionText(declaration, "template", "text", "content", "expression");
+            if (!isBlank(template)) {
+                raw = template;
+            }
         }
         if (raw == null) {
             raw = firstPresent(baseOutput, name);
+        }
+        if (raw == null || (raw instanceof String && isBlank(String.valueOf(raw)))) {
+            raw = firstPresent(input, name);
         }
         if (raw == null) {
             raw = workflowDefaultValue(textValue(declaration, "type", "valueType"));
@@ -6198,13 +6425,14 @@ public class AppServiceImpl implements AppService {
         if (nodeOutputs.containsKey(name)) {
             return nodeOutputs.get(name);
         }
-        for (Object value : nodeOutputs.values()) {
+        List<Object> outputs = new ArrayList<>(nodeOutputs.values());
+        for (int i = outputs.size() - 1; i >= 0; i--) {
+            Object value = outputs.get(i);
             Map<String, Object> output = mapValue(value);
             if (output.containsKey(name)) {
                 return output.get(name);
             }
         }
-        List<Object> outputs = new ArrayList<>(nodeOutputs.values());
         for (int i = outputs.size() - 1; i >= 0; i--) {
             Object value = outputs.get(i);
             Map<String, Object> output = mapValue(value);
