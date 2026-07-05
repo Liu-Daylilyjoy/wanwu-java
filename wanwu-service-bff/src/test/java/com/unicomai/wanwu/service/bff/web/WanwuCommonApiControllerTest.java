@@ -77,11 +77,14 @@ public class WanwuCommonApiControllerTest {
                         .file(new MockMultipartFile("avatar", "avatar.png", "image/png",
                                 "img".getBytes(StandardCharsets.UTF_8))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.key", containsString("avatars/")))
-                .andExpect(jsonPath("$.data.path", containsString("/user/api/v1/avatar/download/")))
+                .andExpect(jsonPath("$.data.key", containsString("custom-upload/avatar/")))
+                .andExpect(jsonPath("$.data.path", containsString("/v1/cache/avatar/custom-upload/avatar/")))
                 .andReturn();
         JsonNode avatarData = JSON.readTree(avatar.getResponse().getContentAsString()).get("data");
-        mockMvc.perform(get(avatarData.get("path").asText()))
+        mockMvc.perform(get("/user/api" + avatarData.get("path").asText()))
+                .andExpect(status().isOk())
+                .andExpect(content().bytes("img".getBytes(StandardCharsets.UTF_8)));
+        mockMvc.perform(get("/user/api/v1/cache/avatar/custom/" + avatarData.get("key").asText()))
                 .andExpect(status().isOk())
                 .andExpect(content().bytes("img".getBytes(StandardCharsets.UTF_8)));
         mockMvc.perform(put("/user/api/v1/user/avatar")

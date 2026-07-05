@@ -38,6 +38,10 @@ public class OperateServiceImpl implements OperateService {
     private static final String TYPE_CLIENT_RECORD = "client_record";
     private static final String TYPE_OAUTH_CODE = "oauth_code";
     private static final String TYPE_OAUTH_REFRESH_TOKEN = "oauth_refresh_token";
+    private static final String AVATAR_CACHE_PREFIX = "/v1/cache/avatar/";
+    private static final String USER_API_AVATAR_CACHE_PREFIX = "/user/api/v1/cache/avatar/";
+    private static final String AVATAR_DOWNLOAD_PREFIX = "/user/api/v1/avatar/download/";
+    private static final String CUSTOM_AVATAR_CACHE_PREFIX = "custom/";
 
     private final Map<String, Map<String, Object>> customTabs = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> customLogins = new ConcurrentHashMap<>();
@@ -115,13 +119,13 @@ public class OperateServiceImpl implements OperateService {
     public synchronized Map<String, Object> getSystemCustom(String mode) {
         String normalizedMode = normalizeMode(mode, null);
         Map<String, Object> login = defaultLogin();
-        login.putAll(copy(customLogins.get(normalizedMode)));
+        login.putAll(customRecord(customLogins.get(normalizedMode), "background", "logo"));
 
         Map<String, Object> home = defaultHome();
-        home.putAll(copy(customHomes.get(normalizedMode)));
+        home.putAll(customRecord(customHomes.get(normalizedMode), "logo"));
 
         Map<String, Object> tab = defaultTab();
-        tab.putAll(copy(customTabs.get(normalizedMode)));
+        tab.putAll(customRecord(customTabs.get(normalizedMode), "logo"));
 
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("login", login);
@@ -587,17 +591,64 @@ public class OperateServiceImpl implements OperateService {
             Object value = request.get(key);
             if (value instanceof Map) {
                 Map<String, Object> avatar = new LinkedHashMap<>((Map<String, Object>) value);
+                String objectKey = firstText(avatar, "key", "path");
+                if (Strings.hasText(objectKey)) {
+                    return customAvatar(objectKey);
+                }
                 if (!avatar.isEmpty()) {
                     return avatar;
                 }
             } else if (value != null && Strings.hasText(String.valueOf(value))) {
-                Map<String, Object> avatar = new LinkedHashMap<>();
-                avatar.put("path", String.valueOf(value));
-                avatar.put("key", String.valueOf(value));
-                return avatar;
+                return customAvatar(String.valueOf(value));
             }
         }
         return Collections.emptyMap();
+    }
+
+    private Map<String, Object> customAvatar(String rawKey) {
+        String objectKey = normalizeAvatarKey(rawKey);
+        Map<String, Object> avatar = new LinkedHashMap<>();
+        avatar.put("key", objectKey);
+        avatar.put("path", AVATAR_CACHE_PREFIX + CUSTOM_AVATAR_CACHE_PREFIX + objectKey);
+        return avatar;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> customRecord(Map<String, Object> source, String... avatarFields) {
+        Map<String, Object> record = copy(source);
+        for (String avatarField : avatarFields) {
+            Object value = record.get(avatarField);
+            if (value instanceof Map) {
+                String objectKey = firstText((Map<String, Object>) value, "key", "path");
+                if (Strings.hasText(objectKey)) {
+                    record.put(avatarField, customAvatar(objectKey));
+                }
+            } else if (value != null && Strings.hasText(String.valueOf(value))) {
+                record.put(avatarField, customAvatar(String.valueOf(value)));
+            }
+        }
+        return record;
+    }
+
+    private String normalizeAvatarKey(String rawKey) {
+        String key = rawKey == null ? "" : rawKey.trim().replace('\\', '/');
+        key = stripPrefix(key, USER_API_AVATAR_CACHE_PREFIX);
+        key = stripPrefix(key, AVATAR_CACHE_PREFIX);
+        key = stripPrefix(key, CUSTOM_AVATAR_CACHE_PREFIX);
+        if (key.startsWith(AVATAR_DOWNLOAD_PREFIX)) {
+            key = key.substring(AVATAR_DOWNLOAD_PREFIX.length());
+        }
+        while (key.startsWith("/")) {
+            key = key.substring(1);
+        }
+        return key;
+    }
+
+    private String stripPrefix(String value, String prefix) {
+        if (value.startsWith(prefix)) {
+            return value.substring(prefix.length());
+        }
+        return value;
     }
 
     private void putIfAvatar(Map<String, Object> target, Map<String, Object> request, String targetKey,

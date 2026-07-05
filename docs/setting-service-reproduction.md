@@ -29,6 +29,8 @@ Date: 2026-07-03
   - `getSystemCustom`
 - `wanwu-service-operate` stores custom tab, login, and home config in `operate_service.operate_records` through Flyway/MyBatis and merges non-empty fields by mode, matching the Go `mergeCustomFields` behavior.
 - `wanwu-service-bff` writes setting updates to `OperateService` and reads `/user/api/v1/base/custom` from `OperateService`, with the zero-change frontend response shape preserved.
+- `POST /user/api/v1/avatar` now stores uploaded images in BFF-local development storage using Go-style `custom-upload/avatar/{prefix}/{id}.ext` keys and returns `/v1/cache/avatar/{key}` paths. `/user/api/v1/cache/avatar/**` serves both normal avatar cache paths and setting-page `custom/` cache paths, so the unchanged frontend `avatarSrc()` helper can preview uploaded platform assets.
+- `OperateService` normalizes setting-page avatar maps to Go-style custom cache paths (`/v1/cache/avatar/custom/{key}`) on write and readback, including legacy Java download paths already stored in the compatibility repository.
 - `docker-compose.yml` includes `wanwu-service-operate` in the `full` profile and makes BFF wait for it before becoming healthy.
 - The admin development account now exposes the `setting` permission so the zero-change frontend can display the platform setting tab inside `web/src/views/permission/index.vue`.
 
@@ -51,20 +53,21 @@ Date: 2026-07-03
 Executed in Docker with Java 8:
 
 - `mvn -q -pl wanwu-service-bff,wanwu-service-operate -am "-Dtest=WanwuFrontendApiControllerTest,OperateServiceImplTest" -DfailIfNoTests=false test`
-- BFF contract test: `WanwuFrontendApiControllerTest` covers all three setting write routes, `/base/custom`, and the admin login permission shape.
-- Operate service test: `OperateServiceImplTest` covers setting config write/readback, mode isolation, and non-empty field merge behavior.
+- BFF contract tests: `WanwuFrontendApiControllerTest` covers all three setting write routes, `/base/custom`, and the admin login permission shape; `WanwuCommonApiControllerTest` covers Go-style avatar upload keys plus normal and custom cache avatar readback.
+- Operate service test: `OperateServiceImplTest` covers setting config write/readback, custom avatar path normalization, mode isolation, and non-empty field merge behavior.
 
 Frontend-entry smoke target:
 
 - `http://localhost:3000/user/api/v1/base/login` returns `setting` for `admin`.
 - `POST /custom/tab`, `/custom/login`, and `/custom/home` return `code: 0`.
 - `GET /base/custom` returns the custom tab/login/home values written through the setting routes.
+- `POST /avatar` returns `/v1/cache/avatar/...`; `GET /cache/avatar/...` and `GET /cache/avatar/custom/...` both serve the uploaded image from the Java development store.
 
 ## Current Boundary
 
-This slice is a frontend-compatible platform setting loop. It prevents the zero-change frontend setting page from hiding the tab or receiving backend 404s when saving platform custom settings.
+This slice is a frontend-compatible platform setting loop. It prevents the zero-change frontend setting page from hiding the tab, receiving backend 404s, or showing broken local previews after saving uploaded platform assets.
 
 It does not yet implement:
 
-- Uploaded asset storage or URL/path resolution beyond preserving the avatar maps sent by the frontend.
+- MinIO/object-storage lifecycle parity for uploaded setting assets.
 - Full Go light/dark theme seed config from YAML; Java accepts mode-specific records but only seeds the default development shell.

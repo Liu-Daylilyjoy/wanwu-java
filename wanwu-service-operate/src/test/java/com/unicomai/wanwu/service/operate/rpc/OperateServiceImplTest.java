@@ -17,9 +17,9 @@ public class OperateServiceImplTest {
         OperateServiceImpl service = new OperateServiceImpl();
 
         service.createSystemCustomTab("dev-admin", "default-org", "default",
-                map("tabTitle", "Smoke Tab", "tabLogo", avatar("/tab.png")));
+                map("tabTitle", "Smoke Tab", "tabLogo", avatar("custom-upload/avatar/aa/tab.png")));
         service.createSystemCustomLogin("dev-admin", "default-org", "default",
-                map("loginBg", avatar("/bg.png"),
+                map("loginBg", avatar("custom-upload/avatar/aa/bg.png"),
                         "loginWelcomeText", "Welcome",
                         "loginButtonColor", "#111111"));
         service.createSystemCustomHome("dev-admin", "default-org", "default",
@@ -27,17 +27,21 @@ public class OperateServiceImplTest {
 
         Map<String, Object> config = service.getSystemCustom("default");
         assertEquals("Smoke Tab", mapAt(config, "tab").get("title"));
-        assertEquals("/tab.png", mapAt(mapAt(config, "tab"), "logo").get("path"));
+        assertEquals("custom-upload/avatar/aa/tab.png", mapAt(mapAt(config, "tab"), "logo").get("key"));
+        assertEquals("/v1/cache/avatar/custom/custom-upload/avatar/aa/tab.png",
+                mapAt(mapAt(config, "tab"), "logo").get("path"));
         assertEquals("Welcome", mapAt(config, "login").get("welcomeText"));
         assertEquals("#111111", mapAt(config, "login").get("loginButtonColor"));
         assertEquals("Smoke Home", mapAt(config, "home").get("title"));
         assertEquals("#ffffff", mapAt(config, "home").get("backgroundColor"));
 
         service.createSystemCustomLogin("dev-admin", "default-org", "default",
-                map("loginWelcomeText", "", "loginLogo", avatar("/logo.png")));
+                map("loginWelcomeText", "", "loginLogo", avatar("/v1/cache/avatar/custom-upload/avatar/bb/logo.png")));
         Map<String, Object> merged = service.getSystemCustom("default");
         assertEquals("Welcome", mapAt(merged, "login").get("welcomeText"));
-        assertEquals("/logo.png", mapAt(mapAt(merged, "login"), "logo").get("path"));
+        assertEquals("custom-upload/avatar/bb/logo.png", mapAt(mapAt(merged, "login"), "logo").get("key"));
+        assertEquals("/v1/cache/avatar/custom/custom-upload/avatar/bb/logo.png",
+                mapAt(mapAt(merged, "login"), "logo").get("path"));
 
         Map<String, Object> dark = service.getSystemCustom("dark");
         assertEquals("Wanwu Java", mapAt(dark, "tab").get("title"));

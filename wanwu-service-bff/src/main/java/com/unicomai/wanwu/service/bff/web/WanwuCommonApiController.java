@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.servlet.http.HttpServletRequest;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,6 +59,8 @@ public class WanwuCommonApiController {
     private static final DocIndex DOC_INDEX = loadDocIndex();
     private static final String DEV_EMAIL_CODE = "123456";
     private static final long EMAIL_CODE_TTL_MILLIS = 10 * 60 * 1000L;
+    private static final String AVATAR_CACHE_PREFIX = "/v1/cache/avatar/";
+    private static final String CUSTOM_AVATAR_CACHE_PREFIX = "custom/";
     private static final Map<String, EmailCode> EMAIL_CODES = Collections.synchronizedMap(
             new LinkedHashMap<String, EmailCode>());
 
@@ -263,11 +266,12 @@ public class WanwuCommonApiController {
                 throw new IllegalArgumentException("avatar is required");
             }
             String original = actual.getOriginalFilename() == null ? "avatar.png" : actual.getOriginalFilename();
-            String key = "avatars/" + UUID.randomUUID().toString().replace("-", "") + extension(original);
-            Path path = avatarRoot.resolve(key.replace('/', '_')).normalize();
+            String id = UUID.randomUUID().toString().replace("-", "");
+            String key = "custom-upload/avatar/" + id.substring(0, 2) + "/" + id + extension(original);
+            Path path = avatarPathForKey(key);
             Files.createDirectories(path.getParent());
             actual.transferTo(path.toFile());
-            return FrontendResponse.ok(avatar(key, "/user/api/v1/avatar/download/" + path.getFileName().toString()));
+            return FrontendResponse.ok(avatar(key, AVATAR_CACHE_PREFIX + key));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         } catch (IOException ex) {
@@ -296,15 +300,25 @@ public class WanwuCommonApiController {
     @GetMapping("/avatar/download/{fileId:.+}")
     public ResponseEntity<InputStreamResource> downloadAvatar(@PathVariable("fileId") String fileId) throws IOException {
         Path path = avatarRoot.resolve(safeFileName(fileId)).normalize();
-        if (!Files.exists(path)) {
+        return avatarFile(path, safeFileName(fileId));
+    }
+
+    @GetMapping("/cache/avatar/**")
+    public ResponseEntity<InputStreamResource> cacheAvatar(HttpServletRequest request) throws IOException {
+        String uri = URLDecoder.decode(request.getRequestURI(), StandardCharsets.UTF_8.name());
+        String marker = "/cache/avatar/";
+        int index = uri.indexOf(marker);
+        if (index < 0) {
             return ResponseEntity.notFound().build();
         }
-        InputStream input = Files.newInputStream(path);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + safeFileName(fileId) + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .contentLength(Files.size(path))
-                .body(new InputStreamResource(input));
+        String key = uri.substring(index + marker.length());
+        if (key.startsWith(CUSTOM_AVATAR_CACHE_PREFIX)) {
+            key = key.substring(CUSTOM_AVATAR_CACHE_PREFIX.length());
+        }
+        if (isBlank(key)) {
+            return ResponseEntity.notFound().build();
+        }
+        return avatarFile(avatarPathForKey(key), key);
     }
 
     @GetMapping("/base/language/select")
@@ -426,6 +440,35 @@ public class WanwuCommonApiController {
         avatar.put("key", key);
         avatar.put("path", path);
         return avatar;
+    }
+
+    private ResponseEntity<InputStreamResource> avatarFile(Path path, String fileName) throws IOException {
+        Path normalized = path.toAbsolutePath().normalize();
+        if (!normalized.startsWith(avatarRoot) || !Files.exists(normalized)) {
+            return ResponseEntity.notFound().build();
+        }
+        InputStream input = Files.newInputStream(normalized);
+        String contentType = Files.probeContentType(normalized);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + safeFileName(fileName) + "\"")
+                .contentType(contentType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(contentType))
+                .contentLength(Files.size(normalized))
+                .body(new InputStreamResource(input));
+    }
+
+    private Path avatarPathForKey(String key) {
+        return avatarRoot.resolve(safeAvatarKey(key).replace('/', '_')).normalize();
+    }
+
+    private String safeAvatarKey(String key) {
+        String normalized = defaultIfBlank(key, "avatar.png").replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (normalized.contains("..")) {
+            throw new IllegalArgumentException("invalid avatar path");
+        }
+        return normalized;
     }
 
     private Map<String, Object> idName(String id, String name) {
