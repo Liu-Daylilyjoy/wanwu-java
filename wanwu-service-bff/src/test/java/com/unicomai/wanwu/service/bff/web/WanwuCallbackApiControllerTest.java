@@ -534,6 +534,45 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void imageOutlineCallbackReturnsGoCompatibleMarkdownResult() throws Exception {
+        String response = mockMvc.perform(post("/callback/v1/image/outline")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"image\":\"data:image/png;base64,aW1hZ2U=\",\"response_format\":\"b64_json\","
+                                + "\"threshold\":123,\"lineWidth\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.message").value("success"))
+                .andExpect(jsonPath("$.data.prompt").isString())
+                .andExpect(jsonPath("$.data.markdown", containsString("![](/callback/v1/file/")))
+                .andExpect(jsonPath("$.data.result[0]", containsString("![](/callback/v1/file/")))
+                .andExpect(jsonPath("$.data.mimeType").value("image/png"))
+                .andExpect(jsonPath("$.data.url", containsString("/callback/v1/file/")))
+                .andExpect(jsonPath("$.data.uri", containsString("callback/image-outline/")))
+                .andExpect(jsonPath("$.data.usage.width").value(0))
+                .andExpect(jsonPath("$.data.usage.height").value(0))
+                .andExpect(jsonPath("$.data.usage.foregroundPixels").value(0))
+                .andExpect(jsonPath("$.data.usage.edgePixels").value(0))
+                .andExpect(jsonPath("$.data.usage.threshold").value(0))
+                .andExpect(jsonPath("$.data.usage.lineWidth").value(0))
+                .andExpect(jsonPath("$.data.usage.method").value("qwen_image_edit"))
+                .andExpect(jsonPath("$.data.status").doesNotExist())
+                .andExpect(jsonPath("$.data.request").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+
+        String fileId = response.replaceAll("(?s).*?/callback/v1/file/([^\\)\\\"]+).*", "$1");
+        mockMvc.perform(get("/callback/v1/file/" + fileId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.IMAGE_PNG));
+
+        mockMvc.perform(post("/callback/v1/image/outline")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"image\":\"data:image/png;base64,aW1hZ2U=\",\"response_format\":\"raw\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg", containsString("unsupported response_format")));
+    }
+
+    @Test
     public void specializedModelCallbacksReturnGoCompatibleBodies() throws Exception {
         mockMvc.perform(post("/callback/v1/model/model-ocr/ocr")
                         .contentType(MediaType.APPLICATION_JSON)

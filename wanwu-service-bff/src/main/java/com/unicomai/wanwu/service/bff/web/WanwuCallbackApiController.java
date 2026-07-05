@@ -46,7 +46,12 @@ public class WanwuCallbackApiController {
     private static final String DEFAULT_CALLBACK_MODEL_BASE_URL = "http://bff:8080/callback/v1/model";
     private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
     private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
+    private static final String IMAGE_OUTLINE_PROMPT =
+            "Generate a clean black-and-white digital line art outline from the input image.";
+    private static final byte[] IMAGE_OUTLINE_PLACEHOLDER_PNG = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=");
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final UploadedFileStore CALLBACK_FILE_STORE = UploadedFileStore.defaultStore();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
@@ -94,6 +99,7 @@ public class WanwuCallbackApiController {
     public FrontendResponse<Map<String, Object>> uploadBase64(@RequestBody(required = false) Map<String, Object> request) {
         String fileName = defaultIfBlank(firstText(request, "fileName", "file_name"), "callback-upload.txt");
         String fileId = "callback-file-" + compactId();
+        writeCallbackFile(fileId, decodeCallbackFileContent(request));
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("fileId", fileId);
         data.put("file_id", fileId);
@@ -105,9 +111,22 @@ public class WanwuCallbackApiController {
 
     @PostMapping("/callback/v1/image/outline")
     public FrontendResponse<Map<String, Object>> imageOutline(@RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> data = echo("outline_extracted", request);
-        data.put("outline", Collections.emptyList());
-        return FrontendResponse.ok(data);
+        try {
+            return FrontendResponse.ok(localImageOutline(request));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    @GetMapping("/callback/v1/file/{fileId:.+}")
+    public ResponseEntity<byte[]> downloadCallbackFile(@PathVariable("fileId") String fileId) {
+        byte[] bytes = CALLBACK_FILE_STORE.readBytes(fileId);
+        if (bytes.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .contentType(callbackFileMediaType(fileId))
+                .body(bytes);
     }
 
     @PostMapping("/callback/v1/tourism/poi/search")
@@ -1002,6 +1021,86 @@ public class WanwuCallbackApiController {
         data.put("request", request == null ? Collections.emptyMap() : request);
         data.put("timestamp", Instant.EPOCH.toString());
         return data;
+    }
+
+    private Map<String, Object> localImageOutline(Map<String, Object> request) {
+        if (isBlank(firstText(request, "image"))) {
+            throw new IllegalArgumentException("image is required");
+        }
+        String responseFormat = firstText(request, "response_format", "responseFormat");
+        if (!isBlank(responseFormat)
+                && !"url".equalsIgnoreCase(responseFormat)
+                && !"b64_json".equalsIgnoreCase(responseFormat)) {
+            throw new IllegalArgumentException("unsupported response_format \"" + responseFormat + "\"");
+        }
+
+        String fileId = "callback-image-outline-" + compactId() + ".png";
+        writeCallbackFile(fileId, IMAGE_OUTLINE_PLACEHOLDER_PNG);
+        String url = "/callback/v1/file/" + fileId;
+        String uri = "callback/image-outline/" + fileId;
+        String markdown = "![](" + url + ")";
+
+        Map<String, Object> usage = new LinkedHashMap<>();
+        usage.put("width", 0);
+        usage.put("height", 0);
+        usage.put("foregroundPixels", 0);
+        usage.put("edgePixels", 0);
+        usage.put("threshold", 0);
+        usage.put("lineWidth", 0);
+        usage.put("method", "qwen_image_edit");
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("message", "success");
+        data.put("prompt", IMAGE_OUTLINE_PROMPT);
+        data.put("markdown", markdown);
+        data.put("result", Collections.singletonList(markdown));
+        data.put("mimeType", "image/png");
+        data.put("url", url);
+        data.put("uri", uri);
+        data.put("usage", usage);
+        return data;
+    }
+
+    private byte[] decodeCallbackFileContent(Map<String, Object> request) {
+        String encoded = firstText(request, "file", "base64", "content");
+        if (isBlank(encoded)) {
+            return new byte[0];
+        }
+        int comma = encoded.indexOf(',');
+        if (comma >= 0 && encoded.substring(0, comma).toLowerCase().contains("base64")) {
+            encoded = encoded.substring(comma + 1);
+        }
+        String compact = encoded.replace("\n", "").replace("\r", "").replace("\t", "").replace(" ", "");
+        try {
+            return Base64.getDecoder().decode(compact);
+        } catch (IllegalArgumentException ignored) {
+            return encoded.getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    private void writeCallbackFile(String fileId, byte[] content) {
+        try {
+            CALLBACK_FILE_STORE.writeBytes(fileId, content);
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("failed to store callback file");
+        }
+    }
+
+    private MediaType callbackFileMediaType(String fileId) {
+        String lower = defaultIfBlank(fileId, "").toLowerCase();
+        if (lower.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG;
+        }
+        if (lower.endsWith(".gif")) {
+            return MediaType.parseMediaType("image/gif");
+        }
+        if (lower.endsWith(".webp")) {
+            return MediaType.parseMediaType("image/webp");
+        }
+        return MediaType.APPLICATION_OCTET_STREAM;
     }
 
     private String firstText(Map<?, ?> map, String... keys) {
