@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.mcp.McpService;
+import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.MediaType;
@@ -33,11 +34,19 @@ public class WanwuResourceApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private McpService mcpService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
+
     public WanwuResourceApiController() {
     }
 
     public WanwuResourceApiController(McpService mcpService) {
         this.mcpService = mcpService;
+    }
+
+    public WanwuResourceApiController(McpService mcpService, ModelService modelService) {
+        this.mcpService = mcpService;
+        this.modelService = modelService;
     }
 
     @PostMapping("/tool/custom")
@@ -350,7 +359,10 @@ public class WanwuResourceApiController {
     private ResponseEntity<String> promptStream(String authorization, Map<String, Object> request,
                                                 ResourceBodyCall call) {
         try {
-            Map<String, Object> payload = call.execute(userContext(authorization), body(request));
+            UserContext context = userContext(authorization);
+            Map<String, Object> payloadRequest = body(request);
+            authorizePromptModel(context, payloadRequest);
+            Map<String, Object> payload = call.execute(context, payloadRequest);
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_EVENT_STREAM)
                     .body("data: " + toJson(payload) + "\n\n");
@@ -363,6 +375,26 @@ public class WanwuResourceApiController {
 
     private Map<String, Object> body(Map<String, Object> request) {
         return request == null ? new LinkedHashMap<>() : request;
+    }
+
+    private void authorizePromptModel(UserContext context, Map<String, Object> request) {
+        String modelId = text(request, "modelId");
+        if (modelService == null || isBlank(modelId)) {
+            return;
+        }
+        modelService.checkModelUserPermission(context.userId, context.orgId, Collections.singletonList(modelId));
+    }
+
+    private String text(Map<String, Object> request, String key) {
+        if (request == null || key == null || !request.containsKey(key)) {
+            return "";
+        }
+        Object value = request.get(key);
+        return value instanceof String ? String.valueOf(value) : "";
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private Map<String, Object> stringMap(Map<String, String> request) {

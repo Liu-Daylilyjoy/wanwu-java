@@ -155,13 +155,13 @@ public class WanwuFrontendApiControllerTest {
     private final OperateService operateService = mock(OperateService.class);
     private final SafetyService safetyService = mock(SafetyService.class);
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(
-                    new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService,
-                            operateService, safetyService),
-                    new WanwuResourceApiController(mcpService),
-                    new WanwuSkillApiController(mcpService),
-                    new WanwuSafetyApiController(safetyService),
-                    new WanwuSettingApiController(operateService),
+        .standaloneSetup(
+                new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService,
+                        operateService, safetyService),
+                new WanwuResourceApiController(mcpService, modelService),
+                new WanwuSkillApiController(mcpService),
+                new WanwuSafetyApiController(safetyService),
+                new WanwuSettingApiController(operateService),
                     new WanwuOperationApiController(iamService, operateService),
                     new WanwuExplorationApiController(appService),
                     new WanwuStatisticApiController(appService, modelService),
@@ -1073,6 +1073,68 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("\"response\":\"optimized prompt\"")))
                 .andExpect(content().string(containsString("\"finish\":1")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void promptSseRoutesCheckModelIdBeforeGeneration() throws Exception {
+        when(mcpService.optimizePrompt(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("response", "optimized prompt", "finish", 1));
+        when(mcpService.reasonPrompt(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("response", "reasoned prompt", "finish", 1));
+        when(mcpService.evaluatePrompt(anyString(), anyString(), any(Map.class)))
+                .thenReturn(map("response", "evaluated prompt", "finish", 1));
+
+        mockMvc.perform(post("/user/api/v1/prompt/optimize")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-001\",\"prompt\":\"review this\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"response\":\"optimized prompt\"")));
+
+        mockMvc.perform(post("/user/api/v1/prompt/reason")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-002\",\"prompt\":\"review this\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"response\":\"reasoned prompt\"")));
+
+        mockMvc.perform(post("/user/api/v1/prompt/evaluate")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-003\",\"prompt\":\"review this\",\"answer\":\"ok\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"response\":\"evaluated prompt\"")));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService, times(3)).checkModelUserPermission(
+                eq("dev-admin"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("model-001"), modelIdsCaptor.getAllValues().get(0));
+        assertEquals(Collections.singletonList("model-002"), modelIdsCaptor.getAllValues().get(1));
+        assertEquals(Collections.singletonList("model-003"), modelIdsCaptor.getAllValues().get(2));
+        verify(mcpService).optimizePrompt(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(mcpService).reasonPrompt(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(mcpService).evaluatePrompt(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void promptSseRouteStopsBeforeGenerationWhenModelIsDenied() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: model-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(post("/user/api/v1/prompt/optimize")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-private\",\"prompt\":\"review this\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("\"code\":1001")))
+                .andExpect(content().string(containsString("\"msg\":\"bff_model_perm: model-private\"")));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("model-private"), modelIdsCaptor.getValue());
+        verify(mcpService, times(0)).optimizePrompt(anyString(), anyString(), any(Map.class));
     }
 
     @Test
