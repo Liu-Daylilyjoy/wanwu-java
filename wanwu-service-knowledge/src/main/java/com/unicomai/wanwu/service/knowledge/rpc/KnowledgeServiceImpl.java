@@ -3164,6 +3164,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 return xlsxText;
             }
         }
+        if ("docx".equals(extension)) {
+            String docxText = docxText(bytes);
+            if (!isBlank(docxText)) {
+                return docxText;
+            }
+        }
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
@@ -3189,6 +3195,48 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    private String docxText(byte[] bytes) {
+        try {
+            String xml = zipEntryText(bytes, "word/document.xml");
+            if (isBlank(xml)) {
+                return "";
+            }
+            Document document = parseXml(xml);
+            NodeList paragraphs = elements(document, "p");
+            StringBuilder result = new StringBuilder();
+            for (int i = 0; i < paragraphs.getLength(); i++) {
+                String text = joinText((Element) paragraphs.item(i), "t").trim();
+                if (!isBlank(text)) {
+                    if (result.length() > 0) {
+                        result.append('\n');
+                    }
+                    result.append(text);
+                }
+            }
+            if (result.length() > 0) {
+                return result.toString();
+            }
+            return joinText(document.getDocumentElement(), "t").trim();
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String zipEntryText(byte[] bytes, String targetName) throws IOException {
+        ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes));
+        try {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (targetName.equals(entry.getName())) {
+                    return zipText(zip);
+                }
+            }
+        } finally {
+            zip.close();
+        }
+        return "";
     }
 
     private WorkbookXml readWorkbook(byte[] bytes) throws IOException {

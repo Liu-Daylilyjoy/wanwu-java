@@ -616,6 +616,30 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void documentImportExtractsDocxBase64IntoSearchableSegments() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Docx Docs", 0)).get("knowledgeId");
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-docx", "Guide.docx",
+                        docxBase64("Wanwu Java imports Word documents.",
+                                "RAG search can find DOCX paragraphs.")));
+
+        Map<String, Object> segments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-docx", "Word documents"));
+        assertEquals(1, segments.get("segmentTotalNum"));
+        assertTrue(String.valueOf(listOfMaps(segments.get("contentList")).get(0).get("content"))
+                .contains("Wanwu Java imports Word documents."));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "DOCX paragraphs"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.docx", searchList.get(0).get("title"));
+        assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find DOCX paragraphs."));
+    }
+
+    @Test
     public void reimportDocsRebuildsSegmentsFromSavedImportSourceAndUpdatedConfig() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Reimport Docs", 0)).get("knowledgeId");
@@ -993,7 +1017,7 @@ public class KnowledgeServiceImplTest {
     private Map<String, Object> docImportWithBase64(String knowledgeId, String docId, String docName, String base64) {
         Map<String, Object> request = docImport(knowledgeId, docId, docName);
         Map<String, Object> doc = map(listOfMaps(request.get("docInfoList")).get(0));
-        doc.put("docType", "xlsx");
+        doc.put("docType", testFileType(docName));
         doc.put("contentBase64", base64);
         return request;
     }
@@ -1361,6 +1385,20 @@ public class KnowledgeServiceImplTest {
         return Base64.getEncoder().encodeToString(output.toByteArray());
     }
 
+    private String docxBase64(String... paragraphs) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ZipOutputStream zip = new ZipOutputStream(output);
+        addZipEntry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                + "<Override PartName=\"/word/document.xml\" "
+                + "ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                + "</Types>");
+        addZipEntry(zip, "word/document.xml", documentXml(paragraphs));
+        zip.close();
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
     private void addZipEntry(ZipOutputStream zip, String name, String content) throws Exception {
         zip.putNextEntry(new ZipEntry(name));
         zip.write(content.getBytes(StandardCharsets.UTF_8));
@@ -1388,6 +1426,20 @@ public class KnowledgeServiceImplTest {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;");
+    }
+
+    private String documentXml(String[] paragraphs) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .append("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>");
+        for (String paragraph : paragraphs) {
+            xml.append("<w:p><w:r><w:t>").append(escapeXml(paragraph)).append("</w:t></w:r></w:p>");
+        }
+        return xml.append("</w:body></w:document>").toString();
+    }
+
+    private String testFileType(String name) {
+        int dot = name == null ? -1 : name.lastIndexOf('.');
+        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ENGLISH);
     }
 
     private int docStatus(String knowledgeId, String docId) {
