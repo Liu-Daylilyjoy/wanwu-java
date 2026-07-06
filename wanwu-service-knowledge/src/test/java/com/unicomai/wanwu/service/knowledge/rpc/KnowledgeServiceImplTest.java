@@ -6,10 +6,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -585,6 +590,32 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void documentImportExtractsXlsxBase64IntoSearchableSegments() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Xlsx Docs", 0)).get("knowledgeId");
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-xlsx", "Quarterly.xlsx",
+                        xlsxBase64(
+                                new String[]{"Title", "Body"},
+                                new String[]{"Revenue", "Wanwu Java imports spreadsheet knowledge."},
+                                new String[]{"Operations", "RAG search can find XLSX cells."})));
+
+        Map<String, Object> segments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-xlsx", "spreadsheet knowledge"));
+        assertEquals(1, segments.get("segmentTotalNum"));
+        assertTrue(String.valueOf(listOfMaps(segments.get("contentList")).get(0).get("content"))
+                .contains("Wanwu Java imports spreadsheet knowledge."));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "XLSX cells"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Quarterly.xlsx", searchList.get(0).get("title"));
+        assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find XLSX cells."));
+    }
+
+    @Test
     public void reimportDocsRebuildsSegmentsFromSavedImportSourceAndUpdatedConfig() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Reimport Docs", 0)).get("knowledgeId");
@@ -959,6 +990,14 @@ public class KnowledgeServiceImplTest {
         return request;
     }
 
+    private Map<String, Object> docImportWithBase64(String knowledgeId, String docId, String docName, String base64) {
+        Map<String, Object> request = docImport(knowledgeId, docId, docName);
+        Map<String, Object> doc = map(listOfMaps(request.get("docInfoList")).get(0));
+        doc.put("docType", "xlsx");
+        doc.put("contentBase64", base64);
+        return request;
+    }
+
     private Map<String, Object> docInfo(String docId, String docName) {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("docId", docId);
@@ -1304,6 +1343,51 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put(key, value);
         return result;
+    }
+
+    private String xlsxBase64(String[]... rows) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ZipOutputStream zip = new ZipOutputStream(output);
+        addZipEntry(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                + "<Override PartName=\"/xl/worksheets/sheet1.xml\" "
+                + "ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                + "</Types>");
+        addZipEntry(zip, "xl/workbook.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"/>");
+        addZipEntry(zip, "xl/worksheets/sheet1.xml", sheetXml(rows));
+        zip.close();
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private void addZipEntry(ZipOutputStream zip, String name, String content) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(content.getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
+    }
+
+    private String sheetXml(String[][] rows) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+        for (int rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+            xml.append("<row r=\"").append(rowIndex + 1).append("\">");
+            for (int columnIndex = 0; columnIndex < rows[rowIndex].length; columnIndex++) {
+                xml.append("<c r=\"").append((char) ('A' + columnIndex)).append(rowIndex + 1)
+                        .append("\" t=\"inlineStr\"><is><t>")
+                        .append(escapeXml(rows[rowIndex][columnIndex]))
+                        .append("</t></is></c>");
+            }
+            xml.append("</row>");
+        }
+        return xml.append("</sheetData></worksheet>").toString();
+    }
+
+    private String escapeXml(String value) {
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private int docStatus(String knowledgeId, String docId) {

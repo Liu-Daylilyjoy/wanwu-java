@@ -11,10 +11,18 @@ import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEn
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 import javax.annotation.PostConstruct;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,6 +36,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
@@ -2823,11 +2832,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private void captureImportSource(DocState doc, Map<String, Object> docInfo, Map<String, Object> docSegment) {
-        String content = firstText(docInfo, "content", "text", "docContent", "snippet");
-        if (isBlank(content)) {
-            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
-        }
-        doc.sourceContent = content;
+        doc.sourceContent = importedDocumentContent(docInfo);
         doc.sourceDocUrl = firstText(docInfo, "docUrl", "url", "filePath");
         doc.importSegmentConfig = normalizedDocSegment(docSegment, doc.segmentMethod);
     }
@@ -2898,10 +2903,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private String importedContent(DocState doc, Map<String, Object> docInfo) {
-        String content = firstText(docInfo, "content", "text", "docContent", "snippet");
-        if (isBlank(content)) {
-            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
-        }
+        String content = importedDocumentContent(docInfo);
         if (!isBlank(content)) {
             return content;
         }
@@ -2910,6 +2912,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             return "Imported URL document: " + doc.docName + "\nSource URL: " + docUrl;
         }
         return "Imported document: " + doc.docName;
+    }
+
+    private String importedDocumentContent(Map<String, Object> docInfo) {
+        String content = firstText(docInfo, "content", "text", "docContent", "snippet");
+        if (!isBlank(content)) {
+            return content;
+        }
+        return decodedDocumentText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"),
+                documentExtension(docInfo));
     }
 
     private String qaImportContent(Map<String, Object> docInfo) {
@@ -3138,13 +3149,222 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private String decodedText(String base64) {
-        if (isBlank(base64)) {
+        byte[] bytes = decodedBytes(base64);
+        return bytes.length == 0 ? "" : new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private String decodedDocumentText(String base64, String extension) {
+        byte[] bytes = decodedBytes(base64);
+        if (bytes.length == 0) {
             return "";
         }
+        if ("xlsx".equals(extension)) {
+            String xlsxText = xlsxDelimitedText(bytes);
+            if (!isBlank(xlsxText)) {
+                return xlsxText;
+            }
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private byte[] decodedBytes(String base64) {
+        if (isBlank(base64)) {
+            return new byte[0];
+        }
         try {
-            return new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+            return Base64.getDecoder().decode(base64);
         } catch (IllegalArgumentException ex) {
+            return new byte[0];
+        }
+    }
+
+    private String xlsxDelimitedText(byte[] bytes) {
+        try {
+            WorkbookXml workbook = readWorkbook(bytes);
+            if (workbook.sheetXml.isEmpty()) {
+                return "";
+            }
+            List<String> sharedStrings = sharedStrings(workbook.sharedStringsXml);
+            return delimitedRows(rows(workbook.sheetXml, sharedStrings));
+        } catch (Exception ex) {
             return "";
+        }
+    }
+
+    private WorkbookXml readWorkbook(byte[] bytes) throws IOException {
+        WorkbookXml workbook = new WorkbookXml();
+        ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes));
+        try {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                String name = entry.getName();
+                if ("xl/sharedStrings.xml".equals(name)) {
+                    workbook.sharedStringsXml = zipText(zip);
+                } else if ("xl/worksheets/sheet1.xml".equals(name) && workbook.sheetXml.isEmpty()) {
+                    workbook.sheetXml = zipText(zip);
+                } else if (name.startsWith("xl/worksheets/sheet") && name.endsWith(".xml")
+                        && workbook.sheetXml.isEmpty()) {
+                    workbook.sheetXml = zipText(zip);
+                }
+            }
+        } finally {
+            zip.close();
+        }
+        return workbook;
+    }
+
+    private String zipText(ZipInputStream zip) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int read;
+        while ((read = zip.read(buffer)) >= 0) {
+            output.write(buffer, 0, read);
+        }
+        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private List<String> sharedStrings(String xml) throws Exception {
+        List<String> result = new ArrayList<String>();
+        if (xml == null || xml.trim().isEmpty()) {
+            return result;
+        }
+        NodeList nodes = elements(parseXml(xml), "si");
+        for (int i = 0; i < nodes.getLength(); i++) {
+            result.add(joinText((Element) nodes.item(i), "t"));
+        }
+        return result;
+    }
+
+    private List<List<String>> rows(String xml, List<String> sharedStrings) throws Exception {
+        List<List<String>> result = new ArrayList<List<String>>();
+        NodeList rows = elements(parseXml(xml), "row");
+        for (int i = 0; i < rows.getLength(); i++) {
+            Element row = (Element) rows.item(i);
+            List<String> values = new ArrayList<String>();
+            NodeList cells = children(row, "c");
+            for (int j = 0; j < cells.getLength(); j++) {
+                Element cell = (Element) cells.item(j);
+                int index = columnIndex(cell.getAttribute("r"), j);
+                while (values.size() <= index) {
+                    values.add("");
+                }
+                values.set(index, cellValue(cell, sharedStrings));
+            }
+            trim(values);
+            if (!values.isEmpty()) {
+                result.add(values);
+            }
+        }
+        return result;
+    }
+
+    private String cellValue(Element cell, List<String> sharedStrings) {
+        String type = cell.getAttribute("t");
+        if ("inlineStr".equals(type)) {
+            return joinText(cell, "t").trim();
+        }
+        String value = firstXmlText(cell, "v").trim();
+        if ("s".equals(type)) {
+            try {
+                int index = Integer.parseInt(value);
+                return index >= 0 && index < sharedStrings.size() ? sharedStrings.get(index).trim() : "";
+            } catch (NumberFormatException ex) {
+                return "";
+            }
+        }
+        return value;
+    }
+
+    private String delimitedRows(List<List<String>> rows) {
+        StringBuilder result = new StringBuilder();
+        for (List<String> row : rows) {
+            if (result.length() > 0) {
+                result.append('\n');
+            }
+            for (int i = 0; i < row.size(); i++) {
+                if (i > 0) {
+                    result.append('\t');
+                }
+                result.append(row.get(i));
+            }
+        }
+        return result.toString();
+    }
+
+    private Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        try {
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        } catch (Exception ignored) {
+            // Unsupported parser hardening flags should not prevent local spreadsheet parsing.
+        }
+        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+    }
+
+    private NodeList elements(Document document, String localName) {
+        NodeList nodes = document.getElementsByTagNameNS("*", localName);
+        return nodes.getLength() == 0 ? document.getElementsByTagName(localName) : nodes;
+    }
+
+    private NodeList children(Element parent, String localName) {
+        List<Node> nodes = new ArrayList<Node>();
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            String nodeName = node.getLocalName() == null ? node.getNodeName() : node.getLocalName();
+            if (node instanceof Element && localName.equals(nodeName)) {
+                nodes.add(node);
+            }
+        }
+        return new ListNodeList(nodes);
+    }
+
+    private String firstXmlText(Element parent, String localName) {
+        NodeList nodes = parent.getElementsByTagNameNS("*", localName);
+        if (nodes.getLength() == 0) {
+            nodes = parent.getElementsByTagName(localName);
+        }
+        return nodes.getLength() == 0 ? "" : nodes.item(0).getTextContent();
+    }
+
+    private String joinText(Element parent, String localName) {
+        NodeList nodes = parent.getElementsByTagNameNS("*", localName);
+        if (nodes.getLength() == 0) {
+            nodes = parent.getElementsByTagName(localName);
+        }
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < nodes.getLength(); i++) {
+            result.append(nodes.item(i).getTextContent());
+        }
+        return result.toString();
+    }
+
+    private int columnIndex(String reference, int fallback) {
+        if (reference == null || reference.isEmpty()) {
+            return fallback;
+        }
+        int result = 0;
+        boolean found = false;
+        for (int i = 0; i < reference.length(); i++) {
+            char ch = Character.toUpperCase(reference.charAt(i));
+            if (ch < 'A' || ch > 'Z') {
+                break;
+            }
+            found = true;
+            result = result * 26 + (ch - 'A' + 1);
+        }
+        return found ? result - 1 : fallback;
+    }
+
+    private void trim(List<String> values) {
+        for (int i = values.size() - 1; i >= 0; i--) {
+            if (values.get(i) != null && !values.get(i).trim().isEmpty()) {
+                return;
+            }
+            values.remove(i);
         }
     }
 
@@ -3478,6 +3698,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String fileType(String docName) {
         int dot = docName == null ? -1 : docName.lastIndexOf('.');
         return dot >= 0 ? docName.substring(dot + 1).toLowerCase(Locale.ENGLISH) : "";
+    }
+
+    private String documentExtension(Map<String, Object> docInfo) {
+        String type = firstText(docInfo, "docType", "fileType", "type");
+        if (!isBlank(type)) {
+            return type.replace(".", "").toLowerCase(Locale.ENGLISH);
+        }
+        String name = firstText(docInfo, "docName", "fileName", "name", "docUrl", "url", "filePath");
+        return fileType(name);
     }
 
     private String fileNameFromUrl(String url) {
@@ -3988,6 +4217,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private String childId;
         private String content;
         private int childNum;
+    }
+
+    private static final class WorkbookXml {
+        private String sharedStringsXml = "";
+        private String sheetXml = "";
+    }
+
+    private static final class ListNodeList implements NodeList {
+        private final List<Node> nodes;
+
+        private ListNodeList(List<Node> nodes) {
+            this.nodes = nodes;
+        }
+
+        @Override
+        public Node item(int index) {
+            return nodes.get(index);
+        }
+
+        @Override
+        public int getLength() {
+            return nodes.size();
+        }
     }
 
     private static final class KeywordState {
