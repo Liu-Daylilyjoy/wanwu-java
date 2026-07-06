@@ -1562,7 +1562,8 @@ public class AppServiceImpl implements AppService {
         RagChatResult result = new RagChatResult();
         result.setRagId(command.getRagId());
         result.setQuestion(command.getQuestion());
-        String response = deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo());
+        String response = defaultIfBlank(command.getOverrideResponse(),
+                deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo()));
         response = enrichRagResponse(response, knowledgeHit, searchList, qaHit, qaSearchList);
         SensitiveBlock outputBlock = matchSensitiveResponse(userId, orgId, safetyConfigJson, response);
         if (outputBlock != null) {

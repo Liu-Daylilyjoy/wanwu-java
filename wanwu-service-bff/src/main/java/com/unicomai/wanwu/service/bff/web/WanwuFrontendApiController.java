@@ -3922,7 +3922,7 @@ public class WanwuFrontendApiController {
                 assistant = appService.getPublishedAssistant(new AssistantPublishedQuery(
                         command.getAssistantId(), null, userContext.getUserId(), userContext.getOrgId()));
             }
-            String modelId = assistantModelId(assistant);
+            String modelId = configuredModelId(assistant);
             if (isBlank(modelId)) {
                 return;
             }
@@ -3951,15 +3951,15 @@ public class WanwuFrontendApiController {
         }
     }
 
-    private String assistantModelId(Map<String, Object> assistant) {
-        if (assistant == null) {
+    private String configuredModelId(Map<String, Object> appConfig) {
+        if (appConfig == null) {
             return "";
         }
         return firstNonBlank(
-                nestedText(assistant, "modelConfig", "modelId"),
-                nestedText(assistant, "modelConfig", "model_id"),
-                nestedText(assistant, "modelConfig", "config", "modelId"),
-                nestedText(assistant, "modelConfig", "config", "model_id"));
+                nestedText(appConfig, "modelConfig", "modelId"),
+                nestedText(appConfig, "modelConfig", "model_id"),
+                nestedText(appConfig, "modelConfig", "config", "modelId"),
+                nestedText(appConfig, "modelConfig", "config", "model_id"));
     }
 
     private ResponseEntity<String> streamRagChat(String authorization,
@@ -3971,6 +3971,7 @@ public class WanwuFrontendApiController {
             RagChatCommand command = request == null ? new RagChatRequest().toCommand(draft) : request.toCommand(draft);
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
+            attachConfiguredRagModelResponse(userContext, command, draft, startedAt);
             RagChatResult result = appService.streamRagChat(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getRagId(), RAG_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
@@ -3983,6 +3984,51 @@ public class WanwuFrontendApiController {
             return ResponseEntity.status(400)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
+        }
+    }
+
+    private void attachConfiguredRagModelResponse(UserContext userContext,
+                                                  RagChatCommand command,
+                                                  boolean draft,
+                                                  long startedAt) {
+        if (command == null || isBlank(command.getRagId()) || isBlank(command.getQuestion())) {
+            return;
+        }
+        try {
+            Map<String, Object> rag;
+            if (draft) {
+                rag = appService.getRagDraft(new RagDetailQuery(
+                        command.getRagId(), null, userContext.getUserId(), userContext.getOrgId()));
+            } else {
+                rag = appService.getPublishedRag(new RagDetailQuery(
+                        command.getRagId(), null, userContext.getUserId(), userContext.getOrgId()));
+            }
+            String modelId = configuredModelId(rag);
+            if (isBlank(modelId)) {
+                return;
+            }
+            ModelInfo model = modelService.getModel(userContext.getUserId(), userContext.getOrgId(), modelId);
+            if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
+                return;
+            }
+            ModelExperienceLlmRequest upstreamRequest = new ModelExperienceLlmRequest();
+            upstreamRequest.setModelId(modelId);
+            upstreamRequest.setSessionId(command.getRagId());
+            upstreamRequest.setContent(command.getQuestion());
+            ModelExperienceStreamResult streamResult = modelExperienceUpstreamStream(userContext, model, upstreamRequest);
+            String answer = defaultIfBlank(streamResult.getContent(), "");
+            ModelExperienceUsage usage = streamResult.getUsage();
+            if (isBlank(answer)) {
+                ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, upstreamRequest);
+                answer = defaultIfBlank(upstreamAnswer.getContent(), "");
+                usage = upstreamAnswer.getUsage();
+            }
+            if (isBlank(answer)) {
+                return;
+            }
+            command.setOverrideResponse(answer);
+            recordModelStatistic(userContext, model, upstreamRequest, answer, startedAt, usage);
+        } catch (RuntimeException ignored) {
         }
     }
 

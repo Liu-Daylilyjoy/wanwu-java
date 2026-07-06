@@ -4184,6 +4184,60 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void ragDraftChatUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondSse(exchange, "data: {\"id\":\"chatcmpl-rag\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"rag \"},"
+                    + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1,\"total_tokens\":5}}\n\n"
+                    + "data: {\"id\":\"chatcmpl-rag\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"},"
+                    + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            Map<String, Object> rag = map("ragId", "rag-001",
+                    "modelConfig", map("modelId", "model-001"));
+            when(appService.getRagDraft(any(RagDetailQuery.class))).thenReturn(rag);
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+            when(appService.streamRagChat(any(RagChatCommand.class))).thenAnswer(invocation -> {
+                RagChatCommand command = invocation.getArgument(0);
+                RagChatResult result = new RagChatResult();
+                result.setRagId(command.getRagId());
+                result.setQuestion(command.getQuestion());
+                result.setResponse(command.getOverrideResponse());
+                result.setSearchList(Collections.emptyList());
+                result.setQaSearchList(Collections.emptyList());
+                result.setCreatedAt(1782806400000L);
+                return result;
+            });
+
+            mockMvc.perform(post("/user/api/v1/rag/chat/draft")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("rag answer")));
+
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
+            ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
+            verify(appService).streamRagChat(captor.capture());
+            assertEquals("rag answer", captor.getValue().getOverrideResponse());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void ragPublishedChatUsesPublishedModeAndUploadReturnsGoShape() throws Exception {
         RagChatResult result = new RagChatResult();
         result.setRagId("rag-001");

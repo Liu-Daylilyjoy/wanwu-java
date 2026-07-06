@@ -445,6 +445,25 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void ragChatPersistsConfiguredModelUpstreamResponse() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("ModelRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagChatCommand command = ragChatCommand(created.getRagId(), "what is policy", true);
+        command.setOverrideResponse("rag model upstream answer");
+        RagChatResult result = service.streamRagChat(command);
+
+        assertEquals("rag model upstream answer", result.getResponse());
+        assertEquals("rag model upstream answer", repository.ragChats.get(0).getResponse());
+    }
+
+    @Test
     public void ragChatUsesConfiguredSafetyTableToBlockSensitiveQuestion() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,
