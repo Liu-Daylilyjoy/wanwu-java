@@ -187,6 +187,8 @@ public class WanwuFrontendApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private SafetyService safetyService;
 
+    private final OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient();
+
     public WanwuFrontendApiController() {
     }
 
@@ -3930,23 +3932,14 @@ public class WanwuFrontendApiController {
             if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
                 return;
             }
-            ModelExperienceLlmRequest upstreamRequest = new ModelExperienceLlmRequest();
-            upstreamRequest.setModelId(modelId);
-            upstreamRequest.setSessionId(defaultIfBlank(command.getConversationId(), command.getAssistantId()));
-            upstreamRequest.setContent(command.getPrompt());
-            ModelExperienceStreamResult streamResult = modelExperienceUpstreamStream(userContext, model, upstreamRequest);
-            String answer = defaultIfBlank(streamResult.getContent(), "");
-            ModelExperienceUsage usage = streamResult.getUsage();
-            if (isBlank(answer)) {
-                ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, upstreamRequest);
-                answer = defaultIfBlank(upstreamAnswer.getContent(), "");
-                usage = upstreamAnswer.getUsage();
-            }
+            OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
+                    chatClient.complete(model, modelId, command.getPrompt());
+            String answer = defaultIfBlank(chatResult.getContent(), "");
             if (isBlank(answer)) {
                 return;
             }
             command.setOverrideResponse(answer);
-            recordModelStatistic(userContext, model, upstreamRequest, answer, startedAt, usage);
+            recordModelStatistic(userContext, model, modelId, command.getPrompt(), answer, startedAt, chatResult.getUsage());
         } catch (RuntimeException ignored) {
         }
     }
@@ -4011,23 +4004,14 @@ public class WanwuFrontendApiController {
             if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
                 return;
             }
-            ModelExperienceLlmRequest upstreamRequest = new ModelExperienceLlmRequest();
-            upstreamRequest.setModelId(modelId);
-            upstreamRequest.setSessionId(command.getRagId());
-            upstreamRequest.setContent(command.getQuestion());
-            ModelExperienceStreamResult streamResult = modelExperienceUpstreamStream(userContext, model, upstreamRequest);
-            String answer = defaultIfBlank(streamResult.getContent(), "");
-            ModelExperienceUsage usage = streamResult.getUsage();
-            if (isBlank(answer)) {
-                ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, upstreamRequest);
-                answer = defaultIfBlank(upstreamAnswer.getContent(), "");
-                usage = upstreamAnswer.getUsage();
-            }
+            OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
+                    chatClient.complete(model, modelId, command.getQuestion());
+            String answer = defaultIfBlank(chatResult.getContent(), "");
             if (isBlank(answer)) {
                 return;
             }
             command.setOverrideResponse(answer);
-            recordModelStatistic(userContext, model, upstreamRequest, answer, startedAt, usage);
+            recordModelStatistic(userContext, model, modelId, command.getQuestion(), answer, startedAt, chatResult.getUsage());
         } catch (RuntimeException ignored) {
         }
     }
@@ -4094,6 +4078,40 @@ public class WanwuFrontendApiController {
             command.setOrgId(userContext.getOrgId());
             command.setModelId(request.getModelId());
             command.setModel(defaultIfBlank(model.getModel(), request.getModelId()));
+            command.setProvider(defaultIfBlank(model.getProvider(), ""));
+            command.setModelType(defaultIfBlank(model.getModelType(), "llm"));
+            command.setPromptTokens(promptTokens);
+            command.setCompletionTokens(completionTokens);
+            command.setTotalTokens(totalTokens);
+            command.setSuccess(true);
+            command.setStream(true);
+            command.setFirstTokenLatency(elapsedMillis(startedAt));
+            command.setCosts(0L);
+            appService.recordModelStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void recordModelStatistic(UserContext userContext,
+                                      ModelInfo model,
+                                      String modelId,
+                                      String prompt,
+                                      String answer,
+                                      long startedAt,
+                                      OpenAiCompatibleChatClient.Usage usage) {
+        if (appService == null || model == null || isBlank(modelId)) {
+            return;
+        }
+        try {
+            long promptTokens = usage == null ? chatClient.estimateTokens(prompt) : usage.getPromptTokens();
+            long completionTokens = usage == null ? chatClient.estimateTokens(answer) : usage.getCompletionTokens();
+            long totalTokens = usage == null || usage.getTotalTokens() <= 0L
+                    ? promptTokens + completionTokens : usage.getTotalTokens();
+            RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+            command.setUserId(userContext.getUserId());
+            command.setOrgId(userContext.getOrgId());
+            command.setModelId(modelId);
+            command.setModel(defaultIfBlank(model.getModel(), modelId));
             command.setProvider(defaultIfBlank(model.getProvider(), ""));
             command.setModelType(defaultIfBlank(model.getModelType(), "llm"));
             command.setPromptTokens(promptTokens);

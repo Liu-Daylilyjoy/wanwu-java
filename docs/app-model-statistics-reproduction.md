@@ -52,6 +52,8 @@ Runtime recording currently covers:
 - public OpenURL assistant stream: `source=webURL`, `appType=agent`
 - public OpenURL assistant stream with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 
+Frontend Assistant/RAG configured-model calls now use the same `OpenAiCompatibleChatClient` as OpenAPI and OpenURL, so stream aggregation, non-stream fallback, provider `usage` parsing, and local token estimation share one implementation. The model experience endpoint keeps its separate proxy because it must preserve dialog history and enabled inference parameters in the upstream request body.
+
 Draft app calls are intentionally not recorded, matching Go's `AppStatisticSourceDraft` comment that draft versions do not contribute to app statistics.
 
 ## Frontend Contract
