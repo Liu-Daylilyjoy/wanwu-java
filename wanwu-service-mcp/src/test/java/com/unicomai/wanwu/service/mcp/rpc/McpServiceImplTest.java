@@ -342,8 +342,10 @@ public class McpServiceImplTest {
         String conversationId = text(service.createSkillConversation(USER_ID, ORG_ID,
                 map("title", "Build skill")), "conversationId");
         Map<String, Object> chat = service.chatSkillConversation(USER_ID, ORG_ID,
-                map("conversationId", conversationId, "query", "build one"));
+                map("conversationId", conversationId, "query", "build one",
+                        "_responseOverride", "upstream skill draft"));
         assertEquals(1, chat.get("finish"));
+        assertEquals("upstream skill draft", text(chat, "response"));
         assertEquals(2, list(service.getSkillConversationDetail(USER_ID, ORG_ID, conversationId).get("list")).size());
         assertFalse(text(service.saveSkillConversation(USER_ID, ORG_ID,
                 map("conversationId", conversationId, "skillSaveId", "save-001", "name", "Generated Skill")),

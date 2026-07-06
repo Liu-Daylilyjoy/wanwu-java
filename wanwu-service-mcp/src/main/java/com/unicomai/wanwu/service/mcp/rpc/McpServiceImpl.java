@@ -933,7 +933,7 @@ public class McpServiceImpl implements McpService {
         Map<String, Object> item = require(skillConversations, orgId, text(request, "conversationId"),
                 "skill conversation");
         String query = defaultText(request, "query", "");
-        String response = "Generated local skill draft for: " + query;
+        String response = defaultText(request, "_responseOverride", "Generated local skill draft for: " + query);
         Map<String, Object> userMessage = conversationMessage("user", query, Collections.<Map<String, Object>>emptyList());
         Map<String, Object> assistantMessage = conversationMessage("assistant", response,
                 Collections.singletonList(skillResponseFile(query)));

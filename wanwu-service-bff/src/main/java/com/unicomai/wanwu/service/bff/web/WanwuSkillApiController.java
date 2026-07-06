@@ -3,6 +3,8 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.mcp.McpService;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.HttpHeaders;
@@ -30,15 +32,25 @@ public class WanwuSkillApiController {
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
+    private static final String RESPONSE_OVERRIDE = "_responseOverride";
+    private final OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private McpService mcpService;
+
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
 
     public WanwuSkillApiController() {
     }
 
     public WanwuSkillApiController(McpService mcpService) {
         this.mcpService = mcpService;
+    }
+
+    public WanwuSkillApiController(McpService mcpService, ModelService modelService) {
+        this.mcpService = mcpService;
+        this.modelService = modelService;
     }
 
     @GetMapping("/agent/skill/custom/list")
@@ -280,11 +292,24 @@ public class WanwuSkillApiController {
     public ResponseEntity<String> chatSkillConversation(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) throws JsonProcessingException {
-        UserContext ctx = userContext(authorization);
-        Map<String, Object> payload = mcpService.chatSkillConversation(ctx.userId, ctx.orgId, body(request));
-        return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_EVENT_STREAM)
-                .body("data: " + JSON.writeValueAsString(payload) + "\n\n");
+        try {
+            UserContext ctx = userContext(authorization);
+            Map<String, Object> payloadRequest = new LinkedHashMap<>(body(request));
+            payloadRequest.remove(RESPONSE_OVERRIDE);
+            authorizeSkillModel(ctx, payloadRequest);
+            String upstream = skillModelResponse(ctx, payloadRequest);
+            if (!isBlank(upstream)) {
+                payloadRequest.put(RESPONSE_OVERRIDE, upstream);
+            }
+            Map<String, Object> payload = mcpService.chatSkillConversation(ctx.userId, ctx.orgId, payloadRequest);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body("data: " + JSON.writeValueAsString(payload) + "\n\n");
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":1001,\"msg\":\"" + ex.getMessage() + "\"}");
+        }
     }
 
     @PostMapping("/agent/skill/conversation/save")
@@ -321,6 +346,70 @@ public class WanwuSkillApiController {
 
     private Map<String, Object> body(Map<String, Object> request) {
         return request == null ? new LinkedHashMap<>() : request;
+    }
+
+    private void authorizeSkillModel(UserContext context, Map<String, Object> request) {
+        String modelId = skillModelId(request);
+        if (modelService == null || isBlank(modelId)) {
+            return;
+        }
+        modelService.checkModelUserPermission(context.userId, context.orgId, Collections.singletonList(modelId));
+    }
+
+    private String skillModelResponse(UserContext context, Map<String, Object> request) {
+        String modelId = skillModelId(request);
+        if (modelService == null || isBlank(modelId)) {
+            return "";
+        }
+        try {
+            ModelInfo model = modelService.getModel(context.userId, context.orgId, modelId);
+            if (model == null) {
+                return "";
+            }
+            OpenAiCompatibleChatClient.ChatCompletionResult result =
+                    chatClient.complete(model, modelId, skillPrompt(request));
+            return result == null ? "" : result.getContent();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String skillPrompt(Map<String, Object> request) {
+        String query = text(request, "query");
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Generate or refine a Wanwu skill from the user request. ")
+                .append("Return concise implementation guidance and key files to create.\n\n")
+                .append("User request:\n").append(query);
+        Object files = request.get("fileInfo");
+        if (files != null) {
+            prompt.append("\n\nUploaded file metadata:\n").append(files);
+        }
+        return prompt.toString();
+    }
+
+    private String skillModelId(Map<String, Object> request) {
+        String direct = text(request, "modelId");
+        if (!isBlank(direct)) {
+            return direct;
+        }
+        Map<String, Object> modelConfig = mapValue(request.get("modelConfig"));
+        return text(modelConfig, "modelId");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Collections.<String, Object>emptyMap();
+    }
+
+    private String text(Map<String, Object> map, String key) {
+        if (map == null || key == null || map.get(key) == null) {
+            return "";
+        }
+        return String.valueOf(map.get(key));
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private UserContext userContext(String authorization) {

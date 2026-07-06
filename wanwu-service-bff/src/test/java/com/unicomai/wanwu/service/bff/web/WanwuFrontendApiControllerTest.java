@@ -160,7 +160,7 @@ public class WanwuFrontendApiControllerTest {
                 new WanwuFrontendApiController(iamService, appService, modelService, knowledgeService, mcpService,
                         operateService, safetyService),
                 new WanwuResourceApiController(mcpService, modelService),
-                new WanwuSkillApiController(mcpService),
+                new WanwuSkillApiController(mcpService, modelService),
                 new WanwuSafetyApiController(safetyService),
                 new WanwuSettingApiController(operateService),
                     new WanwuOperationApiController(iamService, operateService),
@@ -1335,6 +1335,69 @@ public class WanwuFrontendApiControllerTest {
                         .content("{\"conversationId\":\"skill-conv-001\",\"skillSaveId\":\"save-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.skillId").value("skill-custom-002"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void skillConversationChatUsesConfiguredOpenAiCompatibleModelWhenAvailable() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"chatcmpl-skill\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"upstream skill draft\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+            when(mcpService.chatSkillConversation(anyString(), anyString(), any(Map.class)))
+                    .thenAnswer(invocation -> map("response",
+                            ((Map<String, Object>) invocation.getArgument(2)).get("_responseOverride"),
+                            "finish", 1));
+
+            mockMvc.perform(post("/user/api/v1/agent/skill/conversation/chat")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"conversationId\":\"skill-conv-001\",\"query\":\"build one\","
+                                    + "\"modelConfig\":{\"modelId\":\"model-001\"}}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("\"response\":\"upstream skill draft\"")));
+
+            assertEquals("Bearer local-key", authorization.get());
+            assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(upstreamBody.get().contains("Generate or refine a Wanwu skill"));
+            ArgumentCaptor<Map> requestCaptor = forClass(Map.class);
+            verify(mcpService).chatSkillConversation(eq("dev-admin"), eq("default-org"), requestCaptor.capture());
+            assertEquals("upstream skill draft", requestCaptor.getValue().get("_responseOverride"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void skillConversationChatStopsBeforeGenerationWhenModelIsDenied() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: model-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(post("/user/api/v1/agent/skill/conversation/chat")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"skill-conv-001\",\"query\":\"build one\","
+                                + "\"modelConfig\":{\"modelId\":\"model-private\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("\"code\":1001")))
+                .andExpect(content().string(containsString("\"msg\":\"bff_model_perm: model-private\"")));
+
+        verify(mcpService, times(0)).chatSkillConversation(anyString(), anyString(), any(Map.class));
     }
 
     @Test
