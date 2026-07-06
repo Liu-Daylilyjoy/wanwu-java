@@ -60,15 +60,25 @@ The response keeps Java camelCase fields and adds Go callback aliases:
 - `rerankInfo` plus `rerank_info`
 - `fileUrl` plus `file_url`
 
+## Stream Search
+
+`/callback/v1/rag/knowledge/stream/search` now uses the same Java local knowledge hit path and
+returns a Go-style SSE event:
+
+- top-level `code`, `message`, `msg_id`, `history`, and `finish`
+- `data.output`
+- `data.searchList`
+- `data.score`
+
+The Java development stream is a deterministic single-frame completion event. It does not call the
+LLM provider or emit token-by-token deltas yet.
+
 ## Current Boundary
 
-This slice makes the callback RAG search routes usable by the frontend and by internal callback
-callers without changing frontend code. It does not reproduce the full Python RAG/vector/rerank
-runtime yet. Search quality is bounded by the current Java local `KnowledgeService` document and
-QA hit implementations.
-
-`/callback/v1/rag/knowledge/stream/search` remains a deterministic development SSE shell and is
-not yet connected to provider generation.
+This slice makes the callback RAG search and stream routes usable by the frontend and by internal
+callback callers without changing frontend code. It does not reproduce the full Python
+RAG/vector/rerank runtime yet. Search quality is bounded by the current Java local `KnowledgeService`
+document and QA hit implementations.
 
 ## Verification
 
@@ -76,4 +86,5 @@ Executed with Docker Maven/JDK8:
 
 ```powershell
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -Dtest=WanwuCallbackApiControllerTest#ragCallbacksAdaptGoRequestsToKnowledgeServiceAndReturnGoAliases -DfailIfNoTests=false test
+docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -Dtest=WanwuCallbackApiControllerTest#ragKnowledgeStreamReturnsSseWithLocalKnowledgeHits -DfailIfNoTests=false test
 ```

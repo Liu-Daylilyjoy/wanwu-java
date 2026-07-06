@@ -431,9 +431,19 @@ public class WanwuCallbackApiController {
     }
 
     @PostMapping("/callback/v1/rag/knowledge/stream/search")
-    public ResponseEntity<String> knowledgeStream(@RequestBody(required = false) Map<String, Object> request) {
-        String json = "{\"code\":0,\"message\":\"success\",\"data\":{\"list\":[]}}";
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + json + "\n\n");
+    public ResponseEntity<String> knowledgeStream(
+            @RequestBody(required = false) Map<String, Object> request,
+            HttpServletRequest httpRequest) {
+        Map<String, Object> safe = copyStringMap(request);
+        try {
+            Map<String, Object> hit = callbackKnowledgeSearch(safe, httpRequest);
+            return callbackSse(callbackKnowledgeStreamEvent(safe, hit));
+        } catch (RuntimeException ex) {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("code", 1);
+            event.put("message", defaultIfBlank(ex.getMessage(), "rag knowledge stream failed"));
+            return callbackSse(event);
+        }
     }
 
     @PostMapping({"/callback/v1/wga/sandbox/run", "/callback/v1/wga/sandbox/cleanup"})
@@ -517,6 +527,64 @@ public class WanwuCallbackApiController {
                 : knowledgeService.hitQaPairs(callbackUserId(request, httpRequest), callbackOrgId(request, httpRequest),
                 serviceRequest);
         return callbackRagResult(result, serviceRequest, false);
+    }
+
+    private Map<String, Object> callbackKnowledgeStreamEvent(Map<String, Object> request, Map<String, Object> hit) {
+        String question = firstText(request, "question", "query", "prompt", "content");
+        String output = callbackKnowledgeStreamOutput(question, hit);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        Object score = firstValue(hit, "score");
+        data.put("score", hasValue(score) ? score : Collections.emptyList());
+        data.put("output", output);
+        data.put("searchList", firstValue(hit, "searchList"));
+
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("code", 0);
+        event.put("message", "success");
+        event.put("msg_id", compactId());
+        event.put("data", data);
+        event.put("history", callbackKnowledgeStreamHistory(request, question, output));
+        event.put("finish", 1);
+        return event;
+    }
+
+    private String callbackKnowledgeStreamOutput(String question, Map<String, Object> hit) {
+        String safeQuestion = defaultIfBlank(question, "knowledge request");
+        return objectList(hit.get("searchList")).isEmpty()
+                ? "No local knowledge references found for: " + safeQuestion
+                : "Knowledge references ready for: " + safeQuestion;
+    }
+
+    private List<Map<String, Object>> callbackKnowledgeStreamHistory(Map<String, Object> request,
+                                                                     String question, String output) {
+        List<Map<String, Object>> history = new ArrayList<>();
+        for (Object raw : objectList(request.get("history"))) {
+            Map<String, Object> item = objectMap(raw);
+            if (!item.isEmpty()) {
+                history.add(item);
+            }
+        }
+        Map<String, Object> current = new LinkedHashMap<>();
+        current.put("query", question);
+        current.put("response", output);
+        current.put("needHistory", true);
+        history.add(current);
+        return history;
+    }
+
+    private ResponseEntity<String> callbackSse(Map<String, Object> event) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body("data: " + toJson(event) + "\n\n");
+    }
+
+    private String toJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (IOException ex) {
+            return "{\"code\":1,\"message\":\"json serialization failed\"}";
+        }
     }
 
     private Map<String, Object> callbackRagServiceRequest(Map<String, Object> request, boolean qa) {

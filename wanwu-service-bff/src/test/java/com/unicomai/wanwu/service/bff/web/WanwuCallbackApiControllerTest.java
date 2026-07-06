@@ -765,6 +765,52 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void ragKnowledgeStreamReturnsSseWithLocalKnowledgeHits() throws Exception {
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(knowledgeService.hitKnowledge(eq("stream-user"), eq(""), anyMap())).thenReturn(map(
+                "prompt", "Prompt text",
+                "searchList", Collections.singletonList(map(
+                        "title", "Guide.txt",
+                        "snippet", "Wanwu Java guide",
+                        "knowledgeName", "Dev KB",
+                        "contentType", "text",
+                        "score", 0.77)),
+                "score", Collections.singletonList(0.77),
+                "useGraph", false));
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, null, knowledgeService))
+                .build();
+
+        callbackMvc.perform(post("/callback/v1/rag/knowledge/stream/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"stream-user\",\"question\":\"Explain Wanwu\","
+                                + "\"knowledge_base_info\":{\"stream-user\":[{\"kb_id\":\"kb-stream\","
+                                + "\"kb_name\":\"Dev KB\"}]},\"topK\":2,\"threshold\":0.1,"
+                                + "\"use_graph\":false,\"history\":[{\"query\":\"old\",\"response\":\"answer\","
+                                + "\"needHistory\":true}]}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"code\":0")))
+                .andExpect(content().string(containsString("\"msg_id\"")))
+                .andExpect(content().string(containsString("\"finish\":1")))
+                .andExpect(content().string(containsString("\"output\":\"Knowledge references ready for: Explain Wanwu\"")))
+                .andExpect(content().string(containsString("\"searchList\"")))
+                .andExpect(content().string(containsString("\"kb_name\":\"Dev KB\"")))
+                .andExpect(content().string(containsString("\"score\":[0.77]")))
+                .andExpect(content().string(containsString("\"query\":\"Explain Wanwu\"")));
+
+        ArgumentCaptor<Map> streamCaptor = forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("stream-user"), eq(""), streamCaptor.capture());
+        Map<String, Object> streamRequest = streamCaptor.getValue();
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) streamRequest.get("knowledgeList");
+        assertEquals("kb-stream", knowledgeList.get(0).get("knowledgeId"));
+        Map<String, Object> matchParams = (Map<String, Object>) streamRequest.get("knowledgeMatchParams");
+        assertEquals(2, ((Number) matchParams.get("topK")).intValue());
+        assertEquals(0.1, ((Number) matchParams.get("threshold")).doubleValue());
+    }
+
+    @Test
     public void specializedModelCallbacksReturnGoCompatibleBodies() throws Exception {
         mockMvc.perform(post("/callback/v1/model/model-ocr/ocr")
                         .contentType(MediaType.APPLICATION_JSON)
