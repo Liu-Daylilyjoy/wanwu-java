@@ -12,6 +12,13 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.annotation.PostConstruct;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,6 +40,7 @@ public class McpServiceImpl implements McpService {
     private static final String DEFAULT_ORG = "default-org";
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
+    private static final int MCP_REMOTE_TIMEOUT_MILLIS = 2000;
 
     private final ConcurrentMap<String, Map<String, Object>> customTools = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, Object>> customMcps = new ConcurrentHashMap<>();
@@ -218,7 +226,7 @@ public class McpServiceImpl implements McpService {
         item.put("mcpId", id);
         item.put("ownerUserId", userId);
         item.put("ownerOrgId", org(orgId));
-        item.put("tools", sampleMcpTools(text(item, "name")));
+        item.put("tools", resolveMcpTools(item, text(item, "name")));
         customMcps.put(scoped(orgId, id), item);
         saveSnapshot();
         return singleton("mcpId", id);
@@ -238,6 +246,7 @@ public class McpServiceImpl implements McpService {
         updated.put("ownerUserId", current.get("ownerUserId"));
         updated.put("ownerOrgId", current.get("ownerOrgId"));
         updated.put("tools", current.get("tools"));
+        updated.put("tools", resolveMcpTools(updated, text(updated, "name")));
         customMcps.put(scoped(orgId, id), updated);
         saveSnapshot();
     }
@@ -263,9 +272,17 @@ public class McpServiceImpl implements McpService {
     public Map<String, Object> listMcpTools(String userId, String orgId, Map<String, Object> request) {
         String mcpId = text(request, "mcpId");
         if (!blank(mcpId)) {
-            return singleton("tools", copyList(listValue(require(customMcps, orgId, mcpId, "mcp").get("tools"))));
+            Map<String, Object> item = require(customMcps, orgId, mcpId, "mcp");
+            return singleton("tools", resolveMcpTools(item, text(item, "name")));
         }
-        return singleton("tools", sampleMcpTools(text(request, "serverUrl")));
+        Map<String, Object> probe = mcpBase(request);
+        String serverUrl = firstText(request, "serverUrl", "streamableUrl", "sseUrl");
+        if ("streamable".equalsIgnoreCase(text(probe, "transport")) && blank(text(probe, "streamableUrl"))) {
+            probe.put("streamableUrl", serverUrl);
+        } else if (blank(text(probe, "sseUrl"))) {
+            probe.put("sseUrl", serverUrl);
+        }
+        return singleton("tools", resolveMcpTools(probe, serverUrl));
     }
 
     @Override
@@ -1463,6 +1480,126 @@ public class McpServiceImpl implements McpService {
         );
     }
 
+    private List<Map<String, Object>> resolveMcpTools(Map<String, Object> item, String fallbackSeed) {
+        List<Map<String, Object>> remote = fetchRemoteMcpTools(item);
+        if (!remote.isEmpty()) {
+            return remote;
+        }
+        List<Map<String, Object>> stored = listValue(item.get("tools"));
+        if (!stored.isEmpty()) {
+            return copyList(stored);
+        }
+        return sampleMcpTools(fallbackSeed);
+    }
+
+    private List<Map<String, Object>> fetchRemoteMcpTools(Map<String, Object> item) {
+        if (!"streamable".equalsIgnoreCase(text(item, "transport"))) {
+            return Collections.emptyList();
+        }
+        String url = firstText(item, "streamableUrl", "serverUrl");
+        if (blank(url)) {
+            return Collections.emptyList();
+        }
+        try {
+            String sessionId = initializeStreamableMcp(url);
+            return parseRemoteTools(callStreamableMcp(url, mcpRpcBody("tools/list"), sessionId).body);
+        } catch (Exception ex) {
+            return Collections.emptyList();
+        }
+    }
+
+    private String initializeStreamableMcp(String url) {
+        try {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("protocolVersion", "2024-11-05");
+            params.put("capabilities", new LinkedHashMap<String, Object>());
+            Map<String, Object> clientInfo = new LinkedHashMap<>();
+            clientInfo.put("name", "wanwu-java");
+            clientInfo.put("version", "0.1.0");
+            params.put("clientInfo", clientInfo);
+            return callStreamableMcp(url, mcpRpcBody("initialize", params), "").sessionId;
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String mcpRpcBody(String method) throws IOException {
+        return mcpRpcBody(method, Collections.<String, Object>emptyMap());
+    }
+
+    private String mcpRpcBody(String method, Map<String, Object> params) throws IOException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("jsonrpc", "2.0");
+        body.put("id", 1);
+        body.put("method", method);
+        body.put("params", params);
+        return JSON.writeValueAsString(body);
+    }
+
+    private RemoteMcpResponse callStreamableMcp(String url, String body, String sessionId) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("Content-Type", "application/json");
+        if (!blank(sessionId)) {
+            connection.setRequestProperty("Mcp-Session-Id", sessionId);
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        connection.setFixedLengthStreamingMode(bytes.length);
+        try (OutputStream out = connection.getOutputStream()) {
+            out.write(bytes);
+        }
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        String responseBody = stream == null ? "" : readFully(stream);
+        if (status < 200 || status >= 300) {
+            throw new IOException("mcp streamable http " + status + ": " + responseBody);
+        }
+        return new RemoteMcpResponse(responseBody, defaultString(connection.getHeaderField("Mcp-Session-Id"), ""));
+    }
+
+    private String readFully(InputStream stream) throws IOException {
+        byte[] buffer = new byte[1024];
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int read;
+        while ((read = stream.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+        }
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private List<Map<String, Object>> parseRemoteTools(String body) throws IOException {
+        if (blank(body)) {
+            return Collections.emptyList();
+        }
+        JsonNode root = JSON.readTree(body);
+        JsonNode tools = root.path("result").path("tools");
+        if (!tools.isArray()) {
+            tools = root.path("tools");
+        }
+        if (!tools.isArray()) {
+            tools = root.path("data").path("tools");
+        }
+        if (!tools.isArray()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (JsonNode tool : tools) {
+            if (blank(tool.path("name").asText(""))) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> row = JSON.convertValue(tool, Map.class);
+            result.add(row);
+        }
+        return result;
+    }
+
     private Map<String, Object> action(String name, String description) {
         Map<String, Object> property = new LinkedHashMap<>();
         property.put("type", "string");
@@ -1603,6 +1740,16 @@ public class McpServiceImpl implements McpService {
                 new LinkedHashMap<String, Map<String, Object>>();
         public Map<String, String> builtinToolApiKeys = new LinkedHashMap<String, String>();
         public int variableSequence = 1;
+    }
+
+    private static final class RemoteMcpResponse {
+        private final String body;
+        private final String sessionId;
+
+        private RemoteMcpResponse(String body, String sessionId) {
+            this.body = body;
+            this.sessionId = sessionId;
+        }
     }
 
     private Map<String, Object> defaultApiAuth() {

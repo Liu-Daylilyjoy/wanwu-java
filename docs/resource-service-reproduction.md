@@ -7,6 +7,7 @@ Date: 2026-07-01
 - Frontend callers: `web/src/api/mcp.js`, `web/src/api/templateSquare.js`, `web/src/api/promptTemplate.js`, `web/src/api/skill.js`, `web/src/api/skillSquare.js`, `web/src/views/tool`, `web/src/views/mcpManagementPublic`, and `web/src/components/createApp/createPrompt.vue`.
 - Go BFF router: `D:\work\week3\wanwu\internal\bff-service\server\http\handler\router\v1\tool.go`, `workflow.go`, `mcp_square.go`, `skill.go`, `skill_square.go`, and the prompt routes in `explore.go`.
 - Go request/response contracts: `internal\bff-service\model\request\tool.go`, `tool_box.go`, `mcp.go`, `mcp_server.go`, `prompt.go`, `skill.go`, `skill_square.go`; responses in the matching `response` files, especially `workflow_tool.go` and `tool_box.go` for Workflow editor tool selection.
+- Go remote MCP tool discovery: `internal\bff-service\pkg\mcp-util\mcp_client.go` creates an SSE or streamable client and calls `ListTools`; `internal\bff-service\service\mcp.go` wires `/mcp/tool/list` to that remote discovery path.
 
 ## Covered Java Behavior
 
@@ -16,6 +17,7 @@ Date: 2026-07-01
   - OpenAPI schema parsing into frontend action rows and MCP-compatible `name/description/inputSchema` tools.
   - Built-in Tool square list/detail and API-key shell.
   - Custom MCP create/list/detail/update/delete and tool listing.
+  - Streamable custom MCP tool discovery through JSON-RPC `initialize` plus `tools/list`, with local sample-tool fallback when the remote endpoint is offline.
   - MCP Server create/list/detail/update/delete, server tool bind/edit/delete, and OpenAPI-tool bind shell.
   - MCP square list/detail/recommend seed data.
   - Custom Prompt create/list/detail/update/delete/copy.
@@ -46,6 +48,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Login as `app` returned token `dev-token-app` and only `app`, `app.rag`, `app.workflow`, `app.agent`.
 - Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, `/tool/action/list?toolType=custom`, and Workflow editor tool select/action/tool-box compatibility.
 - Created an MCP Server and verified `/mcp/server/list`.
+- Verified `/mcp/tool/list?transport=streamable&serverUrl=...` reaches a local streamable MCP JSON-RPC server and returns the remote `tools/list` result.
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
 - Checked and created a custom Skill, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
@@ -55,12 +58,12 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
-- Real remote MCP protocol runtime, SSE/streamable proxying, and external OpenAPI invocation beyond the local JSON-RPC development call response.
+- Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and external OpenAPI invocation.
 - Real Skill package parsing, validation, execution, and package storage.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.

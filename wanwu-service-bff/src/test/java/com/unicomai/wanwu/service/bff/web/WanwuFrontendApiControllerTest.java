@@ -994,6 +994,8 @@ public class WanwuFrontendApiControllerTest {
                 .thenReturn(listResult(customTool));
         when(mcpService.listToolActions(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(actions);
+        when(mcpService.listMcpTools(anyString(), anyString(), any(Map.class)))
+                .thenReturn(Collections.<String, Object>singletonMap("tools", Collections.singletonList(action)));
         when(mcpService.createMcpServer(anyString(), anyString(), any(Map.class)))
                 .thenReturn(Collections.<String, Object>singletonMap("mcpServerId", "mcpserver-001"));
         Map<String, Object> mcpServer = new LinkedHashMap<>();
@@ -1042,6 +1044,13 @@ public class WanwuFrontendApiControllerTest {
                         .param("toolType", "custom"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.actions[0].name").value("get_weather"));
+
+        mockMvc.perform(get("/user/api/v1/mcp/tool/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("serverUrl", "http://127.0.0.1/mcp")
+                        .param("transport", "streamable"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tools[0].name").value("get_weather"));
 
         mockMvc.perform(post("/user/api/v1/mcp/server")
                         .header("Authorization", "Bearer dev-token")

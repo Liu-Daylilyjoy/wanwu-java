@@ -1,15 +1,22 @@
 package com.unicomai.wanwu.service.mcp.rpc;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.service.mcp.persistence.entity.McpRecordEntity;
 import com.unicomai.wanwu.service.mcp.persistence.mapper.McpRecordMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +83,43 @@ public class McpServiceImplTest {
         assertNotNull(service.getCustomPrompt(USER_ID, ORG_ID, copiedPromptId));
         assertTrue(text(service.optimizePrompt(USER_ID, ORG_ID, map("prompt", "review this")), "response")
                 .contains("优化后的提示词"));
+    }
+
+    @Test
+    public void listMcpToolsFetchesRemoteStreamableTools() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/mcp", exchange -> {
+            requestBody.set(readBody(exchange));
+            byte[] response = ("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":["
+                    + "{\"name\":\"wanwu_remote_search\",\"description\":\"Remote search\","
+                    + "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}},"
+                    + "\"required\":[\"query\"]}}]}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(response);
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/mcp";
+            Map<String, Object> result = service.listMcpTools(USER_ID, ORG_ID,
+                    map("serverUrl", url, "transport", "streamable"));
+
+            Map<String, Object> tool = firstList(result, "tools");
+            assertEquals("wanwu_remote_search", text(tool, "name"));
+            assertEquals("Remote search", text(tool, "description"));
+            assertTrue(requestBody.get().contains("\"method\":\"tools/list\""));
+
+            String mcpId = text(service.createMcp(USER_ID, ORG_ID,
+                    map("name", "Remote MCP", "desc", "remote", "from", "custom",
+                            "streamableUrl", url, "transport", "streamable")), "mcpId");
+            Map<String, Object> storedResult = service.listMcpTools(USER_ID, ORG_ID, map("mcpId", mcpId));
+            assertEquals("wanwu_remote_search", text(firstList(storedResult, "tools"), "name"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -219,5 +263,15 @@ public class McpServiceImplTest {
         record.setCreatedAt(1L);
         record.setUpdatedAt(1L);
         return record;
+    }
+
+    private String readBody(HttpExchange exchange) throws IOException {
+        byte[] buffer = new byte[1024];
+        StringBuilder builder = new StringBuilder();
+        int read;
+        while ((read = exchange.getRequestBody().read(buffer)) != -1) {
+            builder.append(new String(buffer, 0, read, StandardCharsets.UTF_8));
+        }
+        return builder.toString();
     }
 }

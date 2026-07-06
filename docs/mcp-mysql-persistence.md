@@ -23,6 +23,7 @@ The Go MCP service selects `db.name: mysql`, connects to the `mcp_service` schem
 - `wanwu-service-mcp` depends on `wanwu-common-data`.
 - `wanwu-service-mcp/src/main/resources/db/migration/V1__create_mcp_records.sql` creates `mcp_records`.
 - `McpServiceImpl` loads and saves one JSON snapshot containing the current resource-center custom tools, custom MCPs, MCP servers/tools, custom prompts, custom/acquired/builtin skill variables, skill conversations, and built-in tool API keys.
+- Custom MCP `transport=streamable` records now try to refresh their tool list from the configured remote endpoint using JSON-RPC `initialize` plus `tools/list`; successful tool rows are stored in the snapshot, while offline endpoints retain the development fallback tools.
 
 ## Persistence Shape
 
@@ -38,10 +39,11 @@ This makes the zero-frontend-change resource pages durable through Docker restar
 ## Verified Behavior
 
 - Unit tests cover snapshot upsert, startup reload, restored Tool/Prompt/Skill state, and variable sequence continuation.
+- Unit tests cover streamable MCP remote `tools/list` discovery against a local HTTP MCP JSON-RPC test server.
 - Docker smoke should create a custom Tool through `localhost:3000`, recreate MCP and BFF containers, verify the Tool still appears, and confirm a row exists in `mcp_service.mcp_records`.
 
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent tables for custom tools, MCPs, MCP servers, server tools, skills, skill variables, and publishing state.
-- Implement real remote MCP protocol runtime, SSE/streamable proxying, OpenAPI invocation, and callback/OpenAPI runtime endpoints.
+- Implement full remote MCP runtime, SSE discovery, stateful streamable proxying beyond `tools/list`, OpenAPI invocation, and callback/OpenAPI runtime endpoints.
 - Implement real skill package parsing, validation, storage, execution, and model-backed prompt/skill generation.
