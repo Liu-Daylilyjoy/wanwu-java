@@ -533,6 +533,18 @@ public class KnowledgeServiceImplTest {
         assertEquals(true, defaultSegment.get("available"));
         assertTrue(((String) defaultSegment.get("content")).contains("Guide.txt"));
 
+        service.batchCreateDocSegment("dev-admin", "default-org",
+                batchSegmentContent("doc-guide", "content,labels\n"
+                        + "\"Bulk segment A\",\"alpha,beta\"\n"
+                        + "Bulk segment B,manual"));
+        Map<String, Object> bulkSegments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-guide", "Bulk segment A"));
+        assertEquals(1, bulkSegments.get("segmentTotalNum"));
+        Map<String, Object> bulkSegment = listOfMaps(bulkSegments.get("contentList")).get(0);
+        assertEquals("Bulk segment A", bulkSegment.get("content"));
+        assertEquals("alpha", ((List) bulkSegment.get("labels")).get(0));
+        assertEquals("beta", ((List) bulkSegment.get("labels")).get(1));
+
         service.createDocSegment("dev-admin", "default-org",
                 createSegment("doc-guide", "Extra segment", Collections.singletonList("manual")));
         Map<String, Object> twoSegments = service.listDocSegments("dev-admin", "default-org", segmentList("doc-guide", "Extra"));
@@ -550,7 +562,7 @@ public class KnowledgeServiceImplTest {
         assertEquals(false, updated.get("available"));
 
         service.deleteDocSegment("dev-admin", "default-org", deleteSegment("doc-guide", contentId));
-        assertEquals(1, service.listDocSegments("dev-admin", "default-org",
+        assertEquals(3, service.listDocSegments("dev-admin", "default-org",
                 segmentList("doc-guide", "")).get("segmentTotalNum"));
 
         service.deleteDocs("dev-admin", "default-org", deleteDocs(knowledgeId, "doc-guide"));
@@ -1174,6 +1186,14 @@ public class KnowledgeServiceImplTest {
         request.put("docId", docId);
         request.put("content", content);
         request.put("labels", labels);
+        return request;
+    }
+
+    private Map<String, Object> batchSegmentContent(String docId, String content) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("docId", docId);
+        request.put("fileUploadId", "segments.csv");
+        request.put("content", content);
         return request;
     }
 

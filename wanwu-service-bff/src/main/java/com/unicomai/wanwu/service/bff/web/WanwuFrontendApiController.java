@@ -2449,7 +2449,7 @@ public class WanwuFrontendApiController {
     public FrontendResponse<Map<String, Object>> batchCreateKnowledgeDocSegments(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return knowledgeVoidResponse(authorization, request,
+        return knowledgeVoidResponse(authorization, enrichKnowledgeImportContent(request),
                 (ctx, body) -> knowledgeService.batchCreateDocSegment(ctx.getUserId(), ctx.getOrgId(), body),
                 resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }

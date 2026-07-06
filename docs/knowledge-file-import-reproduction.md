@@ -31,6 +31,8 @@ Community report batch import also reuses the same base64 file decoding path for
 
 The BFF upload bridge now preserves binary knowledge imports from the unchanged frontend: local uploads with `.xlsx`, `.docx`, `.pdf`, `.xls`, or `.doc` names are forwarded to the knowledge service as `contentBase64` plus `docType`, while plain text uploads still use the existing UTF-8 `content` path. This lets the frontend upload-first import flows reach the Java parser without corrupting Office/PDF bytes, including document `fileUploadId`, QA `docInfoList[].docUrl`, and community report `fileUploadId` payloads.
 
+Document segment batch-create now follows the Go CSV task shape for the local Docker loop: `/knowledge/doc/segment/batch/create` reads the BFF-local uploaded CSV from `fileUploadId`, skips the header row, uses column 1 as segment content, and splits column 2 into labels by comma. The Go system submits this as an async task through MinIO; Java performs the same content creation synchronously for development.
+
 ## Remaining Gap
 
 Legacy DOC, MinIO object lifecycle, parser model execution, async task state, vector indexing, and Go-equivalent normalized import tables remain later slices.

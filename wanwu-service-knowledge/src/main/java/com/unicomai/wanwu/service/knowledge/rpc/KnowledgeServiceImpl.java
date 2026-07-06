@@ -937,7 +937,23 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
-    public void batchCreateDocSegment(String userId, String orgId, Map<String, Object> request) {
+    public synchronized void batchCreateDocSegment(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String docId = string(safe.get("docId"));
+        if (findDoc(docId) == null) {
+            throw new IllegalArgumentException("doc not found: " + docId);
+        }
+        List<Map<String, Object>> importedSegments = parseSegmentImportRows(segmentImportContent(safe));
+        if (importedSegments.isEmpty()) {
+            throw new IllegalArgumentException("segment file content cannot be empty");
+        }
+        List<SegmentState> target = segments(docId);
+        for (Map<String, Object> imported : importedSegments) {
+            SegmentState segment = newSegment(docId, string(imported.get("content")), target.size() + 1);
+            segment.labels = stringList(imported.get("labels"));
+            target.add(segment);
+        }
+        saveSnapshot();
     }
 
     @Override
@@ -2991,6 +3007,55 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             rows.add(row);
         }
         return rows;
+    }
+
+    private String segmentImportContent(Map<String, Object> request) {
+        String content = firstText(request, "content", "text", "csv", "tsv");
+        if (isBlank(content)) {
+            content = decodedDocumentText(firstText(request, "contentBase64", "base64", "textBase64"),
+                    documentExtension(request));
+        }
+        return content;
+    }
+
+    private List<Map<String, Object>> parseSegmentImportRows(String content) {
+        String normalized = normalizeContent(content);
+        if (isBlank(normalized)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        String[] lines = normalized.split("\\n+");
+        for (int i = 1; i < lines.length; i++) {
+            String line = lines[i];
+            List<String> cells = line.indexOf('\t') >= 0 ? splitTabLine(line) : splitCsvLine(line);
+            if (cells.size() < 2) {
+                continue;
+            }
+            String segmentContent = cells.get(0).trim();
+            if (isBlank(segmentContent)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            row.put("content", segmentContent);
+            row.put("labels", splitSegmentLabels(cells.get(1)));
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private List<String> splitSegmentLabels(String value) {
+        if (isBlank(value)) {
+            return Collections.emptyList();
+        }
+        List<String> labels = new ArrayList<String>();
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            String label = part.trim();
+            if (!isBlank(label)) {
+                labels.add(label);
+            }
+        }
+        return labels;
     }
 
     private List<String> splitTabLine(String line) {

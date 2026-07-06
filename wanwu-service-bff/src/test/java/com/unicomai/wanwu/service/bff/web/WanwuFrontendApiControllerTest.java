@@ -3081,6 +3081,30 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void batchSegmentImportReadsUploadedCsvContent() throws Exception {
+        String segmentFileId = "segment-upload-bff-test.csv";
+        String csv = "content,labels\n"
+                + "\"Bulk segment A\",\"alpha,beta\"\n"
+                + "Bulk segment B,manual";
+        UploadedFileStore.defaultStore().writeText(segmentFileId, csv);
+        when(knowledgeService.resolveKnowledgeId(anyString(), anyString(), any(Map.class)))
+                .thenReturn("knowledge-segment-001");
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/segment/batch/create")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"docId\":\"doc-segment-001\","
+                                + "\"fileUploadId\":\"" + segmentFileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Map> segmentCaptor = forClass(Map.class);
+        verify(knowledgeService).batchCreateDocSegment(anyString(), anyString(), segmentCaptor.capture());
+        assertEquals(csv, segmentCaptor.getValue().get("content"));
+        assertEquals(segmentFileId, segmentCaptor.getValue().get("fileUploadId"));
+    }
+
+    @Test
     public void createAssistantReturnsFrontendAssistantId() throws Exception {
         when(appService.createAssistant(any(AssistantCreateCommand.class)))
                 .thenReturn(new AssistantCreateResult("assistant-001"));
