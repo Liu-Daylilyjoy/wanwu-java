@@ -24,7 +24,7 @@ Date: 2026-07-01
   - Custom Prompt create/list/detail/update/delete/copy.
   - Prompt template list/detail/copy-to-custom.
   - Prompt optimize/reason/evaluate SSE compatibility with deterministic local responses.
-  - Custom Skill import/check/list/detail/delete.
+  - Custom Skill ZIP import/check/list/detail/delete, including `SKILL.md` front matter extraction for `name` and `description`, kebab-case validation, and returning the imported markdown in custom Skill detail.
   - Custom/Built-in/Acquired Skill variable config create/update/delete.
   - Built-in Skill list/detail/download seed data.
   - Skill select endpoint for Agent configuration.
@@ -53,20 +53,20 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Verified `/service/api/openapi/v1/mcp/server/message` `tools/call` delegates to the MCP service runtime, and verified the service runtime calls local OpenAPI HTTP servers for both custom-tool and direct-schema bindings with `query-*` arguments, JSON body arguments, bearer auth, and query auth.
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
-- Checked and created a custom Skill, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
+- Checked and created a custom Skill from a ZIP package containing `SKILL.md`, verified front matter parsing, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
 - Verified built-in Skill list/detail/download for `builtin-summary`.
 - Verified Skill square list, share-to-resource, acquired Skill list, and acquired Skill config.
 - Verified Skill conversation create/chat SSE/save through `/agent/skill/conversation/*`.
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools and direct OpenAPI schema tools through `tools/call`.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
 - Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and built-in MCP Server execution.
-- Real Skill package parsing, validation, execution, and package storage.
+- Real Skill package object storage/download lifecycle, execution, and package-to-runtime installation.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.
 - Callback MCP runtime parity beyond the public OpenAPI custom-tool execution path.

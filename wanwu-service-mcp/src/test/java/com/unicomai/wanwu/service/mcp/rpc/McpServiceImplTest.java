@@ -8,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -17,10 +19,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -213,21 +218,22 @@ public class McpServiceImplTest {
     }
 
     @Test
-    public void resourceLifecycleCoversSkillResourceAndConversation() {
+    public void resourceLifecycleCoversSkillResourceAndConversation() throws Exception {
+        File zip = skillZip("imported-skill/SKILL.md",
+                "---\nname: imported-skill\ndescription: imported\n---\n# Imported Skill\n");
         Map<String, Object> check = service.checkCustomSkill(USER_ID, ORG_ID,
-                map("zipUrl", "file-upload/skill.zip", "name", "Imported Skill", "desc", "imported"));
-        assertEquals("Imported Skill", text(check, "name"));
+                map("zipUrl", zip.getAbsolutePath()));
+        assertEquals("imported-skill", text(check, "name"));
 
         String customSkillId = text(service.createCustomSkill(USER_ID, ORG_ID,
-                map("name", "Imported Skill", "author", "Wanwu", "desc", "imported",
-                        "zipUrl", "file-upload/skill.zip")), "skillId");
+                map("author", "Wanwu", "zipUrl", zip.getAbsolutePath())), "skillId");
         assertFalse(customSkillId.isEmpty());
         String customVariableId = text(service.createCustomSkillConfig(USER_ID, ORG_ID,
                 map("skillId", customSkillId, "variable",
                         map("name", "API Key", "variableKey", "apiKey", "variableValue", "dev"))), "id");
         assertFalse(customVariableId.isEmpty());
         assertEquals(1, list(service.getCustomSkill(USER_ID, ORG_ID, customSkillId).get("variables")).size());
-        assertEquals("custom", text(first(service.listSkillSelect(USER_ID, ORG_ID, "Imported", "custom")),
+        assertEquals("custom", text(first(service.listSkillSelect(USER_ID, ORG_ID, "imported", "custom")),
                 "skillType"));
 
         assertTrue(list(service.listBuiltinSkills(USER_ID, ORG_ID, "").get("list")).size() >= 1);
@@ -260,6 +266,36 @@ public class McpServiceImplTest {
         assertFalse(text(service.saveSkillConversation(USER_ID, ORG_ID,
                 map("conversationId", conversationId, "skillSaveId", "save-001", "name", "Generated Skill")),
                 "skillId").isEmpty());
+    }
+
+    @Test
+    public void checkAndCreateCustomSkillParseZipFrontMatter() throws Exception {
+        File zip = skillZip("demo-skill/SKILL.md",
+                "---\nname: demo-skill\ndescription: Demo skill from zip\n---\n# Demo Skill\n");
+
+        Map<String, Object> check = service.checkCustomSkill(USER_ID, ORG_ID, map("zipUrl", zip.getAbsolutePath()));
+
+        assertEquals("demo-skill", text(check, "name"));
+        assertEquals("Demo skill from zip", text(check, "desc"));
+
+        String skillId = text(service.createCustomSkill(USER_ID, ORG_ID,
+                map("zipUrl", zip.getAbsolutePath(), "author", "Joy")), "skillId");
+        Map<String, Object> detail = service.getCustomSkill(USER_ID, ORG_ID, skillId);
+
+        assertEquals("demo-skill", text(detail, "name"));
+        assertEquals("Demo skill from zip", text(detail, "desc"));
+        assertEquals("Joy", text(detail, "author"));
+        assertTrue(text(detail, "skillMarkdown").contains("# Demo Skill"));
+    }
+
+    @Test
+    public void checkCustomSkillRejectsZipWithoutSkillMarkdown() throws Exception {
+        File zip = skillZip("demo/README.md", "# Missing skill file\n");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.checkCustomSkill(USER_ID, ORG_ID, map("zipUrl", zip.getAbsolutePath())));
+
+        assertTrue(error.getMessage().contains("SKILL.md file not found"));
     }
 
     @Test
@@ -358,6 +394,17 @@ public class McpServiceImplTest {
         record.setCreatedAt(1L);
         record.setUpdatedAt(1L);
         return record;
+    }
+
+    private File skillZip(String entryName, String content) throws IOException {
+        File file = File.createTempFile("wanwu-skill", ".zip");
+        file.deleteOnExit();
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(file))) {
+            zip.putNextEntry(new ZipEntry(entryName));
+            zip.write(content.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return file;
     }
 
     private String readBody(HttpExchange exchange) throws IOException {

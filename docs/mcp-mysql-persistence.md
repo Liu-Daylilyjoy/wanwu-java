@@ -29,6 +29,7 @@ For public MCP Server runtime, Go converts the bound custom Tool OpenAPI schema 
 - `McpServiceImpl` loads and saves one JSON snapshot containing the current resource-center custom tools, custom MCPs, MCP servers/tools, custom prompts, custom/acquired/builtin skill variables, skill conversations, and built-in tool API keys.
 - Custom MCP `transport=streamable` records now try to refresh their tool list from the configured remote endpoint using JSON-RPC `initialize` plus `tools/list`; successful tool rows are stored in the snapshot, while offline endpoints retain the development fallback tools.
 - Public MCP Server `tools/call` now delegates from the BFF OpenAPI JSON-RPC route to `McpService.callMcpServerTool`. Bound custom OpenAPI tools and direct `/mcp/server/tool/openapi` schema tools execute real HTTP requests using the schema `servers[0].url`, operation method/path, Go-style prefixed parameters, JSON body fields, and `none`/`api_key_header`/`api_key_query` auth.
+- Custom Skill checks and creates now load local/file/http ZIP packages, locate `SKILL.md`, parse front matter `name` and `description`, enforce Go-style kebab-case skill names, and store the imported markdown in the custom Skill detail snapshot.
 
 ## Persistence Shape
 
@@ -46,10 +47,11 @@ This makes the zero-frontend-change resource pages durable through Docker restar
 - Unit tests cover snapshot upsert, startup reload, restored Tool/Prompt/Skill state, and variable sequence continuation.
 - Unit tests cover streamable MCP remote `tools/list` discovery against a local HTTP MCP JSON-RPC test server.
 - Unit tests cover public MCP Server `tools/call` against local HTTP OpenAPI test servers, including custom-tool query parameter mapping, direct OpenAPI JSON body mapping, bearer header auth, query auth, and BFF JSON-RPC delegation.
+- Unit tests cover custom Skill ZIP parsing for valid front matter and rejection when `SKILL.md` is missing.
 - Docker smoke should create a custom Tool through `localhost:3000`, recreate MCP and BFF containers, verify the Tool still appears, and confirm a row exists in `mcp_service.mcp_records`.
 
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent tables for custom tools, MCPs, MCP servers, server tools, skills, skill variables, and publishing state.
 - Implement full remote MCP runtime, SSE discovery, stateful streamable proxying beyond `tools/list`, built-in MCP Server tool execution, and callback runtime parity.
-- Implement real skill package parsing, validation, storage, execution, and model-backed prompt/skill generation.
+- Implement real skill package object storage/download lifecycle, runtime execution, package-to-sandbox installation, and model-backed prompt/skill generation.

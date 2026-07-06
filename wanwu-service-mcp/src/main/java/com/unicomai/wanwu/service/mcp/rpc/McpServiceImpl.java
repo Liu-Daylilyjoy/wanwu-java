@@ -12,7 +12,10 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.annotation.PostConstruct;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -33,6 +36,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class McpServiceImpl implements McpService {
@@ -42,6 +48,8 @@ public class McpServiceImpl implements McpService {
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
     private static final int MCP_REMOTE_TIMEOUT_MILLIS = 2000;
+    private static final Pattern SKILL_NAME_PATTERN =
+            Pattern.compile("^[\\p{L}][\\p{L}\\p{N}]*(?:-[\\p{L}\\p{N}]+)*$");
 
     private final ConcurrentMap<String, Map<String, Object>> customTools = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, Object>> customMcps = new ConcurrentHashMap<>();
@@ -647,6 +655,14 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public Map<String, Object> checkCustomSkill(String userId, String orgId, Map<String, Object> request) {
+        String zipUrl = text(request, "zipUrl");
+        if (!blank(zipUrl)) {
+            SkillPackage skillPackage = parseSkillPackage(zipUrl);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("name", skillPackage.name);
+            result.put("desc", skillPackage.description);
+            return result;
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", defaultText(request, "name", "Imported Skill"));
         result.put("desc", defaultText(request, "desc", "Validated local skill package: " + text(request, "zipUrl")));
@@ -970,13 +986,18 @@ public class McpServiceImpl implements McpService {
     }
 
     private Map<String, Object> customSkillBase(Map<String, Object> request) {
+        String zipUrl = defaultText(request, "zipUrl", "");
+        SkillPackage skillPackage = parseSkillPackageForCreate(zipUrl, request);
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("avatar", avatar(request));
-        item.put("name", defaultText(request, "name", "Imported Skill"));
+        item.put("name", skillPackage == null ? defaultText(request, "name", "Imported Skill") : skillPackage.name);
         item.put("author", defaultText(request, "author", "Wanwu"));
-        item.put("desc", defaultText(request, "desc", "Imported local skill package."));
-        item.put("zipUrl", defaultText(request, "zipUrl", ""));
-        item.put("objectPath", defaultText(request, "zipUrl", ""));
+        item.put("desc", skillPackage == null ? defaultText(request, "desc", "Imported local skill package.")
+                : skillPackage.description);
+        item.put("zipUrl", zipUrl);
+        item.put("objectPath", zipUrl);
+        item.put("skillMarkdown", skillPackage == null ? defaultText(request, "skillMarkdown", "")
+                : skillPackage.markdown);
         item.put("sourceType", defaultText(request, "sourceType", "skill_import"));
         item.put("threadId", defaultText(request, "threadId", ""));
         item.put("previewId", defaultText(request, "previewId", ""));
@@ -997,8 +1018,142 @@ public class McpServiceImpl implements McpService {
 
     private Map<String, Object> customSkillDetail(Map<String, Object> item) {
         Map<String, Object> row = customSkillInfo(item);
+        row.put("skillMarkdown", item.get("skillMarkdown"));
         row.put("variables", skillVariables(item));
         return row;
+    }
+
+    private SkillPackage parseSkillPackageForCreate(String zipUrl, Map<String, Object> request) {
+        if (blank(zipUrl)) {
+            return null;
+        }
+        try {
+            return parseSkillPackage(zipUrl);
+        } catch (IllegalArgumentException ex) {
+            if (!blank(text(request, "name")) && !blank(text(request, "desc"))) {
+                return null;
+            }
+            throw ex;
+        }
+    }
+
+    private SkillPackage parseSkillPackage(String zipUrl) {
+        byte[] zipData = loadSkillZip(zipUrl);
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zipData))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (!entry.isDirectory() && "SKILL.md".equals(baseName(entry.getName()))) {
+                    String markdown = new String(readBytes(zip), StandardCharsets.UTF_8);
+                    SkillFrontMatter frontMatter = parseSkillFrontMatter(markdown);
+                    return new SkillPackage(markdown, frontMatter.name, frontMatter.description);
+                }
+            }
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("failed to read zip file: " + ex.getMessage(), ex);
+        }
+        throw new IllegalArgumentException("SKILL.md file not found in the zip archive");
+    }
+
+    private byte[] loadSkillZip(String zipUrl) {
+        if (zipUrl.startsWith("http://") || zipUrl.startsWith("https://")) {
+            return downloadSkillZip(zipUrl);
+        }
+        if (zipUrl.startsWith("file:")) {
+            try (InputStream stream = new URL(zipUrl).openStream()) {
+                return readBytes(stream);
+            } catch (IOException ex) {
+                throw new IllegalArgumentException("failed to read zip file: " + ex.getMessage(), ex);
+            }
+        }
+        File file = new File(zipUrl);
+        if (!file.isFile()) {
+            throw new IllegalArgumentException("skill zip file not found: " + zipUrl);
+        }
+        try (InputStream stream = new FileInputStream(file)) {
+            return readBytes(stream);
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("failed to read zip file: " + ex.getMessage(), ex);
+        }
+    }
+
+    private byte[] downloadSkillZip(String zipUrl) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection) new URL(zipUrl).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+            connection.setReadTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 200 && status < 300
+                    ? connection.getInputStream()
+                    : connection.getErrorStream();
+            byte[] body = stream == null ? new byte[0] : readBytes(stream);
+            if (status < 200 || status >= 300) {
+                throw new IllegalArgumentException("download skill zip err: http " + status + " "
+                        + new String(body, StandardCharsets.UTF_8));
+            }
+            return body;
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("download skill zip err: " + ex.getMessage(), ex);
+        }
+    }
+
+    private SkillFrontMatter parseSkillFrontMatter(String markdown) {
+        String content = markdown == null ? "" : markdown.trim();
+        if (!content.startsWith("---")) {
+            throw new IllegalArgumentException("SKILL.md file must start with front matter delimiters");
+        }
+        String rest = content.substring(3);
+        int endIndex = rest.indexOf("\n---");
+        if (endIndex < 0) {
+            throw new IllegalArgumentException("SKILL.md file must end with front matter delimiters");
+        }
+        Map<String, String> frontMatter = parseSimpleYaml(rest.substring(0, endIndex));
+        String name = frontMatter.get("name");
+        String description = frontMatter.get("description");
+        if (blank(name) || blank(description)) {
+            throw new IllegalArgumentException(
+                    "SKILL.md file must contain both name and description in front matter");
+        }
+        if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
+            throw new IllegalArgumentException("SKILL.md file name must be in kebab-case");
+        }
+        return new SkillFrontMatter(name, description);
+    }
+
+    private Map<String, String> parseSimpleYaml(String source) {
+        Map<String, String> values = new LinkedHashMap<>();
+        String[] lines = source.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        for (String rawLine : lines) {
+            String line = rawLine.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            int separator = line.indexOf(':');
+            if (separator <= 0) {
+                continue;
+            }
+            String key = line.substring(0, separator).trim();
+            String value = stripYamlScalar(line.substring(separator + 1).trim());
+            values.put(key, value);
+        }
+        return values;
+    }
+
+    private String stripYamlScalar(String value) {
+        if (value.length() >= 2) {
+            char first = value.charAt(0);
+            char last = value.charAt(value.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                return value.substring(1, value.length() - 1);
+            }
+        }
+        return value;
+    }
+
+    private String baseName(String name) {
+        String normalized = defaultString(name, "").replace('\\', '/');
+        int index = normalized.lastIndexOf('/');
+        return index < 0 ? normalized : normalized.substring(index + 1);
     }
 
     private Map<String, Object> skillDetail(Map<String, Object> item, List<Map<String, Object>> variables,
@@ -1616,13 +1771,17 @@ public class McpServiceImpl implements McpService {
     }
 
     private String readFully(InputStream stream) throws IOException {
+        return new String(readBytes(stream), StandardCharsets.UTF_8);
+    }
+
+    private byte[] readBytes(InputStream stream) throws IOException {
         byte[] buffer = new byte[1024];
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         int read;
         while ((read = stream.read(buffer)) != -1) {
             out.write(buffer, 0, read);
         }
-        return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        return out.toByteArray();
     }
 
     private List<Map<String, Object>> parseRemoteTools(String body) throws IOException {
@@ -2061,6 +2220,28 @@ public class McpServiceImpl implements McpService {
             this.status = status;
             this.body = body;
             this.url = url;
+        }
+    }
+
+    private static final class SkillPackage {
+        private final String markdown;
+        private final String name;
+        private final String description;
+
+        private SkillPackage(String markdown, String name, String description) {
+            this.markdown = markdown;
+            this.name = name;
+            this.description = description;
+        }
+    }
+
+    private static final class SkillFrontMatter {
+        private final String name;
+        private final String description;
+
+        private SkillFrontMatter(String name, String description) {
+            this.name = name;
+            this.description = description;
         }
     }
 
