@@ -54,6 +54,7 @@ public class WanwuCommonApiController {
     private static final String DOC_FIRST_PATH = "getting-started.md";
     private static final String DOC_CENTER_PAGE_PREFIX = "/aibase/docCenter/pages/";
     private static final String DOC_CENTER_STATIC_API_PREFIX = "../../../user/api/v1/static/manual";
+    private static final int DOC_CENTER_SNIPPET_WINDOW = 200;
     private static final Pattern MD_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
     private static final Pattern MD_LINK_PATTERN = Pattern.compile("(^|[^!])\\[([^\\]]*)\\]\\(([^)]+\\.md)\\)");
     private static final DocIndex DOC_INDEX = loadDocIndex();
@@ -375,16 +376,35 @@ public class WanwuCommonApiController {
     @GetMapping("/doc_center/search")
     public FrontendResponse<List<Map<String, Object>>> docCenterSearch(
             @RequestParam(value = "content", required = false) String content) {
-        String keyword = defaultIfBlank(content, "").toLowerCase(Locale.ROOT);
-        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        String keyword = defaultIfBlank(content, "").trim();
+        List<String> terms = searchTerms(keyword);
+        List<DocSearchHit> hits = new ArrayList<DocSearchHit>();
+        int order = 0;
         for (Map.Entry<String, String> entry : DOC_INDEX.docs.entrySet()) {
             String title = title(entry.getKey());
             String markdown = entry.getValue();
-            if (keyword.isEmpty()
-                    || title.toLowerCase(Locale.ROOT).contains(keyword)
-                    || markdown.toLowerCase(Locale.ROOT).contains(keyword)) {
-                rows.add(searchResult(title, entry.getKey(), markdown, keyword));
+            DocSearchHit hit = scoreDocSearch(title, entry.getKey(), markdown, keyword, terms, order++);
+            if (terms.isEmpty() || hit.score > 0) {
+                hits.add(hit);
             }
+        }
+        Collections.sort(hits, new Comparator<DocSearchHit>() {
+            @Override
+            public int compare(DocSearchHit left, DocSearchHit right) {
+                int score = right.score - left.score;
+                if (score != 0) {
+                    return score;
+                }
+                int first = left.firstIndex - right.firstIndex;
+                if (first != 0) {
+                    return first;
+                }
+                return left.order - right.order;
+            }
+        });
+        List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        for (DocSearchHit hit : hits) {
+            rows.add(searchResult(hit.title, hit.path, hit.markdown, hit.snippetTerm));
         }
         return FrontendResponse.ok(rows);
     }
@@ -414,17 +434,116 @@ public class WanwuCommonApiController {
         return item;
     }
 
+    private DocSearchHit scoreDocSearch(String title,
+                                        String path,
+                                        String markdown,
+                                        String keyword,
+                                        List<String> terms,
+                                        int order) {
+        String normalizedKeyword = normalizeSearchText(keyword);
+        String normalizedTitle = normalizeSearchText(title);
+        String normalizedPath = normalizeSearchText(path);
+        String normalizedMarkdown = normalizeSearchText(markdown);
+        int score = 0;
+        int firstIndex = Integer.MAX_VALUE;
+        String snippetTerm = keyword;
+        if (!isBlank(normalizedKeyword)) {
+            int titleIndex = normalizedTitle.indexOf(normalizedKeyword);
+            int pathIndex = normalizedPath.indexOf(normalizedKeyword);
+            int markdownIndex = normalizedMarkdown.indexOf(normalizedKeyword);
+            if (titleIndex >= 0) {
+                score += 240;
+            }
+            if (pathIndex >= 0) {
+                score += 120;
+            }
+            if (markdownIndex >= 0) {
+                score += 60;
+                firstIndex = markdownIndex;
+                snippetTerm = keyword;
+            }
+        }
+        int matchedTerms = 0;
+        for (String term : terms) {
+            boolean matched = false;
+            if (normalizedTitle.contains(term)) {
+                score += normalizedTitle.startsWith(term) ? 160 : 120;
+                matched = true;
+            }
+            if (normalizedPath.contains(term)) {
+                score += 60;
+                matched = true;
+            }
+            int markdownIndex = normalizedMarkdown.indexOf(term);
+            if (markdownIndex >= 0) {
+                score += Math.min(5, countOccurrences(normalizedMarkdown, term)) * 20;
+                matched = true;
+                if (markdownIndex < firstIndex) {
+                    firstIndex = markdownIndex;
+                    snippetTerm = term;
+                }
+            }
+            if (matched) {
+                matchedTerms++;
+            }
+        }
+        if (!terms.isEmpty() && matchedTerms == terms.size()) {
+            score += 80;
+        }
+        if (firstIndex == Integer.MAX_VALUE) {
+            firstIndex = order;
+        }
+        return new DocSearchHit(title, path, markdown, snippetTerm, score, firstIndex, order);
+    }
+
+    private List<String> searchTerms(String keyword) {
+        String normalized = normalizeSearchText(keyword);
+        if (isBlank(normalized)) {
+            return Collections.emptyList();
+        }
+        String[] parts = normalized.split("[^\\p{L}\\p{N}]+");
+        List<String> terms = new ArrayList<String>();
+        for (String part : parts) {
+            if (!isBlank(part) && !terms.contains(part)) {
+                terms.add(part);
+            }
+        }
+        if (terms.isEmpty()) {
+            terms.add(normalized);
+        }
+        return terms;
+    }
+
+    private String normalizeSearchText(String value) {
+        return defaultIfBlank(value, "").toLowerCase(Locale.ROOT);
+    }
+
+    private int countOccurrences(String text, String term) {
+        if (isBlank(text) || isBlank(term)) {
+            return 0;
+        }
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(term, index)) >= 0) {
+            count++;
+            index += term.length();
+        }
+        return count;
+    }
+
     private String snippet(String markdown, String keyword) {
         if (isBlank(keyword)) {
-            return markdown.length() > 200 ? markdown.substring(0, 200) : markdown;
+            return markdown.length() > DOC_CENTER_SNIPPET_WINDOW
+                    ? markdown.substring(0, DOC_CENTER_SNIPPET_WINDOW) : markdown;
         }
         String lower = markdown.toLowerCase(Locale.ROOT);
         int index = lower.indexOf(keyword.toLowerCase(Locale.ROOT));
         if (index < 0) {
-            return markdown.length() > 200 ? markdown.substring(0, 200) : markdown;
+            return markdown.length() > DOC_CENTER_SNIPPET_WINDOW
+                    ? markdown.substring(0, DOC_CENTER_SNIPPET_WINDOW) : markdown;
         }
-        int start = Math.max(0, index - 80);
-        int end = Math.min(markdown.length(), index + keyword.length() + 120);
+        int start = Math.max(0, index - DOC_CENTER_SNIPPET_WINDOW);
+        int end = Math.min(markdown.length(), index + keyword.length() + DOC_CENTER_SNIPPET_WINDOW);
         return markdown.substring(start, end);
     }
 
@@ -1152,6 +1271,32 @@ public class WanwuCommonApiController {
             this.titles = titles;
             this.menus = menus;
             this.firstPath = firstPath;
+        }
+    }
+
+    private static class DocSearchHit {
+        private final String title;
+        private final String path;
+        private final String markdown;
+        private final String snippetTerm;
+        private final int score;
+        private final int firstIndex;
+        private final int order;
+
+        private DocSearchHit(String title,
+                             String path,
+                             String markdown,
+                             String snippetTerm,
+                             int score,
+                             int firstIndex,
+                             int order) {
+            this.title = title;
+            this.path = path;
+            this.markdown = markdown;
+            this.snippetTerm = snippetTerm;
+            this.score = score;
+            this.firstIndex = firstIndex;
+            this.order = order;
         }
     }
 

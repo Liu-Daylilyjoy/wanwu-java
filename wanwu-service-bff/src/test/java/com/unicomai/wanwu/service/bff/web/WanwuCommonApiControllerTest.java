@@ -176,6 +176,12 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(jsonPath("$.data[0].title").value("0.\u5e73\u53f0\u4ecb\u7ecd"))
                 .andExpect(jsonPath("$.data[0].list[0].url")
                         .value("/aibase/docCenter/pages/0.%E5%B9%B3%E5%8F%B0%E4%BB%8B%E7%BB%8D.md"));
+        mockMvc.perform(get("/user/api/v1/doc_center/search")
+                        .param("content", "\u6a21\u578b\u5bfc\u5165\u65b9\u5f0f"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].title").value("\u6a21\u578b\u5bfc\u5165\u65b9\u5f0f \u8be6\u7ec6\u7248"))
+                .andExpect(jsonPath("$.data[0].list[0].content",
+                        containsString("\u6a21\u578b\u5bfc\u5165\u6559\u7a0b")));
     }
 
     @Test
