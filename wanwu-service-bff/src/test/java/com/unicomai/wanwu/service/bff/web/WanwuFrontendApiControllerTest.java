@@ -2732,6 +2732,78 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void knowledgeRoutesCheckDirectKnowledgeIdPermissionsBeforeService() throws Exception {
+        when(knowledgeService.listDocs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(docPage("knowledge-view", "View KB"));
+
+        mockMvc.perform(put("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-system\",\"name\":\"System KB\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-view\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-edit\",\"docInfoList\":[{\"name\":\"Guide.txt\",\"content\":\"Guide\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<String> knowledgeIdCaptor = forClass(String.class);
+        ArgumentCaptor<Integer> permissionCaptor = forClass(Integer.class);
+        verify(knowledgeService, times(3)).checkKnowledgeUserPermission(
+                eq("dev-admin"), eq("default-org"), knowledgeIdCaptor.capture(), permissionCaptor.capture());
+        assertEquals(Arrays.asList("knowledge-system", "knowledge-view", "knowledge-edit"),
+                knowledgeIdCaptor.getAllValues());
+        assertEquals(Arrays.asList(30, 0, 10), permissionCaptor.getAllValues());
+        verify(knowledgeService).updateKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(knowledgeService).listDocs(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(knowledgeService).importDocs(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
+    public void knowledgeRouteStopsBeforeServiceWhenPermissionIsDenied() throws Exception {
+        doThrow(new IllegalArgumentException("knowledge_perm: denied"))
+                .when(knowledgeService).checkKnowledgeUserPermission(
+                        eq("dev-app"), eq("default-org"), eq("knowledge-private"), eq(10));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/import")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-private\",\"docInfoList\":[{\"name\":\"Guide.txt\",\"content\":\"Guide\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("knowledge_perm: denied"));
+
+        verify(knowledgeService).checkKnowledgeUserPermission(
+                eq("dev-app"), eq("default-org"), eq("knowledge-private"), eq(10));
+        verify(knowledgeService, times(0)).importDocs(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    public void knowledgeRouteRequiresDirectKnowledgeIdBeforeService() throws Exception {
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("knowledgeId is required"));
+
+        verify(knowledgeService, times(0)).checkKnowledgeUserPermission(anyString(), anyString(), anyString(), anyInt());
+        verify(knowledgeService, times(0)).listDocs(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
     public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
         when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("qaPairId", "qa-001"));
