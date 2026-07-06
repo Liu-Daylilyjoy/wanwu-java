@@ -35,9 +35,10 @@ The Java BFF now also performs Go-style route-level model checks before saving:
 - RAG config: `modelConfig.modelId`, `rerankConfig.modelId`, `qaRerankConfig.modelId`.
 - Prompt optimize/reason/evaluate SSE: `modelId`.
 - Model experience dialog, Model experience LLM, and ASR stream: `modelId`.
+- Knowledge create/hit/QA hit: `embeddingModelInfo.modelId`, `knowledgeGraph.llmModelId`, `knowledgeMatchParams.rerankModelId`.
 
 Those checks run before `AppService` persistence and return the normal frontend failure envelope when a referenced model is not visible to the current user/org.
 
 ## Remaining Gap
 
-The Java BFF already calls `checkModelUserPermission` for several OpenAPI routes, Assistant config, RAG config, Prompt SSE routes, Model Experience routes, and ASR stream, but not every Go `AuthModelByModelId` route has an equivalent Java filter yet. Later slices still need route-level model authorization for knowledge create/hit/QA hit routes.
+The checked Go `AuthModelByModelId` frontend route set is now covered in the Java BFF compatibility layer. Later slices still need broader runtime parity: normalized Go-equivalent model tables, provider-specific inference, encrypted credentials, provider-specific callback execution, and provider metrics.

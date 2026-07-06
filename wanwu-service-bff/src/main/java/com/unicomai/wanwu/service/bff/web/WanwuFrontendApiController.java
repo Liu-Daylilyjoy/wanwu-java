@@ -2109,7 +2109,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.createKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.createKnowledge(ctx.getUserId(), ctx.getOrgId(), body),
+                "embeddingModelInfo.modelId", "knowledgeGraph.llmModelId");
     }
 
     @PutMapping("/knowledge")
@@ -2133,7 +2134,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.hitKnowledge(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.hitKnowledge(ctx.getUserId(), ctx.getOrgId(), body),
+                "knowledgeMatchParams.rerankModelId");
     }
 
     @GetMapping("/knowledge/keywords")
@@ -2692,7 +2694,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.hitQaPairs(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.hitQaPairs(ctx.getUserId(), ctx.getOrgId(), body),
+                "knowledgeMatchParams.rerankModelId");
     }
 
     @GetMapping("/knowledge/external/api/select")
@@ -2772,9 +2775,16 @@ public class WanwuFrontendApiController {
 
     private FrontendResponse<Map<String, Object>> knowledgeResponse(
             String authorization, Map<?, ?> request, KnowledgeCall call) {
+        return knowledgeResponse(authorization, request, call, new String[0]);
+    }
+
+    private FrontendResponse<Map<String, Object>> knowledgeResponse(
+            String authorization, Map<?, ?> request, KnowledgeCall call, String... modelFieldPaths) {
         try {
             UserContext userContext = userContext(authorization);
-            return FrontendResponse.ok(call.execute(userContext, objectMap(request)));
+            Map<String, Object> body = objectMap(request);
+            authorizeModelFieldPaths(userContext, body, modelFieldPaths);
+            return FrontendResponse.ok(call.execute(userContext, body));
         } catch (IllegalArgumentException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
@@ -2848,6 +2858,19 @@ public class WanwuFrontendApiController {
             return;
         }
         authorizeModelIds(userContext, Collections.singletonList(modelId));
+    }
+
+    private void authorizeModelFieldPaths(UserContext userContext, Map<String, Object> body, String... fieldPaths) {
+        if (fieldPaths == null || fieldPaths.length == 0) {
+            return;
+        }
+        List<String> modelIds = new ArrayList<>();
+        for (String fieldPath : fieldPaths) {
+            if (!isBlank(fieldPath)) {
+                addNestedModelId(modelIds, body, fieldPath.split("\\."));
+            }
+        }
+        authorizeModelIds(userContext, modelIds);
     }
 
     private List<String> assistantConfigModelIds(AssistantConfigRequest request) {

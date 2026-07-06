@@ -2659,6 +2659,79 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void createKnowledgeChecksEmbeddingAndGraphModelsBeforeSave() throws Exception {
+        when(knowledgeService.createKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeId", "knowledge-001"));
+
+        mockMvc.perform(post("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dev KB\",\"embeddingModelInfo\":{\"modelId\":\"embedding-001\"},\"knowledgeGraph\":{\"llmModelId\":\"graph-llm-001\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.knowledgeId").value("knowledge-001"));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-admin"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Arrays.asList("embedding-001", "graph-llm-001"), modelIdsCaptor.getValue());
+        verify(knowledgeService).createKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void createKnowledgeStopsBeforeSaveWhenModelIsDenied() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: embedding-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(post("/user/api/v1/knowledge")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Dev KB\",\"embeddingModelInfo\":{\"modelId\":\"embedding-private\"},\"knowledgeGraph\":{\"llmModelId\":\"graph-private\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("bff_model_perm: embedding-private"));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Arrays.asList("embedding-private", "graph-private"), modelIdsCaptor.getValue());
+        verify(knowledgeService, times(0)).createKnowledge(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void knowledgeHitRoutesCheckRerankModelBeforeSearch() throws Exception {
+        when(knowledgeService.hitKnowledge(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("searchList", Collections.singletonList(
+                        knowledgeHitResult("Guide.txt", "Guide content", "Dev KB"))));
+        when(knowledgeService.hitQaPairs(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("searchList", Collections.singletonList(
+                        qaHitResult("qa-001", "knowledge-qa-001", "Dev QA", "What is Wanwu?", "An AI platform."))));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/hit")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"Guide\",\"knowledgeList\":[{\"knowledgeId\":\"knowledge-001\"}],\"knowledgeMatchParams\":{\"rerankModelId\":\"rerank-001\",\"topK\":5}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/hit")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"Wanwu\",\"knowledgeList\":[{\"knowledgeId\":\"knowledge-qa-001\"}],\"knowledgeMatchParams\":{\"rerankModelId\":\"qa-rerank-001\",\"topK\":5}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService, times(2)).checkModelUserPermission(
+                eq("dev-admin"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("rerank-001"), modelIdsCaptor.getAllValues().get(0));
+        assertEquals(Collections.singletonList("qa-rerank-001"), modelIdsCaptor.getAllValues().get(1));
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(knowledgeService).hitQaPairs(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
     public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
         when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("qaPairId", "qa-001"));
