@@ -18,7 +18,7 @@ Date: 2026-07-01
   - OpenAPI schema parsing into frontend action rows and MCP-compatible `name/description/inputSchema` tools.
   - Built-in Tool square list/detail and API-key shell.
   - Custom MCP create/list/detail/update/delete and tool listing.
-  - Streamable custom MCP tool discovery through JSON-RPC `initialize` plus `tools/list`, with local sample-tool fallback when the remote endpoint is offline.
+  - Streamable and SSE custom MCP tool discovery through JSON-RPC `initialize` plus `tools/list`, with local sample-tool fallback when the remote endpoint is offline.
   - MCP Server create/list/detail/update/delete, server tool bind/edit/delete, and OpenAPI-tool bind shell.
   - MCP Server `tools/call` execution for bound built-in Weather/Search tools with deterministic local `content/structuredContent` results.
   - MCP square list/detail/recommend seed data.
@@ -51,6 +51,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, `/tool/action/list?toolType=custom`, and Workflow editor tool select/action/tool-box compatibility.
 - Created an MCP Server and verified `/mcp/server/list`.
 - Verified `/mcp/tool/list?transport=streamable&serverUrl=...` reaches a local streamable MCP JSON-RPC server and returns the remote `tools/list` result.
+- Verified `/mcp/tool/list?transport=sse&serverUrl=...` reads a local SSE endpoint event, posts JSON-RPC `tools/list` to the message endpoint, and returns the remote tool schema.
 - Bound built-in Weather/Search tools to MCP Servers and verified `tools/call` returns MCP-compatible local `content`, `structuredContent.response`, and `isError=false`.
 - Verified `/service/api/openapi/v1/mcp/server/message` `tools/call` delegates to the MCP service runtime, and verified the service runtime calls local OpenAPI HTTP servers for both custom-tool and direct-schema bindings with `query-*` arguments, JSON body arguments, bearer auth, and query auth.
 - Created a custom Prompt and verified `/prompt/custom/list`.
@@ -63,12 +64,12 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` and `sse` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
-- Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and provider-backed built-in tool execution beyond the local Weather/Search runtime.
+- Full remote MCP runtime, streamable/SSE stateful proxying beyond `tools/list`, and provider-backed built-in tool execution beyond the local Weather/Search runtime.
 - Real Skill package execution and package-to-runtime installation.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.

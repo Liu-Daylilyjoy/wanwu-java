@@ -1767,34 +1767,44 @@ public class McpServiceImpl implements McpService {
     }
 
     private List<Map<String, Object>> fetchRemoteMcpTools(Map<String, Object> item) {
-        if (!"streamable".equalsIgnoreCase(text(item, "transport"))) {
-            return Collections.emptyList();
-        }
-        String url = firstText(item, "streamableUrl", "serverUrl");
+        String transport = text(item, "transport");
+        String url = "streamable".equalsIgnoreCase(transport)
+                ? firstText(item, "streamableUrl", "serverUrl")
+                : firstText(item, "sseUrl", "serverUrl");
         if (blank(url)) {
             return Collections.emptyList();
         }
         try {
-            String sessionId = initializeStreamableMcp(url);
-            return parseRemoteTools(callStreamableMcp(url, mcpRpcBody("tools/list"), sessionId).body);
+            if ("streamable".equalsIgnoreCase(transport)) {
+                String sessionId = initializeStreamableMcp(url);
+                return parseRemoteTools(callStreamableMcp(url, mcpRpcBody("tools/list"), sessionId).body);
+            }
+            if ("sse".equalsIgnoreCase(transport)) {
+                return fetchSseMcpTools(url);
+            }
         } catch (Exception ex) {
             return Collections.emptyList();
         }
+        return Collections.emptyList();
     }
 
     private String initializeStreamableMcp(String url) {
         try {
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("protocolVersion", "2024-11-05");
-            params.put("capabilities", new LinkedHashMap<String, Object>());
-            Map<String, Object> clientInfo = new LinkedHashMap<>();
-            clientInfo.put("name", "wanwu-java");
-            clientInfo.put("version", "0.1.0");
-            params.put("clientInfo", clientInfo);
-            return callStreamableMcp(url, mcpRpcBody("initialize", params), "").sessionId;
+            return callStreamableMcp(url, mcpRpcBody("initialize", mcpInitializeParams()), "").sessionId;
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    private Map<String, Object> mcpInitializeParams() {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("protocolVersion", "2024-11-05");
+        params.put("capabilities", new LinkedHashMap<String, Object>());
+        Map<String, Object> clientInfo = new LinkedHashMap<>();
+        clientInfo.put("name", "wanwu-java");
+        clientInfo.put("version", "0.1.0");
+        params.put("clientInfo", clientInfo);
+        return params;
     }
 
     private String mcpRpcBody(String method) throws IOException {
@@ -1835,6 +1845,56 @@ public class McpServiceImpl implements McpService {
             throw new IOException("mcp streamable http " + status + ": " + responseBody);
         }
         return new RemoteMcpResponse(responseBody, defaultString(connection.getHeaderField("Mcp-Session-Id"), ""));
+    }
+
+    private List<Map<String, Object>> fetchSseMcpTools(String sseUrl) throws IOException {
+        String endpoint = sseMessageEndpoint(sseUrl);
+        if (blank(endpoint)) {
+            return Collections.emptyList();
+        }
+        String endpointUrl = resolveSseEndpoint(sseUrl, endpoint);
+        try {
+            callStreamableMcp(endpointUrl, mcpRpcBody("initialize", mcpInitializeParams()), "");
+        } catch (IOException ignored) {
+        }
+        return parseRemoteTools(callStreamableMcp(endpointUrl, mcpRpcBody("tools/list"), "").body);
+    }
+
+    private String sseMessageEndpoint(String sseUrl) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(sseUrl).openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setRequestProperty("Accept", "text/event-stream");
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        String body = stream == null ? "" : readFully(stream);
+        if (status < 200 || status >= 300) {
+            throw new IOException("mcp sse http " + status + ": " + body);
+        }
+        return parseSseEndpoint(body);
+    }
+
+    private String parseSseEndpoint(String body) {
+        String event = "";
+        String[] lines = defaultString(body, "").replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        for (String rawLine : lines) {
+            String line = rawLine.trim();
+            if (line.startsWith("event:")) {
+                event = line.substring("event:".length()).trim();
+            } else if (line.startsWith("data:") && (blank(event) || "endpoint".equals(event))) {
+                return line.substring("data:".length()).trim();
+            } else if (line.isEmpty()) {
+                event = "";
+            }
+        }
+        return "";
+    }
+
+    private String resolveSseEndpoint(String sseUrl, String endpoint) throws IOException {
+        return new URL(new URL(sseUrl), endpoint).toString();
     }
 
     private String readFully(InputStream stream) throws IOException {

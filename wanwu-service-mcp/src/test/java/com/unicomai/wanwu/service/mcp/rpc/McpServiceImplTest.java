@@ -131,6 +131,54 @@ public class McpServiceImplTest {
     }
 
     @Test
+    public void listMcpToolsFetchesRemoteSseTools() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/sse", exchange -> {
+            byte[] response = "event: endpoint\ndata: /messages\n\n".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(response);
+            }
+        });
+        server.createContext("/messages", exchange -> {
+            String body = readBody(exchange);
+            requestBody.set(requestBody.get() + body + "\n");
+            String payload = body.contains("\"method\":\"initialize\"")
+                    ? "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2024-11-05\"}}"
+                    : "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":["
+                    + "{\"name\":\"wanwu_sse_search\",\"description\":\"SSE search\","
+                    + "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}}]}}";
+            byte[] response = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(response);
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/sse";
+            Map<String, Object> result = service.listMcpTools(USER_ID, ORG_ID,
+                    map("serverUrl", url, "transport", "sse"));
+
+            Map<String, Object> tool = firstList(result, "tools");
+            assertEquals("wanwu_sse_search", text(tool, "name"));
+            assertEquals("SSE search", text(tool, "description"));
+            assertTrue(requestBody.get().contains("\"method\":\"tools/list\""));
+
+            String mcpId = text(service.createMcp(USER_ID, ORG_ID,
+                    map("name", "SSE MCP", "desc", "remote", "from", "custom",
+                            "sseUrl", url, "transport", "sse")), "mcpId");
+            Map<String, Object> storedResult = service.listMcpTools(USER_ID, ORG_ID, map("mcpId", mcpId));
+            assertEquals("wanwu_sse_search", text(firstList(storedResult, "tools"), "name"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void callMcpServerToolExecutesBoundBuiltinTools() {
         String weatherServerId = text(service.createMcpServer(USER_ID, ORG_ID, map("name", "Builtin Weather MCP")),
                 "mcpServerId");
