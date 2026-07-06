@@ -170,6 +170,49 @@ public class McpServiceImplTest {
     }
 
     @Test
+    public void callMcpServerToolExecutesDirectOpenApiTool() throws Exception {
+        AtomicReference<String> query = new AtomicReference<>("");
+        AtomicReference<String> requestBody = new AtomicReference<>("");
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/echo", exchange -> {
+            query.set(exchange.getRequestURI().getQuery());
+            requestBody.set(readBody(exchange));
+            byte[] response = "{\"echo\":\"Suzhou\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(response);
+            }
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            String schema = "{\"openapi\":\"3.0.1\",\"info\":{\"title\":\"Echo\",\"version\":\"1\"},"
+                    + "\"servers\":[{\"url\":\"" + baseUrl + "\"}],"
+                    + "\"paths\":{\"/echo\":{\"post\":{\"operationId\":\"echo_city\","
+                    + "\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\","
+                    + "\"properties\":{\"city\":{\"type\":\"string\"}}}}}},"
+                    + "\"responses\":{\"200\":{\"description\":\"ok\"}}}}}}";
+            String mcpServerId = text(service.createMcpServer(USER_ID, ORG_ID, map("name", "Direct MCP")),
+                    "mcpServerId");
+            service.createMcpServerOpenApiTool(USER_ID, ORG_ID, map("mcpServerId", mcpServerId,
+                    "name", "Direct Echo", "schema", schema, "methodNames", Collections.singletonList("echo_city"),
+                    "apiAuth", map("authType", "api_key_query", "apiKeyQueryParam", "key",
+                            "apiKeyValue", "secret-001")));
+
+            Map<String, Object> result = service.callMcpServerTool(USER_ID, ORG_ID, mcpServerId,
+                    map("name", "echo_city", "arguments", map("city", "Suzhou")));
+
+            assertEquals(false, result.get("isError"));
+            assertTrue(text(firstList(result, "content"), "text").contains("\"echo\":\"Suzhou\""));
+            assertEquals("key=secret-001", query.get());
+            assertEquals("{\"city\":\"Suzhou\"}", requestBody.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void resourceLifecycleCoversSkillResourceAndConversation() {
         Map<String, Object> check = service.checkCustomSkill(USER_ID, ORG_ID,
                 map("zipUrl", "file-upload/skill.zip", "name", "Imported Skill", "desc", "imported"));

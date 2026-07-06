@@ -32,7 +32,7 @@ Date: 2026-07-01
   - Skill conversation create/list/detail/delete/clear/chat/save with deterministic local SSE responses.
 - `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, `/user/api/v1/prompt`, `/user/api/v1/agent/skill`, `/user/api/v1/agent/acquired/skill`, and `/user/api/v1/square/skill`.
 - `wanwu-service-bff` also exposes `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box`, adapting the same MCP Tool data into the Go Workflow editor response shapes.
-- `wanwu-service-bff` exposes the public MCP Server OpenAPI endpoints with app-key validation plus JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call`. `tools/call` now delegates to `McpService.callMcpServerTool`; bound custom OpenAPI tools execute real HTTP requests with query/header/path/body argument mapping and Go-style API-key auth, while unsupported bindings keep the deterministic compatibility fallback.
+- `wanwu-service-bff` exposes the public MCP Server OpenAPI endpoints with app-key validation plus JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call`. `tools/call` now delegates to `McpService.callMcpServerTool`; bound custom OpenAPI tools and direct OpenAPI schema tools execute real HTTP requests with query/header/path/body argument mapping and Go-style API-key auth, while unsupported bindings keep the deterministic compatibility fallback.
 - Docker Compose `full` profile includes `mcp` on ports `8087` and `20887`, and BFF waits for it.
 
 ## Verification
@@ -50,7 +50,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Created a custom Tool with an OpenAPI schema and verified `/tool/custom/list`, `/tool/select`, `/tool/action/list?toolType=custom`, and Workflow editor tool select/action/tool-box compatibility.
 - Created an MCP Server and verified `/mcp/server/list`.
 - Verified `/mcp/tool/list?transport=streamable&serverUrl=...` reaches a local streamable MCP JSON-RPC server and returns the remote `tools/list` result.
-- Verified `/service/api/openapi/v1/mcp/server/message` `tools/call` delegates to the MCP service runtime, and verified the service runtime calls a local OpenAPI HTTP server with `query-*` arguments and bearer auth.
+- Verified `/service/api/openapi/v1/mcp/server/message` `tools/call` delegates to the MCP service runtime, and verified the service runtime calls local OpenAPI HTTP servers for both custom-tool and direct-schema bindings with `query-*` arguments, JSON body arguments, bearer auth, and query auth.
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
 - Checked and created a custom Skill, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
@@ -60,12 +60,12 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools through `tools/call`.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools and direct OpenAPI schema tools through `tools/call`.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
-- Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and built-in/direct OpenAPI MCP Server execution.
+- Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and built-in MCP Server execution.
 - Real Skill package parsing, validation, execution, and package storage.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.

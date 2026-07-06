@@ -398,6 +398,10 @@ public class McpServiceImpl implements McpService {
             create.put("methodName", methodName);
             create.put("name", defaultText(request, "name", "OpenAPI Tool"));
             create.put("desc", "OpenAPI action " + methodName);
+            create.put("schema", text(request, "schema"));
+            if (request.get("apiAuth") instanceof Map) {
+                create.put("apiAuth", copy(castMap(request.get("apiAuth"))));
+            }
             Map<String, Object> tool = serverTool(orgId, create);
             listValue(server.get("tools")).add(tool);
             created.add(tool);
@@ -421,6 +425,16 @@ public class McpServiceImpl implements McpService {
         if ("custom".equals(text(tool, "type"))) {
             try {
                 return executeCustomMcpServerTool(orgId, mcpServerId, tool, name, arguments);
+            } catch (Exception ex) {
+                return mcpCallResult(mcpServerId, name, arguments, tool,
+                        "MCP tool call failed: " + ex.getMessage(), true,
+                        Collections.<String, Object>emptyMap());
+            }
+        }
+        if ("openapi".equals(text(tool, "type"))) {
+            try {
+                return executeOpenApiMcpServerTool(mcpServerId, tool, name, arguments,
+                        text(tool, "schema"), mapValue(tool.get("apiAuth")));
             } catch (Exception ex) {
                 return mcpCallResult(mcpServerId, name, arguments, tool,
                         "MCP tool call failed: " + ex.getMessage(), true,
@@ -1319,6 +1333,12 @@ public class McpServiceImpl implements McpService {
         row.put("id", id);
         row.put("name", defaultText(request, "name", resolveToolName(orgId, id, type)));
         row.put("desc", defaultText(request, "desc", resolveToolDesc(orgId, id, type)));
+        if (!blank(text(request, "schema"))) {
+            row.put("schema", text(request, "schema"));
+        }
+        if (request.get("apiAuth") instanceof Map) {
+            row.put("apiAuth", copy(castMap(request.get("apiAuth"))));
+        }
         return row;
     }
 
@@ -1674,8 +1694,16 @@ public class McpServiceImpl implements McpService {
                                                            Map<String, Object> serverTool, String name,
                                                            Map<String, Object> arguments) throws IOException {
         Map<String, Object> customTool = require(customTools, orgId, text(serverTool, "id"), "custom tool");
-        OpenApiOperation operation = openApiOperation(text(customTool, "schema"), name);
-        HttpToolResponse response = callOpenApiOperation(operation, mapValue(customTool.get("apiAuth")), arguments);
+        return executeOpenApiMcpServerTool(mcpServerId, serverTool, name, arguments,
+                text(customTool, "schema"), mapValue(customTool.get("apiAuth")));
+    }
+
+    private Map<String, Object> executeOpenApiMcpServerTool(String mcpServerId, Map<String, Object> serverTool,
+                                                            String name, Map<String, Object> arguments,
+                                                            String schema, Map<String, Object> apiAuth)
+            throws IOException {
+        OpenApiOperation operation = openApiOperation(schema, name);
+        HttpToolResponse response = callOpenApiOperation(operation, apiAuth, arguments);
         Object parsed = parseJsonValue(response.body);
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("status", response.status);
