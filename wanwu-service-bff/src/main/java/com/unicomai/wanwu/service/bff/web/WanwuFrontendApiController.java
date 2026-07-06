@@ -2909,15 +2909,35 @@ public class WanwuFrontendApiController {
             return;
         }
         String fileId = firstText(body, "fileUploadId", "fileId", "docId");
-        String content = UploadedFileStore.defaultStore().readText(fileId);
-        if (isBlank(content)) {
+        byte[] bytes = UploadedFileStore.defaultStore().readBytes(fileId);
+        if (bytes.length == 0) {
             return;
         }
-        body.put("content", content);
+        String fileName = defaultIfBlank(firstText(body, "docName", "fileName", "name"), fileId);
+        String extension = fileExtension(fileName);
+        if (isBinaryKnowledgeImport(extension)) {
+            body.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+            if (isBlank(firstText(body, "docType", "fileType", "type"))) {
+                body.put("docType", extension);
+            }
+        } else {
+            body.put("content", new String(bytes, StandardCharsets.UTF_8));
+        }
         if (isBlank(firstText(body, "docName", "name"))) {
             body.put("docName", fileId);
             body.put("name", fileId);
         }
+    }
+
+    private String fileExtension(String fileName) {
+        int dot = fileName == null ? -1 : fileName.lastIndexOf('.');
+        return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ENGLISH);
+    }
+
+    private boolean isBinaryKnowledgeImport(String extension) {
+        return "xlsx".equals(extension) || "xls".equals(extension)
+                || "docx".equals(extension) || "doc".equals(extension)
+                || "pdf".equals(extension);
     }
 
     private boolean hasImportContent(Map<String, Object> body) {

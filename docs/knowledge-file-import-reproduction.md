@@ -29,6 +29,8 @@ QA pair import also reuses the same base64 file decoding path for `.xlsx`, conve
 
 Community report batch import also reuses the same base64 file decoding path for `.xlsx`, converting spreadsheet rows into the existing title/content parser.
 
+The BFF upload bridge now preserves binary knowledge imports from the unchanged frontend: local uploads with `.xlsx`, `.docx`, `.pdf`, `.xls`, or `.doc` names are forwarded to the knowledge service as `contentBase64` plus `docType`, while plain text uploads still use the existing UTF-8 `content` path. This lets the frontend upload-first, import-by-`fileUploadId` flow reach the Java document parser without corrupting Office/PDF bytes.
+
 ## Remaining Gap
 
 Legacy DOC, MinIO object lifecycle, parser model execution, async task state, vector indexing, and Go-equivalent normalized import tables remain later slices.
