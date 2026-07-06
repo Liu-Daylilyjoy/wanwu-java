@@ -25,6 +25,6 @@ Frontend permissions are intentionally narrower than `web/src/router/constants.j
 
 The WGA compatibility controller now also omits the `ontology` global-config section from `/service/api/v1/general/agent/config`; legacy submissions containing `ontology` are accepted but discarded, so the unchanged frontend cannot render a hidden ontology-agent configuration tab from stale server state.
 
-Current import note: Knowledge document import now extracts base64 `.xlsx`, `.docx`, and `.pdf` content locally into searchable text before segmentation, and QA pair import now parses base64 `.xlsx` rows into question/answer pairs. Legacy-DOC parser-backed conversion and MinIO-backed lifecycle are still later.
+Current import note: Knowledge document import now extracts base64 `.xlsx`, `.docx`, and `.pdf` content locally into searchable text before segmentation. QA pair and community report imports now parse base64 `.xlsx` rows into question/answer and title/content records. Legacy-DOC parser-backed conversion and MinIO-backed lifecycle are still later.
 
 Current limitation: built-in BFF requests now map `dev-token` to `dev-admin` and `dev-token-app` to `dev-app`, but both still share the Docker development organization `default-org`. Full Go-style token/session validation, multi-organization selection, dynamic IAM users, role membership, audit fields, and service-layer authorization remain later.

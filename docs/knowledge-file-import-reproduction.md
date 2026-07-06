@@ -27,6 +27,8 @@ This covers the frontend's development-time spreadsheet, Word, and PDF document 
 
 QA pair import also reuses the same base64 file decoding path for `.xlsx`, converting spreadsheet rows into the existing question/answer parser. CSV/TSV inline content and UTF-8 base64 text remain unchanged.
 
+Community report batch import also reuses the same base64 file decoding path for `.xlsx`, converting spreadsheet rows into the existing title/content parser.
+
 ## Remaining Gap
 
 Legacy DOC, MinIO object lifecycle, parser model execution, async task state, vector indexing, and Go-equivalent normalized import tables remain later slices.

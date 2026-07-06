@@ -2962,7 +2962,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String reportImportContent(Map<String, Object> request) {
         String content = firstText(request, "content", "text", "csv", "tsv");
         if (isBlank(content)) {
-            content = decodedText(firstText(request, "contentBase64", "base64", "textBase64"));
+            content = decodedDocumentText(firstText(request, "contentBase64", "base64", "textBase64"),
+                    documentExtension(request));
         }
         return content;
     }

@@ -423,6 +423,27 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void reportBatchAddParsesXlsxBase64Rows() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Report XLSX KB", 0)).get("knowledgeId");
+
+        service.batchAddReports("dev-admin", "default-org",
+                reportBatchBase64(knowledgeId, "reports.xlsx",
+                        xlsxBase64(
+                                new String[]{"title", "content"},
+                                new String[]{"Quarterly Report", "Spreadsheet report body."},
+                                new String[]{"Operations Report", "XLSX report import body."})));
+
+        Map<String, Object> parsed = service.listReports("dev-admin", "default-org", reportList(knowledgeId, 1, 10));
+        assertEquals(2, parsed.get("total"));
+        assertEquals(2, parsed.get("lastImportStatus"));
+        List<Map<String, Object>> reports = listOfMaps(parsed.get("list"));
+        assertEquals("Quarterly Report", reports.get(0).get("title"));
+        assertEquals("Operations Report", reports.get(1).get("title"));
+        assertEquals("XLSX report import body.", reports.get(1).get("content"));
+    }
+
+    @Test
     public void externalKnowledgeLifecycleFollowsFrontendAndGoContract() {
         Map<String, Object> createdApi = service.createExternalApi("dev-admin", "default-org",
                 externalApiCreate("Dify Dev", "https://dify.example/v1", "dev-key"));
@@ -1377,6 +1398,15 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> request = new LinkedHashMap<String, Object>();
         request.put("knowledgeId", knowledgeId);
         request.put("content", content);
+        return request;
+    }
+
+    private Map<String, Object> reportBatchBase64(String knowledgeId, String fileName, String base64) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        request.put("fileName", fileName);
+        request.put("docType", testFileType(fileName));
+        request.put("contentBase64", base64);
         return request;
     }
 
