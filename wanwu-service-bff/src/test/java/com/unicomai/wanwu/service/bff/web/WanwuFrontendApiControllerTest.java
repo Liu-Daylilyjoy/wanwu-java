@@ -3004,10 +3004,16 @@ public class WanwuFrontendApiControllerTest {
         String qaFileId = "qa-upload-bff-test.csv";
         String reportFileId = "report-upload-bff-test.csv";
         String xlsxFileId = "doc-upload-bff-test.xlsx";
+        String qaXlsxFileId = "qa-upload-bff-test.xlsx";
+        String reportXlsxFileId = "report-upload-bff-test.xlsx";
         byte[] xlsxBytes = new byte[]{80, 75, 3, 4, 1, 2, 3, 4};
+        byte[] qaXlsxBytes = new byte[]{80, 75, 3, 4, 5, 6, 7, 8};
+        byte[] reportXlsxBytes = new byte[]{80, 75, 3, 4, 9, 10, 11, 12};
         UploadedFileStore.defaultStore().writeText(qaFileId, "question,answer\nWhat is Wanwu?,An AI platform");
         UploadedFileStore.defaultStore().writeText(reportFileId, "title,content\nReport A,Uploaded report content");
         UploadedFileStore.defaultStore().writeBytes(xlsxFileId, xlsxBytes);
+        UploadedFileStore.defaultStore().writeBytes(qaXlsxFileId, qaXlsxBytes);
+        UploadedFileStore.defaultStore().writeBytes(reportXlsxFileId, reportXlsxBytes);
 
         mockMvc.perform(post("/user/api/v1/knowledge/doc/import")
                         .header("Authorization", "Bearer dev-token")
@@ -3033,11 +3039,23 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
+        mockMvc.perform(post("/user/api/v1/knowledge/qa/pair/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-qa-001\","
+                                + "\"docInfoList\":[{\"docUrl\":\"" + qaXlsxFileId + "\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
         ArgumentCaptor<Map> qaCaptor = forClass(Map.class);
-        verify(knowledgeService).importQaPairs(anyString(), anyString(), qaCaptor.capture());
-        Map<String, Object> qaRequest = qaCaptor.getValue();
+        verify(knowledgeService, times(2)).importQaPairs(anyString(), anyString(), qaCaptor.capture());
+        Map<String, Object> qaRequest = qaCaptor.getAllValues().get(0);
         Map<String, Object> qaDoc = listMap(qaRequest.get("docInfoList")).get(0);
         assertEquals("question,answer\nWhat is Wanwu?,An AI platform", qaDoc.get("content"));
+        Map<String, Object> qaXlsxRequest = qaCaptor.getAllValues().get(1);
+        Map<String, Object> qaXlsxDoc = listMap(qaXlsxRequest.get("docInfoList")).get(0);
+        assertEquals(Base64.getEncoder().encodeToString(qaXlsxBytes), qaXlsxDoc.get("contentBase64"));
+        assertEquals("xlsx", qaXlsxDoc.get("docType"));
 
         mockMvc.perform(post("/user/api/v1/knowledge/report/batch/add")
                         .header("Authorization", "Bearer dev-token")
@@ -3047,9 +3065,19 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
+        mockMvc.perform(post("/user/api/v1/knowledge/report/batch/add")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-report-001\","
+                                + "\"fileUploadId\":\"" + reportXlsxFileId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
         ArgumentCaptor<Map> reportCaptor = forClass(Map.class);
-        verify(knowledgeService).batchAddReports(anyString(), anyString(), reportCaptor.capture());
-        assertEquals("title,content\nReport A,Uploaded report content", reportCaptor.getValue().get("content"));
+        verify(knowledgeService, times(2)).batchAddReports(anyString(), anyString(), reportCaptor.capture());
+        assertEquals("title,content\nReport A,Uploaded report content", reportCaptor.getAllValues().get(0).get("content"));
+        assertEquals(Base64.getEncoder().encodeToString(reportXlsxBytes), reportCaptor.getAllValues().get(1).get("contentBase64"));
+        assertEquals("xlsx", reportCaptor.getAllValues().get(1).get("docType"));
     }
 
     @Test

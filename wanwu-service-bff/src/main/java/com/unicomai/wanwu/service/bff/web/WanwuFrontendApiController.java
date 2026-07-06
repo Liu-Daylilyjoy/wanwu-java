@@ -2908,7 +2908,7 @@ public class WanwuFrontendApiController {
         if (hasImportContent(body)) {
             return;
         }
-        String fileId = firstText(body, "fileUploadId", "fileId", "docId");
+        String fileId = firstText(body, "fileUploadId", "fileId", "docId", "docUrl", "fileUrl");
         byte[] bytes = UploadedFileStore.defaultStore().readBytes(fileId);
         if (bytes.length == 0) {
             return;
