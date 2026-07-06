@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
@@ -811,6 +812,35 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void agentCallbackReturnsGoJsonStringFromAgentService() throws Exception {
+        AgentService agentService = mock(AgentService.class);
+        when(agentService.chatAgent(anyMap())).thenReturn(map(
+                "assistantId", "assistant-001",
+                "conversationId", "conv-001",
+                "response", "Agent answer"));
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, null, null, null, agentService))
+                .build();
+
+        callbackMvc.perform(post("/callback/v1/agent/assistant-001/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"input\":\"hello\",\"conversationId\":\"conv-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value("Agent answer"));
+
+        ArgumentCaptor<Map> requestCaptor = forClass(Map.class);
+        verify(agentService).chatAgent(requestCaptor.capture());
+        Map<String, Object> request = requestCaptor.getValue();
+        assertEquals("assistant-001", request.get("assistantId"));
+        assertEquals("hello", request.get("input"));
+        assertEquals(true, request.get("stream"));
+        assertEquals("conv-001", request.get("conversationId"));
+    }
+
+    @Test
     public void specializedModelCallbacksReturnGoCompatibleBodies() throws Exception {
         mockMvc.perform(post("/callback/v1/model/model-ocr/ocr")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -946,10 +976,10 @@ public class WanwuCallbackApiControllerTest {
 
         mockMvc.perform(post("/callback/v1/agent/assistant-001/chat")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"query\":\"hello\"}"))
+                        .content("{\"input\":\"hello\"}"))
                 .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-                .andExpect(content().string(containsString("assistant-001")));
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value("hello"));
 
         mockMvc.perform(post("/callback/v1/rag/knowledge/stream/search")
                         .contentType(MediaType.APPLICATION_JSON)

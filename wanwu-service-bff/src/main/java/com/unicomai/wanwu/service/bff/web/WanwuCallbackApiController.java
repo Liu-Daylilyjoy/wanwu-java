@@ -2,6 +2,7 @@ package com.unicomai.wanwu.service.bff.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
@@ -75,6 +76,9 @@ public class WanwuCallbackApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private McpService mcpService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private AgentService agentService;
+
     public WanwuCallbackApiController() {
     }
 
@@ -93,10 +97,17 @@ public class WanwuCallbackApiController {
 
     public WanwuCallbackApiController(ModelService modelService, AppService appService,
                                       KnowledgeService knowledgeService, McpService mcpService) {
+        this(modelService, appService, knowledgeService, mcpService, null);
+    }
+
+    public WanwuCallbackApiController(ModelService modelService, AppService appService,
+                                      KnowledgeService knowledgeService, McpService mcpService,
+                                      AgentService agentService) {
         this.modelService = modelService;
         this.appService = appService;
         this.knowledgeService = knowledgeService;
         this.mcpService = mcpService;
+        this.agentService = agentService;
     }
 
     @PostMapping("/callback/v1/file/url/base64")
@@ -386,13 +397,14 @@ public class WanwuCallbackApiController {
     }
 
     @PostMapping("/callback/v1/agent/{assistantId}/chat")
-    public ResponseEntity<String> agentChat(
+    public FrontendResponse<String> agentChat(
             @PathVariable("assistantId") String assistantId,
             @RequestBody(required = false) Map<String, Object> request) {
-        String query = firstText(request, "query", "prompt", "content");
-        String json = "{\"assistantId\":\"" + jsonEscape(assistantId) + "\",\"response\":\""
-                + jsonEscape(defaultIfBlank(query, "callback response")) + "\",\"finish\":1}";
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + json + "\n\n");
+        try {
+            return FrontendResponse.ok(callbackAgentChat(assistantId, request));
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, defaultIfBlank(ex.getMessage(), "agent callback failed"));
+        }
     }
 
     @PostMapping({"/callback/v1/rag/search-knowledge-base",
@@ -515,6 +527,22 @@ public class WanwuCallbackApiController {
         } catch (RuntimeException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
+    }
+
+    private String callbackAgentChat(String assistantId, Map<String, Object> request) {
+        Map<String, Object> safe = copyStringMap(request);
+        String input = firstText(safe, "input", "query", "prompt", "content");
+        safe.put("assistantId", assistantId);
+        safe.put("input", input);
+        safe.put("stream", true);
+        if (agentService != null) {
+            Map<String, Object> result = agentService.chatAgent(safe);
+            String response = firstText(result, "response", "content", "data", "output");
+            if (!isBlank(response)) {
+                return response;
+            }
+        }
+        return defaultIfBlank(input, "callback response");
     }
 
     private Map<String, Object> callbackKnowledgeSearch(Map<String, Object> request, HttpServletRequest httpRequest) {
