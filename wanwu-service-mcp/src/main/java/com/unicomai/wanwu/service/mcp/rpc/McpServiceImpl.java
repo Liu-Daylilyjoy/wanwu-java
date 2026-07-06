@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -39,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class McpServiceImpl implements McpService {
@@ -709,8 +711,7 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public byte[] downloadBuiltinSkill(String userId, String orgId, String skillId) {
-        builtinSkill(skillId);
-        return skillArchive(skillId, "builtin");
+        return skillArchive(builtinSkill(skillId), "builtin");
     }
 
     @Override
@@ -835,6 +836,7 @@ public class McpServiceImpl implements McpService {
         item.put("ownerUserId", userId);
         item.put("ownerOrgId", org(orgId));
         item.put("variables", new ArrayList<Map<String, Object>>());
+        item.put("skillPackageBase64", Base64.getEncoder().encodeToString(skillArchive(source, "square")));
         acquiredSkills.put(scoped(orgId, id), item);
         saveSnapshot();
     }
@@ -850,8 +852,19 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public byte[] downloadSquareSkill(String userId, String orgId, String skillId) {
-        builtinSkill(skillId);
-        return skillArchive(skillId, "square");
+        Map<String, Object> builtin = findBuiltinSkill(skillId);
+        if (builtin != null) {
+            return skillArchive(builtin, "square");
+        }
+        Map<String, Object> custom = customSkills.get(scoped(orgId, skillId));
+        if (custom != null) {
+            return skillArchive(custom, "custom");
+        }
+        Map<String, Object> acquired = acquiredSkills.get(scoped(orgId, skillId));
+        if (acquired != null) {
+            return skillArchive(acquired, "acquired");
+        }
+        throw new IllegalArgumentException("square skill not found: " + skillId);
     }
 
     @Override
@@ -998,6 +1011,9 @@ public class McpServiceImpl implements McpService {
         item.put("objectPath", zipUrl);
         item.put("skillMarkdown", skillPackage == null ? defaultText(request, "skillMarkdown", "")
                 : skillPackage.markdown);
+        if (skillPackage != null) {
+            item.put("skillPackageBase64", Base64.getEncoder().encodeToString(skillPackage.zipData));
+        }
         item.put("sourceType", defaultText(request, "sourceType", "skill_import"));
         item.put("threadId", defaultText(request, "threadId", ""));
         item.put("previewId", defaultText(request, "previewId", ""));
@@ -1045,7 +1061,7 @@ public class McpServiceImpl implements McpService {
                 if (!entry.isDirectory() && "SKILL.md".equals(baseName(entry.getName()))) {
                     String markdown = new String(readBytes(zip), StandardCharsets.UTF_8);
                     SkillFrontMatter frontMatter = parseSkillFrontMatter(markdown);
-                    return new SkillPackage(markdown, frontMatter.name, frontMatter.description);
+                    return new SkillPackage(zipData, markdown, frontMatter.name, frontMatter.description);
                 }
             }
         } catch (IOException ex) {
@@ -1323,9 +1339,49 @@ public class McpServiceImpl implements McpService {
         return false;
     }
 
-    private byte[] skillArchive(String skillId, String source) {
-        String body = "SKILL.md\nname: " + skillId + "\nsource: " + source + "\n";
-        return body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private byte[] skillArchive(Map<String, Object> item, String source) {
+        byte[] stored = storedSkillPackage(item);
+        if (stored.length > 0) {
+            return stored;
+        }
+        String skillId = text(item, "skillId");
+        String desc = defaultText(item, "desc", "Wanwu skill package.");
+        String markdown = defaultText(item, "skillMarkdown",
+                "# " + defaultText(item, "name", skillId) + "\n\n" + desc);
+        return zipSkillArchive(skillId, source, desc, markdown);
+    }
+
+    private byte[] storedSkillPackage(Map<String, Object> item) {
+        String encoded = text(item, "skillPackageBase64");
+        if (blank(encoded)) {
+            return new byte[0];
+        }
+        try {
+            return Base64.getDecoder().decode(encoded);
+        } catch (IllegalArgumentException ex) {
+            return new byte[0];
+        }
+    }
+
+    private byte[] zipSkillArchive(String skillId, String source, String desc, String markdown) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            zip.putNextEntry(new ZipEntry(skillId + "/SKILL.md"));
+            zip.write(skillMarkdownWithFrontMatter(skillId, source, desc, markdown).getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            return output.toByteArray();
+        } catch (IOException ex) {
+            throw new IllegalStateException("failed to build skill zip: " + ex.getMessage(), ex);
+        }
+    }
+
+    private String skillMarkdownWithFrontMatter(String skillId, String source, String desc, String markdown) {
+        String body = defaultString(markdown, "").trim();
+        if (body.startsWith("---")) {
+            return body + "\n";
+        }
+        return "---\nname: " + skillId + "\ndescription: " + desc + "\nsource: " + source
+                + "\n---\n" + defaultString(markdown, "") + "\n";
     }
 
     private Map<String, Object> conversationMessage(String role, String content,
@@ -1654,12 +1710,20 @@ public class McpServiceImpl implements McpService {
     }
 
     private Map<String, Object> builtinSkill(String id) {
+        Map<String, Object> item = findBuiltinSkill(id);
+        if (item != null) {
+            return item;
+        }
+        throw new IllegalArgumentException("builtin skill not found: " + id);
+    }
+
+    private Map<String, Object> findBuiltinSkill(String id) {
         for (Map<String, Object> item : builtinSkills()) {
             if (text(item, "skillId").equals(id)) {
                 return item;
             }
         }
-        throw new IllegalArgumentException("builtin skill not found: " + id);
+        return null;
     }
 
     private Map<String, Object> mcpSquare(String id) {
@@ -2224,11 +2288,13 @@ public class McpServiceImpl implements McpService {
     }
 
     private static final class SkillPackage {
+        private final byte[] zipData;
         private final String markdown;
         private final String name;
         private final String description;
 
-        private SkillPackage(String markdown, String name, String description) {
+        private SkillPackage(byte[] zipData, String markdown, String name, String description) {
+            this.zipData = zipData;
             this.markdown = markdown;
             this.name = name;
             this.description = description;

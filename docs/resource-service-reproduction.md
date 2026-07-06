@@ -24,9 +24,9 @@ Date: 2026-07-01
   - Custom Prompt create/list/detail/update/delete/copy.
   - Prompt template list/detail/copy-to-custom.
   - Prompt optimize/reason/evaluate SSE compatibility with deterministic local responses.
-  - Custom Skill ZIP import/check/list/detail/delete, including `SKILL.md` front matter extraction for `name` and `description`, kebab-case validation, and returning the imported markdown in custom Skill detail.
+  - Custom Skill ZIP import/check/list/detail/delete, including `SKILL.md` front matter extraction for `name` and `description`, kebab-case validation, returning the imported markdown in custom Skill detail, and persisting the original ZIP package bytes in the Docker MySQL snapshot.
   - Custom/Built-in/Acquired Skill variable config create/update/delete.
-  - Built-in Skill list/detail/download seed data.
+  - Built-in Skill list/detail/download seed data, with download returning a real ZIP containing `SKILL.md` front matter instead of a text placeholder.
   - Skill select endpoint for Agent configuration.
   - Skill square list/detail/share/download seed data and acquired Skill list/detail/delete.
   - Skill conversation create/list/detail/delete/clear/chat/save with deterministic local SSE responses.
@@ -54,19 +54,20 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Created a custom Prompt and verified `/prompt/custom/list`.
 - Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
 - Checked and created a custom Skill from a ZIP package containing `SKILL.md`, verified front matter parsing, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
-- Verified built-in Skill list/detail/download for `builtin-summary`.
+- Verified built-in Skill list/detail/download for `builtin-summary`, including unzipping the downloaded package and reading `SKILL.md`.
+- Verified imported custom Skill packages are saved in the MCP snapshot and remain downloadable after service restart.
 - Verified Skill square list, share-to-resource, acquired Skill list, and acquired Skill config.
 - Verified Skill conversation create/chat SSE/save through `/agent/skill/conversation/*`.
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound custom OpenAPI tools and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
 - Full remote MCP runtime, SSE long-connection discovery, streamable stateful proxying beyond `tools/list`, and built-in MCP Server execution.
-- Real Skill package object storage/download lifecycle, execution, and package-to-runtime installation.
+- Real Skill package execution and package-to-runtime installation.
 - Real Skill conversation generation through a model provider.
 - Prompt optimization through a real model provider.
 - Callback MCP runtime parity beyond the public OpenAPI custom-tool execution path.

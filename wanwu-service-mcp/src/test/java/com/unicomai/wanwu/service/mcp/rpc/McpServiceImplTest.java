@@ -8,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -244,7 +247,8 @@ public class McpServiceImplTest {
                         map("name", "Language", "variableKey", "language", "variableValue", "zh"))), "id");
         assertFalse(builtinVariableId.isEmpty());
         assertEquals(1, list(service.getBuiltinSkill(USER_ID, ORG_ID, "builtin-summary").get("variables")).size());
-        assertTrue(new String(service.downloadBuiltinSkill(USER_ID, ORG_ID, "builtin-summary")).contains("builtin"));
+        assertTrue(skillMarkdown(service.downloadBuiltinSkill(USER_ID, ORG_ID, "builtin-summary"))
+                .contains("name: builtin-summary"));
 
         assertEquals("builtin-summary", text(first(service.listSquareSkills(USER_ID, ORG_ID, "Summary")),
                 "skillId"));
@@ -286,6 +290,7 @@ public class McpServiceImplTest {
         assertEquals("Demo skill from zip", text(detail, "desc"));
         assertEquals("Joy", text(detail, "author"));
         assertTrue(text(detail, "skillMarkdown").contains("# Demo Skill"));
+        assertTrue(skillMarkdown(service.downloadSquareSkill(USER_ID, ORG_ID, skillId)).contains("# Demo Skill"));
     }
 
     @Test
@@ -296,6 +301,30 @@ public class McpServiceImplTest {
                 () -> service.checkCustomSkill(USER_ID, ORG_ID, map("zipUrl", zip.getAbsolutePath())));
 
         assertTrue(error.getMessage().contains("SKILL.md file not found"));
+    }
+
+    @Test
+    public void customSkillPackageBytesArePersistedAndDownloadableAfterRestart() throws Exception {
+        File zip = skillZip("restart-skill/SKILL.md",
+                "---\nname: restart-skill\ndescription: Persisted package\n---\n# Restart Skill\n");
+        McpRecordMapper sourceMapper = mock(McpRecordMapper.class);
+        McpServiceImpl source = new McpServiceImpl(sourceMapper);
+
+        String skillId = text(source.createCustomSkill(USER_ID, ORG_ID,
+                map("zipUrl", zip.getAbsolutePath(), "author", "Joy")), "skillId");
+
+        ArgumentCaptor<McpRecordEntity> captor = ArgumentCaptor.forClass(McpRecordEntity.class);
+        verify(sourceMapper, atLeastOnce()).upsertRecord(captor.capture());
+        String payload = captor.getAllValues().get(captor.getAllValues().size() - 1).getPayload();
+        assertTrue(payload.contains("skillPackageBase64"));
+
+        McpRecordMapper restartMapper = mock(McpRecordMapper.class);
+        when(restartMapper.selectByType(eq("snapshot")))
+                .thenReturn(Collections.singletonList(record("snapshot", "state", payload)));
+        McpServiceImpl restarted = new McpServiceImpl(restartMapper);
+
+        assertTrue(skillMarkdown(restarted.downloadSquareSkill(USER_ID, ORG_ID, skillId))
+                .contains("# Restart Skill"));
     }
 
     @Test
@@ -405,6 +434,29 @@ public class McpServiceImplTest {
             zip.closeEntry();
         }
         return file;
+    }
+
+    private String skillMarkdown(byte[] zipBytes) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                String name = entry.getName().replace('\\', '/');
+                if (!entry.isDirectory() && (name.equals("SKILL.md") || name.endsWith("/SKILL.md"))) {
+                    return new String(readZipEntry(zip), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        return "";
+    }
+
+    private byte[] readZipEntry(ZipInputStream zip) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = zip.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
     }
 
     private String readBody(HttpExchange exchange) throws IOException {
