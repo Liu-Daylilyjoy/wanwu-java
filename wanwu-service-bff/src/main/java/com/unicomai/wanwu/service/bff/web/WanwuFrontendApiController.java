@@ -653,6 +653,26 @@ public class WanwuFrontendApiController {
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .body(modelExperienceSseFrames(safe.getSessionId(), model.getModel(), sensitiveReply));
             }
+            ModelExperienceStreamResult streamResult = modelExperienceUpstreamStream(userContext, model, safe);
+            if (!isBlank(streamResult.getSse())) {
+                String answer = defaultIfBlank(streamResult.getContent(), "");
+                String outputSensitiveReply = matchGlobalSensitiveReply(userContext, answer);
+                String responseBody = streamResult.getSse();
+                if (!isBlank(outputSensitiveReply)) {
+                    answer = outputSensitiveReply;
+                    responseBody = modelExperienceSseFrames(safe.getSessionId(), model.getModel(), answer);
+                }
+                modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                        userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
+                        safe.getSessionId(), defaultIfBlank(safe.getContent(), ""), "", "", "user"));
+                modelService.saveModelExperienceDialogRecord(new ModelExperienceDialogRecordSaveCommand(
+                        userContext.getUserId(), userContext.getOrgId(), safe.getModelExperienceId(), safe.getModelId(),
+                        safe.getSessionId(), answer, "", streamResult.getReasoningContent(), "assistant"));
+                recordModelStatistic(userContext, model, safe, answer, startedAt, streamResult.getUsage());
+                return ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(responseBody);
+            }
             ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, safe);
             String answer = firstNonBlank(upstreamAnswer.getContent(),
                     "Echo: " + defaultIfBlank(safe.getContent(), ""));
@@ -4008,6 +4028,29 @@ public class WanwuFrontendApiController {
         }
     }
 
+    private ModelExperienceStreamResult modelExperienceUpstreamStream(UserContext userContext, ModelInfo model,
+                                                                      ModelExperienceLlmRequest request) {
+        if (model == null || request == null || model.getConfig() == null) {
+            return ModelExperienceStreamResult.empty();
+        }
+        try {
+            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
+            String apiKey = firstText(model.getConfig(), "apiKey");
+            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
+                return ModelExperienceStreamResult.empty();
+            }
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("model", defaultIfBlank(model.getModel(), request.getModelId()));
+            payload.put("messages", modelExperienceMessages(userContext, request));
+            payload.put("stream", true);
+            putModelExperienceParams(payload, request);
+            return postJsonStream(modelEndpointUrl(endpoint, "/chat/completions"),
+                    apiKey, JSON.writeValueAsString(payload));
+        } catch (RuntimeException | IOException ignored) {
+            return ModelExperienceStreamResult.empty();
+        }
+    }
+
     private void putModelExperienceParams(Map<String, Object> payload, ModelExperienceLlmRequest request) {
         if (Boolean.TRUE.equals(request.getTemperatureEnable())) {
             payload.put("temperature", defaultNumber(request.getTemperature()));
@@ -4111,6 +4154,89 @@ public class WanwuFrontendApiController {
         } finally {
             connection.disconnect();
         }
+    }
+
+    private ModelExperienceStreamResult postJsonStream(String endpoint, String apiKey, String json) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+        connection.setConnectTimeout(MODEL_PROXY_CONNECT_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MODEL_PROXY_READ_TIMEOUT_MILLIS);
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Accept", "text/event-stream");
+        connection.setDoOutput(true);
+        try (OutputStream body = connection.getOutputStream()) {
+            body.write(json.getBytes(StandardCharsets.UTF_8));
+        }
+        try {
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (status >= 400) {
+                throw new IOException("model experience upstream returned " + status);
+            }
+            String contentType = defaultIfBlank(connection.getHeaderField("Content-Type"), "");
+            if (!isBlank(contentType) && !contentType.toLowerCase(Locale.ROOT).contains("text/event-stream")) {
+                return ModelExperienceStreamResult.empty();
+            }
+            return readModelExperienceStream(stream);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private ModelExperienceStreamResult readModelExperienceStream(InputStream stream) throws IOException {
+        if (stream == null) {
+            return ModelExperienceStreamResult.empty();
+        }
+        StringBuilder sse = new StringBuilder();
+        StringBuilder answer = new StringBuilder();
+        StringBuilder reasoning = new StringBuilder();
+        ModelExperienceUsage usage = null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sse.append(line).append('\n');
+                if (line.startsWith("data:")) {
+                    ModelExperienceStreamChunk chunk = parseModelExperienceStreamChunk(
+                            line.substring("data:".length()).trim());
+                    answer.append(chunk.content);
+                    reasoning.append(chunk.reasoningContent);
+                    if (chunk.usage != null) {
+                        usage = chunk.usage;
+                    }
+                }
+            }
+        }
+        return new ModelExperienceStreamResult(sse.toString(), answer.toString(), reasoning.toString(), usage);
+    }
+
+    private ModelExperienceStreamChunk parseModelExperienceStreamChunk(String data) {
+        if (isBlank(data) || "[DONE]".equals(data)) {
+            return ModelExperienceStreamChunk.empty();
+        }
+        try {
+            JsonNode root = JSON.readTree(data);
+            JsonNode choice = root.path("choices").path(0);
+            JsonNode delta = choice.path("delta");
+            String content = textual(delta.path("content"));
+            if (content == null) {
+                content = textual(choice.path("message").path("content"));
+            }
+            String reasoning = firstNonNull(textual(delta.path("reasoning_content")),
+                    textual(delta.path("reasoningContent")));
+            ModelExperienceUsage usage = root.has("usage") ? extractChatUsage(root.path("usage")) : null;
+            return new ModelExperienceStreamChunk(defaultIfBlank(content, ""), defaultIfBlank(reasoning, ""), usage);
+        } catch (IOException ignored) {
+            return ModelExperienceStreamChunk.empty();
+        }
+    }
+
+    private String textual(JsonNode node) {
+        return node != null && node.isTextual() ? node.asText() : null;
+    }
+
+    private String firstNonNull(String first, String second) {
+        return first != null ? first : second;
     }
 
     private String readStream(InputStream stream) throws IOException {
@@ -6456,6 +6582,57 @@ public class WanwuFrontendApiController {
 
         private ModelExperienceUsage getUsage() {
             return usage;
+        }
+    }
+
+    private static class ModelExperienceStreamResult {
+        private final String sse;
+        private final String content;
+        private final String reasoningContent;
+        private final ModelExperienceUsage usage;
+
+        private ModelExperienceStreamResult(String sse, String content, String reasoningContent,
+                                            ModelExperienceUsage usage) {
+            this.sse = sse;
+            this.content = content;
+            this.reasoningContent = reasoningContent;
+            this.usage = usage;
+        }
+
+        private static ModelExperienceStreamResult empty() {
+            return new ModelExperienceStreamResult("", "", "", null);
+        }
+
+        private String getSse() {
+            return sse;
+        }
+
+        private String getContent() {
+            return content;
+        }
+
+        private String getReasoningContent() {
+            return reasoningContent;
+        }
+
+        private ModelExperienceUsage getUsage() {
+            return usage;
+        }
+    }
+
+    private static class ModelExperienceStreamChunk {
+        private final String content;
+        private final String reasoningContent;
+        private final ModelExperienceUsage usage;
+
+        private ModelExperienceStreamChunk(String content, String reasoningContent, ModelExperienceUsage usage) {
+            this.content = content;
+            this.reasoningContent = reasoningContent;
+            this.usage = usage;
+        }
+
+        private static ModelExperienceStreamChunk empty() {
+            return new ModelExperienceStreamChunk("", "", null);
         }
     }
 

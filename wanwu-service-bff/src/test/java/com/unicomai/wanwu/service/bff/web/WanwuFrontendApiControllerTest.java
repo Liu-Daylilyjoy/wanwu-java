@@ -1985,6 +1985,58 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void modelExperienceLlmStreamsConfiguredOpenAiCompatibleUpstream() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondSse(exchange, "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first \"},"
+                    + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1,\"total_tokens\":6}}\n\n"
+                    + "data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"second\"},"
+                    + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+
+            mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"sessionId\":\"session-001\","
+                                    + "\"modelExperienceId\":\"exp-001\",\"content\":\"hello\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("\"content\":\"first \"")))
+                    .andExpect(content().string(containsString("\"content\":\"second\"")))
+                    .andExpect(content().string(containsString("data: [DONE]")));
+
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+
+            ArgumentCaptor<ModelExperienceDialogRecordSaveCommand> recordCaptor =
+                    forClass(ModelExperienceDialogRecordSaveCommand.class);
+            verify(modelService, times(2)).saveModelExperienceDialogRecord(recordCaptor.capture());
+            assertEquals("hello", recordCaptor.getAllValues().get(0).getOriginalContent());
+            assertEquals("first second", recordCaptor.getAllValues().get(1).getOriginalContent());
+
+            ArgumentCaptor<RecordModelStatisticCommand> statisticCaptor = forClass(RecordModelStatisticCommand.class);
+            verify(appService).recordModelStatistic(statisticCaptor.capture());
+            assertEquals(5L, statisticCaptor.getValue().getPromptTokens());
+            assertEquals(2L, statisticCaptor.getValue().getCompletionTokens());
+            assertEquals(7L, statisticCaptor.getValue().getTotalTokens());
+            assertTrue(statisticCaptor.getValue().isStream());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void modelExperienceLlmIncludesDialogHistoryInConfiguredUpstreamRequest() throws Exception {
         AtomicReference<String> upstreamBody = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -4980,6 +5032,15 @@ public class WanwuFrontendApiControllerTest {
     private static void respondJson(HttpExchange exchange, String json) throws IOException {
         byte[] response = json.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(response);
+        }
+    }
+
+    private static void respondSse(HttpExchange exchange, String sse) throws IOException {
+        byte[] response = sse.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
         exchange.sendResponseHeaders(200, response.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(response);
