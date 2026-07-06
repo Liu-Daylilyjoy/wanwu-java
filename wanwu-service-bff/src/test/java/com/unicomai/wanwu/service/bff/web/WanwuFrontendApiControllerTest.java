@@ -225,8 +225,7 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(jsonPath("$.data.orgPermission.permissions[27].perm").value("exploration.skill"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[28].perm").value("app_observability"))
                 .andExpect(jsonPath("$.data.orgPermission.permissions[29].perm").value("app_observability.statistic"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[30].perm").value("wga"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[31].perm").value("wga.wanwu_bot"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[30]").doesNotExist())
                 .andExpect(jsonPath("$.data.custom.loginEmail.email.status").value(false));
 
         verify(iamService).login(any(LoginCommand.class));
@@ -4403,9 +4402,7 @@ public class WanwuFrontendApiControllerTest {
                 permission("exploration.template"),
                 permission("exploration.skill"),
                 permission("app_observability"),
-                permission("app_observability.statistic"),
-                permission("wga"),
-                permission("wga.wanwu_bot")
+                permission("app_observability.statistic")
         ));
         orgPermission.put("roles", Collections.singletonList("admin"));
         orgPermission.put("isAdmin", true);

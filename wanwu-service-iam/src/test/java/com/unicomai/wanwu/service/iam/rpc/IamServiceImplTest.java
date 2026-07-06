@@ -84,13 +84,13 @@ public class IamServiceImplTest {
         assertTrue(permissions.contains("exploration.skill"));
         assertTrue(permissions.contains("app_observability"));
         assertTrue(permissions.contains("app_observability.statistic"));
-        assertTrue(permissions.contains("wga"));
-        assertTrue(permissions.contains("wga.wanwu_bot"));
+        assertFalse(permissions.contains("wga"));
+        assertFalse(permissions.contains("wga.wanwu_bot"));
         assertFalse(permissions.contains("wga.openclaw"));
         assertFalse(permissions.contains("ontology"));
         assertFalse(permissions.contains("ontology.knowledge_network"));
         assertFalse(permissions.contains("ontology.data_source"));
-        assertEquals(32, permissions.size());
+        assertEquals(30, permissions.size());
         assertFalse((Boolean) ((Map) ((Map) result.getCustom().get("loginEmail")).get("email")).get("status"));
     }
 
@@ -138,8 +138,7 @@ public class IamServiceImplTest {
                 "resource.skill", "resource.safety",
                 "operation", "operation.oauth", "operation.statistic_client",
                 "exploration", "exploration.app", "exploration.mcp", "exploration.template", "exploration.skill",
-                "app_observability", "app_observability.statistic",
-                "wga", "wga.wanwu_bot"),
+                "app_observability", "app_observability.statistic"),
                 permissions(result.getOrgPermission()));
 
         PermissionResult appResult = service.permission("dev-token-app");
@@ -206,10 +205,7 @@ public class IamServiceImplTest {
         assertEquals("app_observability", statisticRoute.get("perm"));
         assertEquals(1, ((List) statisticRoute.get("children")).size());
         assertEquals("app_observability.statistic", ((Map) ((List) statisticRoute.get("children")).get(0)).get("perm"));
-        Map wgaRoute = (Map) ((List) template.get("routes")).get(9);
-        assertEquals("wga", wgaRoute.get("perm"));
-        assertEquals(1, ((List) wgaRoute.get("children")).size());
-        assertEquals("wga.wanwu_bot", ((Map) ((List) wgaRoute.get("children")).get(0)).get("perm"));
+        assertEquals(9, ((List) template.get("routes")).size());
 
         Map<String, Object> orgs = service.listOrganizations("default-org", "", 1, 10);
         assertEquals(1L, orgs.get("total"));

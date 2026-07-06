@@ -241,7 +241,7 @@ public class WanwuCommonApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.uid").value("dev-admin"))
                 .andExpect(jsonPath("$.data.username").value("admin"))
-                .andExpect(jsonPath("$.data.orgPermission.permissions[31].perm").value("wga.wanwu_bot"));
+                .andExpect(jsonPath("$.data.orgPermission.permissions[30]").doesNotExist());
         mockMvc.perform(post("/user/api/v1/user/login/email/code")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"app@example.local\"}"))

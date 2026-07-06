@@ -659,9 +659,7 @@ public class WanwuCommonApiController {
                 "exploration.template",
                 "exploration.skill",
                 "app_observability",
-                "app_observability.statistic",
-                "wga",
-                "wga.wanwu_bot");
+                "app_observability.statistic");
     }
 
     private List<String> appPermissions() {

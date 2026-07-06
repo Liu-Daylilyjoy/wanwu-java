@@ -79,9 +79,7 @@ public class IamServiceImpl implements IamService {
             "exploration.template",
             "exploration.skill",
             "app_observability",
-            "app_observability.statistic",
-            "wga",
-            "wga.wanwu_bot"
+            "app_observability.statistic"
     ));
     private static final String CREATED_AT = "2026-06-30 00:00:00";
     private static final DevAccount ADMIN_ACCOUNT = new DevAccount(
@@ -1037,9 +1035,6 @@ public class IamServiceImpl implements IamService {
                 )),
                 route("App Observation", "app_observability", Collections.singletonList(
                         route("Statistic Dashboard", "app_observability.statistic", Collections.<Map<String, Object>>emptyList())
-                )),
-                route("WanwuBot", "wga", Collections.singletonList(
-                        route("WanwuBot", "wga.wanwu_bot", Collections.<Map<String, Object>>emptyList())
                 ))
         );
     }
@@ -1142,12 +1137,6 @@ public class IamServiceImpl implements IamService {
         }
         if ("app_observability.statistic".equals(perm)) {
             return "Statistic Dashboard";
-        }
-        if ("wga".equals(perm)) {
-            return "WanwuBot";
-        }
-        if ("wga.wanwu_bot".equals(perm)) {
-            return "WanwuBot";
         }
         return perm;
     }
