@@ -2643,7 +2643,9 @@ public class AppServiceImpl implements AppService {
                 safetyConfigJson,
                 command.getPrompt());
         List<Map<String, Object>> searchList = Collections.emptyList();
-        String response = sensitiveBlock == null ? deterministicResponse(assistant, command.getPrompt()) : sensitiveBlock.reply;
+        String response = sensitiveBlock == null
+                ? defaultIfBlank(command.getOverrideResponse(), deterministicResponse(assistant, command.getPrompt()))
+                : sensitiveBlock.reply;
         if (sensitiveBlock == null) {
             Map<String, Object> knowledgeHit = hitConfiguredKnowledge(
                     userId,

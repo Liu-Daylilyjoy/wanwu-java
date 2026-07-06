@@ -42,6 +42,7 @@ Runtime recording currently covers:
 - frontend published RAG chat: `source=web`, `appType=rag`
 - frontend workflow run: `source=web`, `appType=workflow`
 - frontend model experience LLM: model statistic with provider `usage` when available, otherwise deterministic local token estimate
+- frontend assistant stream with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 - OpenAPI agent chat: `source=openapi`, `appType=agent`
 - OpenAPI RAG chat: `source=openapi`, `appType=rag`
 - OpenAPI workflow run: `source=openapi`, `appType=workflow`
@@ -67,7 +68,7 @@ The export endpoints now emit xlsx workbooks from the same persisted aggregate r
 ## Remaining Gaps
 
 - Go's Redis daily hash plus hourly cron has not been reproduced; Java currently writes MySQL directly.
-- Runtime costs are still development estimates; token counts use provider-reported `usage` for supported OpenAI-compatible model experience/callback paths and local estimates for deterministic fallbacks.
+- Runtime costs are still development estimates; token counts use provider-reported `usage` for supported OpenAI-compatible model experience, assistant stream, and callback paths, with local estimates for deterministic fallbacks.
 - The xlsx writer intentionally covers the simple single-sheet statistics export surface only; richer Excel styling can be added later if the frontend starts depending on it.
 
 ## Verification

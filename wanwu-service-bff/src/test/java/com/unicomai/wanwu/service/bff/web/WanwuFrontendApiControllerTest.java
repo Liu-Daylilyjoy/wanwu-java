@@ -4069,6 +4069,61 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void assistantDraftStreamUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange));
+            respondSse(exchange, "data: {\"id\":\"chatcmpl-agent\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"model \"},"
+                    + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n"
+                    + "data: {\"id\":\"chatcmpl-agent\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"},"
+                    + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            Map<String, Object> assistant = map("assistantId", "assistant-001",
+                    "modelConfig", map("modelId", "model-001"));
+            when(appService.getAssistantDraft(any(AssistantDetailQuery.class))).thenReturn(assistant);
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+            when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
+                    .thenAnswer(invocation -> {
+                        AssistantConversationStreamCommand command = invocation.getArgument(0);
+                        AssistantConversationStreamResult result = new AssistantConversationStreamResult();
+                        result.setAssistantId(command.getAssistantId());
+                        result.setConversationId("conversation-001");
+                        result.setDetailId("detail-001");
+                        result.setResponse(command.getOverrideResponse());
+                        result.setCreatedAt(1782806400000L);
+                        return result;
+                    });
+
+            mockMvc.perform(post("/user/api/v1/assistant/stream/draft")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"assistantId\":\"assistant-001\",\"prompt\":\"hello agent\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("model answer")));
+
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"content\":\"hello agent\""));
+            ArgumentCaptor<AssistantConversationStreamCommand> captor =
+                    forClass(AssistantConversationStreamCommand.class);
+            verify(appService).streamAssistantConversation(captor.capture());
+            assertEquals("model answer", captor.getValue().getOverrideResponse());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void assistantPublishedStreamAndTestStreamShareSseContract() throws Exception {
         AssistantConversationStreamResult result = new AssistantConversationStreamResult();
         result.setAssistantId("assistant-001");

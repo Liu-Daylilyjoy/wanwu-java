@@ -3890,6 +3890,7 @@ public class WanwuFrontendApiController {
                     : request.toCommand(draft);
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
+            attachConfiguredAssistantModelResponse(userContext, command, draft, startedAt);
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getAssistantId(), AGENT_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
@@ -3903,6 +3904,62 @@ public class WanwuFrontendApiController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(errorJson(ex.getMessage()));
         }
+    }
+
+    private void attachConfiguredAssistantModelResponse(UserContext userContext,
+                                                        AssistantConversationStreamCommand command,
+                                                        boolean draft,
+                                                        long startedAt) {
+        if (command == null || isBlank(command.getAssistantId()) || isBlank(command.getPrompt())) {
+            return;
+        }
+        try {
+            Map<String, Object> assistant;
+            if (draft) {
+                assistant = appService.getAssistantDraft(new AssistantDetailQuery(
+                        command.getAssistantId(), userContext.getUserId(), userContext.getOrgId()));
+            } else {
+                assistant = appService.getPublishedAssistant(new AssistantPublishedQuery(
+                        command.getAssistantId(), null, userContext.getUserId(), userContext.getOrgId()));
+            }
+            String modelId = assistantModelId(assistant);
+            if (isBlank(modelId)) {
+                return;
+            }
+            ModelInfo model = modelService.getModel(userContext.getUserId(), userContext.getOrgId(), modelId);
+            if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
+                return;
+            }
+            ModelExperienceLlmRequest upstreamRequest = new ModelExperienceLlmRequest();
+            upstreamRequest.setModelId(modelId);
+            upstreamRequest.setSessionId(defaultIfBlank(command.getConversationId(), command.getAssistantId()));
+            upstreamRequest.setContent(command.getPrompt());
+            ModelExperienceStreamResult streamResult = modelExperienceUpstreamStream(userContext, model, upstreamRequest);
+            String answer = defaultIfBlank(streamResult.getContent(), "");
+            ModelExperienceUsage usage = streamResult.getUsage();
+            if (isBlank(answer)) {
+                ModelExperienceAnswer upstreamAnswer = modelExperienceUpstreamAnswer(userContext, model, upstreamRequest);
+                answer = defaultIfBlank(upstreamAnswer.getContent(), "");
+                usage = upstreamAnswer.getUsage();
+            }
+            if (isBlank(answer)) {
+                return;
+            }
+            command.setOverrideResponse(answer);
+            recordModelStatistic(userContext, model, upstreamRequest, answer, startedAt, usage);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private String assistantModelId(Map<String, Object> assistant) {
+        if (assistant == null) {
+            return "";
+        }
+        return firstNonBlank(
+                nestedText(assistant, "modelConfig", "modelId"),
+                nestedText(assistant, "modelConfig", "model_id"),
+                nestedText(assistant, "modelConfig", "config", "modelId"),
+                nestedText(assistant, "modelConfig", "config", "model_id"));
     }
 
     private ResponseEntity<String> streamRagChat(String authorization,

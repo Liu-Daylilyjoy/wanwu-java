@@ -2139,6 +2139,21 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void draftStreamPersistsConfiguredModelUpstreamResponse() {
+        AppServiceImpl service = new AppServiceImpl(new InMemoryApplicationRepository(), fixedClock());
+        AssistantCreateResult created = service.createAssistant(command("UpstreamAgent", "model backed desc"));
+
+        AssistantConversationStreamCommand stream = streamCommand(created.getAssistantId(), "", "hello model", true);
+        stream.setOverrideResponse("model upstream answer");
+        AssistantConversationStreamResult result = service.streamAssistantConversation(stream);
+
+        assertEquals("model upstream answer", result.getResponse());
+        AssistantConversationPageResult details = service.listAssistantConversationDetails(
+                conversationDetailQuery(result.getConversationId()));
+        assertEquals("model upstream answer", details.getList().get(0).get("response"));
+    }
+
+    @Test
     public void assistantDraftStreamUsesConfiguredSafetyTableToBlockSensitivePrompt() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), null,

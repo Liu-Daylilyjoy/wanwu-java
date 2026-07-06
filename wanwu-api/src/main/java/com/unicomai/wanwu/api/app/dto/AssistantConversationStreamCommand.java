@@ -17,6 +17,7 @@ public class AssistantConversationStreamCommand implements Serializable {
     private List<Map<String, Object>> fileInfo = new ArrayList<>();
     private String userId;
     private String orgId;
+    private String overrideResponse;
 
     public String getAssistantId() {
         return assistantId;
@@ -80,5 +81,13 @@ public class AssistantConversationStreamCommand implements Serializable {
 
     public void setOrgId(String orgId) {
         this.orgId = orgId;
+    }
+
+    public String getOverrideResponse() {
+        return overrideResponse;
+    }
+
+    public void setOverrideResponse(String overrideResponse) {
+        this.overrideResponse = overrideResponse;
     }
 }
