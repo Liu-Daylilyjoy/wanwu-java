@@ -191,7 +191,11 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public synchronized ModelInfo getModel(String userId, String orgId, String modelId) {
-        return copyForUser(existing(modelId), userId);
+        ModelInfo model = existing(modelId);
+        if (!isVisibleToUserOrg(userId, orgId, model)) {
+            throw new IllegalArgumentException("model permission denied: " + modelId);
+        }
+        return copyForUser(model, userId);
     }
 
     @Override
@@ -221,8 +225,6 @@ public class ModelServiceImpl implements ModelService {
         if (modelIds == null || modelIds.isEmpty()) {
             return;
         }
-        String safeUser = defaultIfBlank(userId, DEFAULT_USER_ID);
-        String safeOrg = defaultIfBlank(orgId, DEFAULT_ORG_ID);
         String unauthorized = "";
         for (String modelId : modelIds) {
             ModelInfo model = models.get(modelId);
@@ -230,15 +232,7 @@ public class ModelServiceImpl implements ModelService {
                 unauthorized = modelId;
                 continue;
             }
-            boolean allowed;
-            if (SCOPE_PUBLIC.equals(model.getScopeType())) {
-                allowed = true;
-            } else if (SCOPE_ORG.equals(model.getScopeType())) {
-                allowed = safeOrg.equals(model.getOrgId());
-            } else {
-                allowed = safeUser.equals(model.getUserId()) && safeOrg.equals(model.getOrgId());
-            }
-            if (!allowed) {
+            if (!isVisibleToUserOrg(userId, orgId, model)) {
                 unauthorized = modelId;
             }
         }
@@ -252,6 +246,9 @@ public class ModelServiceImpl implements ModelService {
         ModelListQuery safe = query == null ? new ModelListQuery() : query;
         List<ModelInfo> result = new ArrayList<ModelInfo>();
         for (ModelInfo model : models.values()) {
+            if (!isVisibleToUserOrg(safe.getUserId(), safe.getOrgId(), model)) {
+                continue;
+            }
             if (!matches(safe, model)) {
                 continue;
             }
@@ -266,6 +263,9 @@ public class ModelServiceImpl implements ModelService {
         String requestedType = canonicalModelType(safe.getModelType());
         List<ModelInfo> result = new ArrayList<ModelInfo>();
         for (ModelInfo model : models.values()) {
+            if (!isVisibleToUserOrg(safe.getUserId(), safe.getOrgId(), model)) {
+                continue;
+            }
             if (!Boolean.TRUE.equals(model.getIsActive())) {
                 continue;
             }
@@ -605,6 +605,18 @@ public class ModelServiceImpl implements ModelService {
                     || (SCOPE_ORG.equals(model.getScopeType()) && defaultIfBlank(query.getUserId(), "").equals(model.getUserId()));
         }
         return true;
+    }
+
+    private boolean isVisibleToUserOrg(String userId, String orgId, ModelInfo model) {
+        String safeUser = defaultIfBlank(userId, DEFAULT_USER_ID);
+        String safeOrg = defaultIfBlank(orgId, DEFAULT_ORG_ID);
+        if (SCOPE_PUBLIC.equals(model.getScopeType())) {
+            return true;
+        }
+        if (SCOPE_ORG.equals(model.getScopeType())) {
+            return safeOrg.equals(model.getOrgId());
+        }
+        return safeUser.equals(model.getUserId()) && safeOrg.equals(model.getOrgId());
     }
 
     private ModelInfo copyForUser(ModelInfo source, String userId) {

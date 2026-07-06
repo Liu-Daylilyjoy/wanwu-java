@@ -125,6 +125,30 @@ public class ModelServiceImplTest {
     }
 
     @Test
+    public void listAndGetModelsApplyGoUserOrgOrPublicScopeRules() {
+        ModelInfo adminPrivate = service.importModel(modelCommand(
+                "dev-admin", "default-org", "Admin Private Model", "1"));
+        ModelInfo orgShared = service.importModel(modelCommand(
+                "dev-admin", "default-org", "Org Shared Model", "3"));
+        ModelInfo publicModel = service.importModel(modelCommand(
+                "other-user", "other-org", "Public Model", "2"));
+
+        ModelListResult appList = service.listModels(new ModelListQuery("dev-app", "default-org", "", "", "", "", ""));
+        assertFalse(containsModel(appList, adminPrivate.getModelId()));
+        assertTrue(containsModel(appList, orgShared.getModelId()));
+        assertTrue(containsModel(appList, publicModel.getModelId()));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.getModel("dev-app", "default-org", adminPrivate.getModelId()));
+        assertEquals("Org Shared Model",
+                service.getModel("dev-app", "default-org", orgShared.getModelId()).getDisplayName());
+
+        ModelListResult appTypeList = service.listTypeModels(new ModelTypeQuery("dev-app", "default-org", "llm"));
+        assertFalse(containsModel(appTypeList, adminPrivate.getModelId()));
+        assertTrue(containsModel(appTypeList, orgShared.getModelId()));
+    }
+
+    @Test
     public void typeSelectProviderAndRecommendModelsFollowFrontendContract() {
         ModelListResult llm = service.listTypeModels(new ModelTypeQuery("dev-admin", "default-org", "llm"));
         assertTrue(llm.getTotal() >= 1);
@@ -316,6 +340,27 @@ public class ModelServiceImplTest {
         record.setCreatedAt(1L);
         record.setUpdatedAt(1L);
         return record;
+    }
+
+    private ModelUpsertCommand modelCommand(String userId, String orgId, String displayName, String scopeType) {
+        ModelUpsertCommand command = new ModelUpsertCommand();
+        command.setUserId(userId);
+        command.setOrgId(orgId);
+        command.setProvider("DeepSeek");
+        command.setModelType("llm");
+        command.setModel(displayName.toLowerCase().replace(' ', '-'));
+        command.setDisplayName(displayName);
+        command.setScopeType(scopeType);
+        return command;
+    }
+
+    private boolean containsModel(ModelListResult result, String modelId) {
+        for (ModelInfo model : result.getList()) {
+            if (modelId.equals(model.getModelId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void assertSpecializedModel(String modelType, String model, String tag) {
