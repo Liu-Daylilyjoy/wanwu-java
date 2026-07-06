@@ -585,9 +585,9 @@ public class WanwuFrontendApiController {
             @RequestBody ModelExperienceDialogRequest request) {
         try {
             UserContext userContext = userContext(authorization);
-            ModelExperienceDialogSaveCommand command = request == null
-                    ? new ModelExperienceDialogSaveCommand()
-                    : request.toCommand();
+            ModelExperienceDialogRequest safeRequest = request == null ? new ModelExperienceDialogRequest() : request;
+            authorizeModelId(userContext, safeRequest.getModelId());
+            ModelExperienceDialogSaveCommand command = safeRequest.toCommand();
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
             return FrontendResponse.ok(modelService.saveModelExperienceDialog(command));
@@ -636,6 +636,7 @@ public class WanwuFrontendApiController {
         try {
             UserContext userContext = userContext(authorization);
             ModelExperienceLlmRequest safe = request == null ? new ModelExperienceLlmRequest() : request;
+            authorizeModelId(userContext, safe.getModelId());
             ModelInfo model = modelService.getModel(userContext.getUserId(), userContext.getOrgId(), safe.getModelId());
             if (!Boolean.TRUE.equals(model.getIsActive())) {
                 return ResponseEntity.status(400)
@@ -1671,13 +1672,20 @@ public class WanwuFrontendApiController {
     public ResponseEntity<String> asrStream(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam("modelId") String modelId) {
-        UserContext userContext = userContext(authorization);
-        String connected = "{\"type\":\"asr.connected\",\"modelId\":\"" + jsonEscape(modelId)
-                + "\",\"userId\":\"" + jsonEscape(userContext.getUserId()) + "\"}";
-        String closed = "{\"type\":\"asr.closed\",\"modelId\":\"" + jsonEscape(modelId) + "\"}";
-        return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_EVENT_STREAM)
-                .body("data: " + connected + "\n\n" + "data: " + closed + "\n\n");
+        try {
+            UserContext userContext = userContext(authorization);
+            authorizeModelId(userContext, modelId);
+            String connected = "{\"type\":\"asr.connected\",\"modelId\":\"" + jsonEscape(modelId)
+                    + "\",\"userId\":\"" + jsonEscape(userContext.getUserId()) + "\"}";
+            String closed = "{\"type\":\"asr.closed\",\"modelId\":\"" + jsonEscape(modelId) + "\"}";
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body("data: " + connected + "\n\n" + "data: " + closed + "\n\n");
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(400)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(errorJson(ex.getMessage()));
+        }
     }
 
     @PostMapping(value = "/assistant/question/recommend", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -2833,6 +2841,13 @@ public class WanwuFrontendApiController {
             return;
         }
         modelService.checkModelUserPermission(userContext.getUserId(), userContext.getOrgId(), modelIds);
+    }
+
+    private void authorizeModelId(UserContext userContext, String modelId) {
+        if (isBlank(modelId)) {
+            return;
+        }
+        authorizeModelIds(userContext, Collections.singletonList(modelId));
     }
 
     private List<String> assistantConfigModelIds(AssistantConfigRequest request) {

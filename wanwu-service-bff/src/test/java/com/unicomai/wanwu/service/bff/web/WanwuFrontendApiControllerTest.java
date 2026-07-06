@@ -1786,6 +1786,7 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void asrStreamRouteReturnsDevelopmentEventStream() throws Exception {
         mockMvc.perform(get("/user/api/v1/asr/stream")
                         .header("Authorization", "Bearer dev-token")
@@ -1795,6 +1796,29 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(content().string(containsString("asr.connected")))
                 .andExpect(content().string(containsString("asr.closed")))
                 .andExpect(content().string(containsString("asr-001")));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-admin"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("asr-001"), modelIdsCaptor.getValue());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void asrStreamStopsBeforeEventsWhenModelIsDenied() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: asr-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(get("/user/api/v1/asr/stream")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .param("modelId", "asr-private"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(containsString("\"msg\":\"bff_model_perm: asr-private\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("asr.connected"))));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("asr-private"), modelIdsCaptor.getValue());
     }
 
     @Test
@@ -1859,6 +1883,47 @@ public class WanwuFrontendApiControllerTest {
         verify(modelService).listModelExperienceDialogRecords(any());
         verify(modelService).deleteModelExperienceDialog(any());
         verify(modelService, times(2)).saveModelExperienceDialogRecord(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void modelExperienceDialogChecksModelPermissionBeforeSave() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: model-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/dialog")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-private\",\"sessionId\":\"session-001\",\"title\":\"hello\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("bff_model_perm: model-private"));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("model-private"), modelIdsCaptor.getValue());
+        verify(modelService, times(0)).saveModelExperienceDialog(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void modelExperienceLlmChecksModelPermissionBeforeStreaming() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: model-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(post("/user/api/v1/model/experience/llm")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"modelId\":\"model-private\",\"sessionId\":\"session-001\",\"modelExperienceId\":\"exp-001\",\"content\":\"hello\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(containsString("\"msg\":\"bff_model_perm: model-private\"")));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Collections.singletonList("model-private"), modelIdsCaptor.getValue());
+        verify(modelService, times(0)).getModel(anyString(), anyString(), anyString());
+        verify(modelService, times(0)).saveModelExperienceDialogRecord(any());
     }
 
     @Test
