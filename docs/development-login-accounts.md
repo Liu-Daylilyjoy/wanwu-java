@@ -13,6 +13,8 @@ Initial password and captcha remain development-compatible so existing zero-chan
 
 `wga` and `wga.wanwu_bot` are intentionally not granted. The Java WGA controllers remain as compatibility shells, but the unchanged frontend hides the General Agent/WanwuBot menu through the IAM permission response.
 
+The Java BFF now also enforces these development permission scopes for `/user/api/v1/**` routes. `dev-token-app` can access the app workspace route families, but direct requests to model, knowledge, resource, permission, operation, setting, exploration, statistic, and API-key management routes return `403` with `permission denied`. Common bootstrap routes such as `/user/api/v1/user/permission`, `/user/api/v1/user/info`, `/user/api/v1/org/select`, avatar/file helpers, and Doc Center routes remain available after login.
+
 Email register/reset/login routes are also available as development compatibility contracts:
 
 - `POST /user/api/v1/base/login/email` returns `dev-token` for `admin` and `dev-token-app` for `app`.
