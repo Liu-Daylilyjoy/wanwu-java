@@ -2801,6 +2801,26 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void assistantConfigChecksReferencedModelIdsBeforeSave() throws Exception {
+        doThrow(new IllegalArgumentException("bff_model_perm: model-private"))
+                .when(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), any(List.class));
+
+        mockMvc.perform(put("/user/api/v1/assistant/config")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"modelConfig\":{\"modelId\":\"model-private\"},\"rerankConfig\":{\"modelId\":\"rerank-private\"},\"recommendConfig\":{\"modelConfig\":{\"modelId\":\"recommend-private\"}}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("bff_model_perm: model-private"));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-app"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Arrays.asList("model-private", "rerank-private", "recommend-private"), modelIdsCaptor.getValue());
+        verify(appService, times(0)).updateAssistantConfig(any(AssistantConfigUpdateCommand.class));
+    }
+
+    @Test
     public void deleteAppspaceAgentReturnsFrontendSuccessAndMapsRequest() throws Exception {
         mockMvc.perform(delete("/user/api/v1/appspace/app")
                         .header("Authorization", "Bearer dev-token")
@@ -3206,6 +3226,22 @@ public class WanwuFrontendApiControllerTest {
         verify(appService).getPublishedRag(any(RagDetailQuery.class));
         verify(appService).copyRag(any(RagCopyCommand.class));
         verify(appService).deleteRag(any(RagDeleteCommand.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void ragConfigChecksReferencedModelIdsBeforeSave() throws Exception {
+        mockMvc.perform(put("/user/api/v1/appspace/rag/config")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ragId\":\"rag-001\",\"modelConfig\":{\"modelId\":\"llm-001\"},\"rerankConfig\":{\"modelId\":\"rerank-001\"},\"qaRerankConfig\":{\"modelId\":\"qa-rerank-001\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<List> modelIdsCaptor = forClass(List.class);
+        verify(modelService).checkModelUserPermission(eq("dev-admin"), eq("default-org"), modelIdsCaptor.capture());
+        assertEquals(Arrays.asList("llm-001", "rerank-001", "qa-rerank-001"), modelIdsCaptor.getValue());
+        verify(appService).updateRagConfig(any(RagConfigUpdateCommand.class));
     }
 
     @Test

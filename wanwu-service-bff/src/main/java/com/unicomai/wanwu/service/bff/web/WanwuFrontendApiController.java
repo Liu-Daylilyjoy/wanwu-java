@@ -853,7 +853,9 @@ public class WanwuFrontendApiController {
             @RequestBody AssistantConfigRequest request) {
         try {
             UserContext userContext = userContext(authorization);
-            AssistantConfigUpdateCommand command = request.toCommand();
+            AssistantConfigRequest safeRequest = request == null ? new AssistantConfigRequest() : request;
+            authorizeModelIds(userContext, assistantConfigModelIds(safeRequest));
+            AssistantConfigUpdateCommand command = safeRequest.toCommand();
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
             appService.updateAssistantConfig(command);
@@ -913,7 +915,9 @@ public class WanwuFrontendApiController {
             @RequestBody RagConfigRequest request) {
         try {
             UserContext userContext = userContext(authorization);
-            RagConfigUpdateCommand command = request == null ? new RagConfigRequest().toCommand() : request.toCommand();
+            RagConfigRequest safeRequest = request == null ? new RagConfigRequest() : request;
+            authorizeModelIds(userContext, ragConfigModelIds(safeRequest));
+            RagConfigUpdateCommand command = safeRequest.toCommand();
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
             appService.updateRagConfig(command);
@@ -2822,6 +2826,63 @@ public class WanwuFrontendApiController {
     private boolean hasImportContent(Map<String, Object> body) {
         return !isBlank(firstText(body, "content", "text", "docContent", "csv", "tsv",
                 "contentBase64", "base64", "docContentBase64", "textBase64"));
+    }
+
+    private void authorizeModelIds(UserContext userContext, List<String> modelIds) {
+        if (modelService == null || modelIds == null || modelIds.isEmpty()) {
+            return;
+        }
+        modelService.checkModelUserPermission(userContext.getUserId(), userContext.getOrgId(), modelIds);
+    }
+
+    private List<String> assistantConfigModelIds(AssistantConfigRequest request) {
+        List<String> modelIds = new ArrayList<>();
+        if (request == null) {
+            return modelIds;
+        }
+        addModelId(modelIds, request.getModelConfig());
+        addModelId(modelIds, request.getRerankConfig());
+        addNestedModelId(modelIds, request.getRecommendConfig(), "modelConfig", "modelId");
+        return modelIds;
+    }
+
+    private List<String> ragConfigModelIds(RagConfigRequest request) {
+        List<String> modelIds = new ArrayList<>();
+        if (request == null) {
+            return modelIds;
+        }
+        addModelId(modelIds, request.getModelConfig());
+        addModelId(modelIds, request.getRerankConfig());
+        addModelId(modelIds, request.getQaRerankConfig());
+        return modelIds;
+    }
+
+    private void addModelId(List<String> modelIds, Map<String, Object> config) {
+        addNestedModelId(modelIds, config, "modelId");
+    }
+
+    private void addNestedModelId(List<String> modelIds, Map<String, Object> root, String... path) {
+        String modelId = nestedText(root, path);
+        if (!isBlank(modelId) && !modelIds.contains(modelId)) {
+            modelIds.add(modelId);
+        }
+    }
+
+    private String nestedText(Map<String, Object> root, String... path) {
+        if (root == null || path == null || path.length == 0) {
+            return "";
+        }
+        Object current = root;
+        for (String key : path) {
+            if (!(current instanceof Map)) {
+                return "";
+            }
+            current = mapValue(current).get(key);
+            if (current == null) {
+                return "";
+            }
+        }
+        return current instanceof String ? String.valueOf(current) : "";
     }
 
     private Map<String, Object> objectMap(Map<?, ?> request) {
