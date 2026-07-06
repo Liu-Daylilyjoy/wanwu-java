@@ -59,16 +59,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -131,6 +124,7 @@ public class WanwuOpenApiController {
     private OpenApiChatflowSessionStore chatflowSessionStore = new OpenApiChatflowSessionStore();
     private final Map<String, OAuthCode> oauthCodes = new ConcurrentHashMap<>();
     private final Map<String, OAuthToken> oauthRefreshTokens = new ConcurrentHashMap<>();
+    private final OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient();
 
     public WanwuOpenApiController() {
     }
@@ -1409,14 +1403,10 @@ public class WanwuOpenApiController {
             if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
                 return;
             }
-            OpenApiModelStreamResult streamResult = openApiModelUpstreamStream(model, modelId, command.getPrompt());
-            String answer = defaultIfBlank(streamResult.content, "");
-            OpenApiModelUsage usage = streamResult.usage;
-            if (isBlank(answer)) {
-                OpenApiModelAnswer modelAnswer = openApiModelUpstreamAnswer(model, modelId, command.getPrompt());
-                answer = defaultIfBlank(modelAnswer.content, "");
-                usage = modelAnswer.usage;
-            }
+            OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
+                    chatClient.complete(model, modelId, command.getPrompt());
+            String answer = defaultIfBlank(chatResult.getContent(), "");
+            OpenAiCompatibleChatClient.Usage usage = chatResult.getUsage();
             if (isBlank(answer)) {
                 return;
             }
@@ -1444,14 +1434,10 @@ public class WanwuOpenApiController {
             if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
                 return;
             }
-            OpenApiModelStreamResult streamResult = openApiModelUpstreamStream(model, modelId, command.getQuestion());
-            String answer = defaultIfBlank(streamResult.content, "");
-            OpenApiModelUsage usage = streamResult.usage;
-            if (isBlank(answer)) {
-                OpenApiModelAnswer modelAnswer = openApiModelUpstreamAnswer(model, modelId, command.getQuestion());
-                answer = defaultIfBlank(modelAnswer.content, "");
-                usage = modelAnswer.usage;
-            }
+            OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
+                    chatClient.complete(model, modelId, command.getQuestion());
+            String answer = defaultIfBlank(chatResult.getContent(), "");
+            OpenAiCompatibleChatClient.Usage usage = chatResult.getUsage();
             if (isBlank(answer)) {
                 return;
             }
@@ -1467,15 +1453,15 @@ public class WanwuOpenApiController {
                                       String question,
                                       String answer,
                                       long startedAt,
-                                      OpenApiModelUsage usage) {
+                                      OpenAiCompatibleChatClient.Usage usage) {
         if (ctx == null || appService == null || model == null || isBlank(modelId)) {
             return;
         }
         try {
-            long promptTokens = usage == null ? estimateTokens(question) : usage.promptTokens;
-            long completionTokens = usage == null ? estimateTokens(answer) : usage.completionTokens;
-            long totalTokens = usage == null || usage.totalTokens <= 0L
-                    ? promptTokens + completionTokens : usage.totalTokens;
+            long promptTokens = usage == null ? chatClient.estimateTokens(question) : usage.getPromptTokens();
+            long completionTokens = usage == null ? chatClient.estimateTokens(answer) : usage.getCompletionTokens();
+            long totalTokens = usage == null || usage.getTotalTokens() <= 0L
+                    ? promptTokens + completionTokens : usage.getTotalTokens();
             RecordModelStatisticCommand command = new RecordModelStatisticCommand();
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
@@ -1493,182 +1479,6 @@ public class WanwuOpenApiController {
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }
-    }
-
-    private OpenApiModelStreamResult openApiModelUpstreamStream(ModelInfo model, String modelId, String question) {
-        if (model == null || model.getConfig() == null) {
-            return OpenApiModelStreamResult.empty();
-        }
-        try {
-            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
-            String apiKey = firstText(model.getConfig(), "apiKey");
-            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
-                return OpenApiModelStreamResult.empty();
-            }
-            Map<String, Object> payload = openApiModelPayload(model, modelId, question, true);
-            return postOpenApiModelStream(modelEndpointUrl(endpoint, "/chat/completions"),
-                    apiKey, JSON.writeValueAsString(payload));
-        } catch (RuntimeException | IOException ignored) {
-            return OpenApiModelStreamResult.empty();
-        }
-    }
-
-    private OpenApiModelAnswer openApiModelUpstreamAnswer(ModelInfo model, String modelId, String question) {
-        if (model == null || model.getConfig() == null) {
-            return OpenApiModelAnswer.empty();
-        }
-        try {
-            String endpoint = firstText(model.getConfig(), "endpointUrl", "inferUrl", "baseUrl", "url");
-            String apiKey = firstText(model.getConfig(), "apiKey");
-            if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
-                return OpenApiModelAnswer.empty();
-            }
-            Map<String, Object> payload = openApiModelPayload(model, modelId, question, false);
-            String response = postOpenApiModelJson(modelEndpointUrl(endpoint, "/chat/completions"),
-                    apiKey, JSON.writeValueAsString(payload));
-            return extractOpenApiModelAnswer(response);
-        } catch (RuntimeException | IOException ignored) {
-            return OpenApiModelAnswer.empty();
-        }
-    }
-
-    private Map<String, Object> openApiModelPayload(ModelInfo model, String modelId, String question, boolean stream) {
-        Map<String, Object> message = new LinkedHashMap<>();
-        message.put("role", "user");
-        message.put("content", defaultIfBlank(question, ""));
-        List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(message);
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", defaultIfBlank(model == null ? "" : model.getModel(), modelId));
-        payload.put("messages", messages);
-        payload.put("stream", stream);
-        return payload;
-    }
-
-    private OpenApiModelStreamResult postOpenApiModelStream(String endpoint, String apiKey, String json)
-            throws IOException {
-        HttpURLConnection connection = openModelConnection(endpoint, apiKey, "text/event-stream");
-        try (OutputStream body = connection.getOutputStream()) {
-            body.write(json.getBytes(StandardCharsets.UTF_8));
-        }
-        try {
-            int status = connection.getResponseCode();
-            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            if (status >= 400) {
-                throw new IOException("openapi rag model upstream returned " + status);
-            }
-            String contentType = defaultIfBlank(connection.getHeaderField("Content-Type"), "");
-            if (!isBlank(contentType) && !contentType.toLowerCase().contains("text/event-stream")) {
-                return OpenApiModelStreamResult.empty();
-            }
-            return readOpenApiModelStream(stream);
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    private String postOpenApiModelJson(String endpoint, String apiKey, String json) throws IOException {
-        HttpURLConnection connection = openModelConnection(endpoint, apiKey, "application/json");
-        try (OutputStream body = connection.getOutputStream()) {
-            body.write(json.getBytes(StandardCharsets.UTF_8));
-        }
-        try {
-            int status = connection.getResponseCode();
-            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            String response = readRawStream(stream);
-            if (status >= 400) {
-                throw new IOException("openapi rag model upstream returned " + status);
-            }
-            return response;
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    private HttpURLConnection openModelConnection(String endpoint, String apiKey, String accept) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
-        connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Authorization", "Bearer " + apiKey);
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("Accept", accept);
-        connection.setDoOutput(true);
-        return connection;
-    }
-
-    private OpenApiModelStreamResult readOpenApiModelStream(InputStream stream) throws IOException {
-        if (stream == null) {
-            return OpenApiModelStreamResult.empty();
-        }
-        StringBuilder answer = new StringBuilder();
-        OpenApiModelUsage usage = null;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("data:")) {
-                    OpenApiModelStreamChunk chunk = parseOpenApiModelStreamChunk(
-                            line.substring("data:".length()).trim());
-                    answer.append(chunk.content);
-                    if (chunk.usage != null) {
-                        usage = chunk.usage;
-                    }
-                }
-            }
-        }
-        return new OpenApiModelStreamResult(answer.toString(), usage);
-    }
-
-    @SuppressWarnings("unchecked")
-    private OpenApiModelStreamChunk parseOpenApiModelStreamChunk(String data) {
-        if (isBlank(data) || "[DONE]".equals(data)) {
-            return OpenApiModelStreamChunk.empty();
-        }
-        try {
-            Map<String, Object> root = JSON.readValue(data, Map.class);
-            Map<String, Object> choice = firstMap(root.get("choices"));
-            Map<String, Object> delta = objectMap(choice.get("delta"));
-            Map<String, Object> message = objectMap(choice.get("message"));
-            String content = firstNonBlank(firstText(delta, "content"), firstText(message, "content"));
-            return new OpenApiModelStreamChunk(content, openApiModelUsage(objectMap(root.get("usage"))));
-        } catch (IOException ignored) {
-            return OpenApiModelStreamChunk.empty();
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private OpenApiModelAnswer extractOpenApiModelAnswer(String response) throws IOException {
-        if (isBlank(response)) {
-            return OpenApiModelAnswer.empty();
-        }
-        Map<String, Object> root = JSON.readValue(response, Map.class);
-        Map<String, Object> choice = firstMap(root.get("choices"));
-        Map<String, Object> message = objectMap(choice.get("message"));
-        Map<String, Object> delta = objectMap(choice.get("delta"));
-        String content = firstNonBlank(firstText(message, "content"), firstText(delta, "content"));
-        return new OpenApiModelAnswer(content, openApiModelUsage(objectMap(root.get("usage"))));
-    }
-
-    private OpenApiModelUsage openApiModelUsage(Map<String, Object> usage) {
-        if (usage == null || usage.isEmpty()) {
-            return null;
-        }
-        return new OpenApiModelUsage(
-                payloadLong(usage, "prompt_tokens"),
-                payloadLong(usage, "completion_tokens"),
-                payloadLong(usage, "total_tokens"));
-    }
-
-    private Map<String, Object> firstMap(Object value) {
-        if (!(value instanceof List)) {
-            return Collections.emptyMap();
-        }
-        List<?> list = (List<?>) value;
-        if (list.isEmpty() || !(list.get(0) instanceof Map)) {
-            return Collections.emptyMap();
-        }
-        return objectMap(list.get(0));
     }
 
     private String configuredModelId(Map<String, Object> config) {
@@ -1700,49 +1510,6 @@ public class WanwuOpenApiController {
             }
         }
         return "";
-    }
-
-    private String modelEndpointUrl(String endpoint, String suffix) {
-        String base = trimTrailingSlash(endpoint);
-        if (base.endsWith(suffix)) {
-            return base;
-        }
-        return base + suffix;
-    }
-
-    private String trimTrailingSlash(String value) {
-        String result = defaultIfBlank(value, "");
-        while (result.endsWith("/")) {
-            result = result.substring(0, result.length() - 1);
-        }
-        return result;
-    }
-
-    private String readRawStream(InputStream stream) throws IOException {
-        if (stream == null) {
-            return "";
-        }
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[1024];
-        int read;
-        while ((read = stream.read(buffer)) != -1) {
-            output.write(buffer, 0, read);
-        }
-        return new String(output.toByteArray(), StandardCharsets.UTF_8);
-    }
-
-    private long estimateTokens(String value) {
-        String text = defaultIfBlank(value, "");
-        if (isBlank(text)) {
-            return 0L;
-        }
-        return Math.max(1L, (text.length() + 3L) / 4L);
-    }
-
-    private boolean isDevelopmentApiKey(String value) {
-        return "dev-model-key".equals(value)
-                || "useless-api-key".equals(value)
-                || "it-is-not-your-api-key".equals(value);
     }
 
     private AssistantConfigUpdateCommand openApiAgentConfig(OpenApiContext ctx, Map<String, Object> body) {
@@ -2305,60 +2072,6 @@ public class WanwuOpenApiController {
             }
         }
         return scopes;
-    }
-
-    private static class OpenApiModelAnswer {
-        private final String content;
-        private final OpenApiModelUsage usage;
-
-        private OpenApiModelAnswer(String content, OpenApiModelUsage usage) {
-            this.content = content;
-            this.usage = usage;
-        }
-
-        private static OpenApiModelAnswer empty() {
-            return new OpenApiModelAnswer("", null);
-        }
-    }
-
-    private static class OpenApiModelStreamResult {
-        private final String content;
-        private final OpenApiModelUsage usage;
-
-        private OpenApiModelStreamResult(String content, OpenApiModelUsage usage) {
-            this.content = content;
-            this.usage = usage;
-        }
-
-        private static OpenApiModelStreamResult empty() {
-            return new OpenApiModelStreamResult("", null);
-        }
-    }
-
-    private static class OpenApiModelStreamChunk {
-        private final String content;
-        private final OpenApiModelUsage usage;
-
-        private OpenApiModelStreamChunk(String content, OpenApiModelUsage usage) {
-            this.content = content;
-            this.usage = usage;
-        }
-
-        private static OpenApiModelStreamChunk empty() {
-            return new OpenApiModelStreamChunk("", null);
-        }
-    }
-
-    private static class OpenApiModelUsage {
-        private final long promptTokens;
-        private final long completionTokens;
-        private final long totalTokens;
-
-        private OpenApiModelUsage(long promptTokens, long completionTokens, long totalTokens) {
-            this.promptTokens = promptTokens;
-            this.completionTokens = completionTokens;
-            this.totalTokens = totalTokens;
-        }
     }
 
     private static class OAuthCode {
