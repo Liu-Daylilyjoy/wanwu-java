@@ -63,6 +63,9 @@ public interface McpService {
 
     Map<String, Object> createMcpServerOpenApiTool(String userId, String orgId, Map<String, Object> request);
 
+    Map<String, Object> callMcpServerTool(String userId, String orgId, String mcpServerId,
+                                          Map<String, Object> request);
+
     Map<String, Object> listMcpSelect(String userId, String orgId, String name);
 
     Map<String, Object> listMcpActions(String userId, String orgId, String toolId, String toolType);

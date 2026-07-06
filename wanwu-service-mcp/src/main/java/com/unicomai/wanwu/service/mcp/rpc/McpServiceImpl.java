@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -403,6 +404,37 @@ public class McpServiceImpl implements McpService {
         }
         saveSnapshot();
         return listResult(created);
+    }
+
+    @Override
+    public Map<String, Object> callMcpServerTool(String userId, String orgId, String mcpServerId,
+                                                 Map<String, Object> request) {
+        Map<String, Object> server = require(mcpServers, orgId, mcpServerId, "mcp server");
+        String name = firstText(request, "name", "toolName", "methodName");
+        Map<String, Object> arguments = mapValue(request == null ? null : request.get("arguments"));
+        Map<String, Object> tool = findServerTool(server, name);
+        if (tool.isEmpty()) {
+            return mcpCallResult(mcpServerId, name, arguments, tool,
+                    "MCP tool not found: " + defaultString(name, "unknown"), true,
+                    Collections.<String, Object>emptyMap());
+        }
+        if ("custom".equals(text(tool, "type"))) {
+            try {
+                return executeCustomMcpServerTool(orgId, mcpServerId, tool, name, arguments);
+            } catch (Exception ex) {
+                return mcpCallResult(mcpServerId, name, arguments, tool,
+                        "MCP tool call failed: " + ex.getMessage(), true,
+                        Collections.<String, Object>emptyMap());
+            }
+        }
+        String text = "Executed MCP tool " + defaultString(name, "unknown")
+                + " on server " + defaultString(mcpServerId, "")
+                + " with arguments " + arguments;
+        if (!blank(text(tool, "desc"))) {
+            text = text + ". " + text(tool, "desc");
+        }
+        return mcpCallResult(mcpServerId, name, arguments, tool, text, false,
+                Collections.<String, Object>emptyMap());
     }
 
     @Override
@@ -1628,6 +1660,232 @@ public class McpServiceImpl implements McpService {
         return actions.isEmpty() ? action("invoke", "Invoke") : actions.get(0);
     }
 
+    private Map<String, Object> findServerTool(Map<String, Object> server, String name) {
+        for (Map<String, Object> tool : listValue(server.get("tools"))) {
+            String methodName = defaultString(text(tool, "methodName"), text(tool, "name"));
+            if (methodName.equals(name)) {
+                return tool;
+            }
+        }
+        return Collections.emptyMap();
+    }
+
+    private Map<String, Object> executeCustomMcpServerTool(String orgId, String mcpServerId,
+                                                           Map<String, Object> serverTool, String name,
+                                                           Map<String, Object> arguments) throws IOException {
+        Map<String, Object> customTool = require(customTools, orgId, text(serverTool, "id"), "custom tool");
+        OpenApiOperation operation = openApiOperation(text(customTool, "schema"), name);
+        HttpToolResponse response = callOpenApiOperation(operation, mapValue(customTool.get("apiAuth")), arguments);
+        Object parsed = parseJsonValue(response.body);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("status", response.status);
+        extra.put("url", response.url);
+        extra.put("response", parsed);
+        return mcpCallResult(mcpServerId, name, arguments, serverTool, response.body,
+                response.status < 200 || response.status >= 300, extra);
+    }
+
+    private OpenApiOperation openApiOperation(String schema, String operationId) throws IOException {
+        JsonNode root = JSON.readTree(defaultString(schema, "{}"));
+        String baseUrl = root.path("servers").path(0).path("url").asText("");
+        JsonNode paths = root.path("paths");
+        if (!paths.isObject()) {
+            throw new IOException("openapi paths empty");
+        }
+        java.util.Iterator<Map.Entry<String, JsonNode>> pathIt = paths.fields();
+        while (pathIt.hasNext()) {
+            Map.Entry<String, JsonNode> path = pathIt.next();
+            java.util.Iterator<Map.Entry<String, JsonNode>> methodIt = path.getValue().fields();
+            while (methodIt.hasNext()) {
+                Map.Entry<String, JsonNode> method = methodIt.next();
+                JsonNode operation = method.getValue();
+                if (operationId.equals(operation.path("operationId").asText(""))) {
+                    return new OpenApiOperation(baseUrl, path.getKey(),
+                            method.getKey().toUpperCase(Locale.ROOT), operation);
+                }
+            }
+        }
+        throw new IOException("operationId not found: " + operationId);
+    }
+
+    private HttpToolResponse callOpenApiOperation(OpenApiOperation operation, Map<String, Object> apiAuth,
+                                                   Map<String, Object> arguments) throws IOException {
+        Map<String, Object> queryParams = new LinkedHashMap<>();
+        Map<String, String> headerParams = new LinkedHashMap<>();
+        Map<String, Object> bodyParams = new LinkedHashMap<>();
+        String path = operation.path;
+
+        JsonNode parameters = operation.operation.path("parameters");
+        if (parameters.isArray()) {
+            for (JsonNode parameter : parameters) {
+                String in = parameter.path("in").asText("");
+                String name = parameter.path("name").asText("");
+                Object value = argumentValue(arguments, in + "-" + name, name);
+                if (value == null || blank(name)) {
+                    continue;
+                }
+                if ("path".equals(in)) {
+                    path = path.replace("{" + name + "}", urlEncode(value));
+                } else if ("query".equals(in)) {
+                    queryParams.put(name, value);
+                } else if ("header".equals(in)) {
+                    headerParams.put(name, String.valueOf(value));
+                }
+            }
+        }
+
+        JsonNode requestBody = operation.operation.path("requestBody").path("content");
+        if (requestBody.isObject()) {
+            java.util.Iterator<JsonNode> mediaTypes = requestBody.elements();
+            while (mediaTypes.hasNext()) {
+                JsonNode properties = mediaTypes.next().path("schema").path("properties");
+                if (properties.isObject()) {
+                    java.util.Iterator<String> names = properties.fieldNames();
+                    while (names.hasNext()) {
+                        String property = names.next();
+                        Object value = argumentValue(arguments, property);
+                        if (value != null) {
+                            bodyParams.put(property, value);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if (bodyParams.isEmpty() && !"GET".equals(operation.method)) {
+            bodyParams.putAll(arguments);
+        }
+
+        applyApiAuth(apiAuth, headerParams, queryParams);
+        String url = appendQuery(joinUrl(operation.baseUrl, path), queryParams);
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setRequestMethod(operation.method);
+        connection.setConnectTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setReadTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setRequestProperty("Accept", "application/json");
+        for (Map.Entry<String, String> header : headerParams.entrySet()) {
+            connection.setRequestProperty(header.getKey(), header.getValue());
+        }
+        if (!bodyParams.isEmpty() && !"GET".equals(operation.method)) {
+            byte[] bytes = JSON.writeValueAsBytes(bodyParams);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setFixedLengthStreamingMode(bytes.length);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(bytes);
+            }
+        }
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        return new HttpToolResponse(status, stream == null ? "" : readFully(stream), url);
+    }
+
+    private void applyApiAuth(Map<String, Object> apiAuth, Map<String, String> headers,
+                              Map<String, Object> queryParams) {
+        String authType = text(apiAuth, "authType");
+        if ("api_key_query".equals(authType)) {
+            String name = text(apiAuth, "apiKeyQueryParam");
+            if (!blank(name)) {
+                queryParams.put(name, text(apiAuth, "apiKeyValue"));
+            }
+            return;
+        }
+        if (!"api_key_header".equals(authType)) {
+            return;
+        }
+        String header = defaultString(text(apiAuth, "apiKeyHeader"), "Authorization");
+        String value = text(apiAuth, "apiKeyValue");
+        String prefix = text(apiAuth, "apiKeyHeaderPrefix");
+        if ("basic".equals(prefix)) {
+            value = "Basic " + value;
+        } else if ("bearer".equals(prefix)) {
+            value = "Bearer " + value;
+        }
+        headers.put(header, value);
+    }
+
+    private Object argumentValue(Map<String, Object> arguments, String... keys) {
+        for (String key : keys) {
+            if (arguments.containsKey(key)) {
+                return arguments.get(key);
+            }
+        }
+        return null;
+    }
+
+    private String joinUrl(String baseUrl, String path) {
+        String base = defaultString(baseUrl, "");
+        String suffix = defaultString(path, "");
+        if (base.endsWith("/") && suffix.startsWith("/")) {
+            return base.substring(0, base.length() - 1) + suffix;
+        }
+        if (!base.endsWith("/") && !suffix.startsWith("/")) {
+            return base + "/" + suffix;
+        }
+        return base + suffix;
+    }
+
+    private String appendQuery(String url, Map<String, Object> queryParams) {
+        if (queryParams.isEmpty()) {
+            return url;
+        }
+        StringBuilder builder = new StringBuilder(url);
+        builder.append(url.contains("?") ? "&" : "?");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : queryParams.entrySet()) {
+            if (!first) {
+                builder.append("&");
+            }
+            builder.append(urlEncode(entry.getKey())).append("=").append(urlEncode(entry.getValue()));
+            first = false;
+        }
+        return builder.toString();
+    }
+
+    private String urlEncode(Object value) {
+        try {
+            return URLEncoder.encode(String.valueOf(value == null ? "" : value), "UTF-8").replace("+", "%20");
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private Object parseJsonValue(String body) {
+        if (blank(body)) {
+            return "";
+        }
+        try {
+            return JSON.readValue(body, Object.class);
+        } catch (IOException ignored) {
+            return body;
+        }
+    }
+
+    private Map<String, Object> mcpCallResult(String mcpServerId, String name, Map<String, Object> arguments,
+                                              Map<String, Object> tool, String text, boolean isError,
+                                              Map<String, Object> extraStructuredContent) {
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "text");
+        content.put("text", defaultString(text, ""));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("content", Collections.singletonList(content));
+        Map<String, Object> structuredContent = new LinkedHashMap<>();
+        structuredContent.put("mcpServerId", defaultString(mcpServerId, ""));
+        structuredContent.put("name", defaultString(name, "unknown"));
+        structuredContent.put("arguments", arguments);
+        if (!tool.isEmpty()) {
+            structuredContent.put("toolId", firstText(tool, "id", "toolId", "mcpServerToolId"));
+            structuredContent.put("toolType", firstText(tool, "type", "toolType"));
+            structuredContent.put("description", defaultString(text(tool, "desc"), text(tool, "description")));
+        }
+        structuredContent.putAll(extraStructuredContent);
+        result.put("structuredContent", structuredContent);
+        result.put("isError", isError);
+        return result;
+    }
+
     private Map<String, Object> listResult(List<Map<String, Object>> list) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", list);
@@ -1752,6 +2010,32 @@ public class McpServiceImpl implements McpService {
         }
     }
 
+    private static final class OpenApiOperation {
+        private final String baseUrl;
+        private final String path;
+        private final String method;
+        private final JsonNode operation;
+
+        private OpenApiOperation(String baseUrl, String path, String method, JsonNode operation) {
+            this.baseUrl = baseUrl;
+            this.path = path;
+            this.method = method;
+            this.operation = operation;
+        }
+    }
+
+    private static final class HttpToolResponse {
+        private final int status;
+        private final String body;
+        private final String url;
+
+        private HttpToolResponse(int status, String body, String url) {
+            this.status = status;
+            this.body = body;
+            this.url = url;
+        }
+    }
+
     private Map<String, Object> defaultApiAuth() {
         Map<String, Object> auth = new LinkedHashMap<>();
         auth.put("authType", "none");
@@ -1850,6 +2134,14 @@ public class McpServiceImpl implements McpService {
     @SuppressWarnings("unchecked")
     private Map<String, Object> castMap(Object value) {
         return (Map<String, Object>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map) {
+            return (Map<String, Object>) value;
+        }
+        return Collections.emptyMap();
     }
 
     @SuppressWarnings("unchecked")

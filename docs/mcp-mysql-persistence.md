@@ -14,8 +14,12 @@ Original files inspected:
 - `D:\work\week3\wanwu\internal\mcp-service\client\model\custom_skill.go`
 - `D:\work\week3\wanwu\internal\mcp-service\client\model\builtin_skill_var.go`
 - `D:\work\week3\wanwu\internal\mcp-service\client\model\acquired_skill.go`
+- `D:\work\week3\wanwu\internal\bff-service\pkg\mcp-util\mcp_server_util.go`
+- `D:\work\week3\wanwu\pkg\util\auth.go`
 
 The Go MCP service selects `db.name: mysql`, connects to the `mcp_service` schema, and uses ORM/model layers for custom tools, custom MCP records, MCP servers and bound tools, custom skills, acquired skills, skill variables, and skill publishing state.
+
+For public MCP Server runtime, Go converts the bound custom Tool OpenAPI schema into MCP protocol tools, then handles `tools/call` by resolving `query-*`, `path-*`, `header-*`, and request-body arguments, applying API-key header/query auth, executing the matching OpenAPI operation, and returning a text `CallToolResult`.
 
 ## Java Coverage Added
 
@@ -24,6 +28,7 @@ The Go MCP service selects `db.name: mysql`, connects to the `mcp_service` schem
 - `wanwu-service-mcp/src/main/resources/db/migration/V1__create_mcp_records.sql` creates `mcp_records`.
 - `McpServiceImpl` loads and saves one JSON snapshot containing the current resource-center custom tools, custom MCPs, MCP servers/tools, custom prompts, custom/acquired/builtin skill variables, skill conversations, and built-in tool API keys.
 - Custom MCP `transport=streamable` records now try to refresh their tool list from the configured remote endpoint using JSON-RPC `initialize` plus `tools/list`; successful tool rows are stored in the snapshot, while offline endpoints retain the development fallback tools.
+- Public MCP Server `tools/call` now delegates from the BFF OpenAPI JSON-RPC route to `McpService.callMcpServerTool`. Bound custom OpenAPI tools execute real HTTP requests using the schema `servers[0].url`, operation method/path, Go-style prefixed parameters, JSON body fields, and `none`/`api_key_header`/`api_key_query` auth.
 
 ## Persistence Shape
 
@@ -40,10 +45,11 @@ This makes the zero-frontend-change resource pages durable through Docker restar
 
 - Unit tests cover snapshot upsert, startup reload, restored Tool/Prompt/Skill state, and variable sequence continuation.
 - Unit tests cover streamable MCP remote `tools/list` discovery against a local HTTP MCP JSON-RPC test server.
+- Unit tests cover public MCP Server `tools/call` against a local HTTP OpenAPI test server, including query parameter mapping and bearer header auth, plus BFF JSON-RPC delegation.
 - Docker smoke should create a custom Tool through `localhost:3000`, recreate MCP and BFF containers, verify the Tool still appears, and confirm a row exists in `mcp_service.mcp_records`.
 
 ## Remaining Gaps
 
 - Normalize the snapshot into Go-equivalent tables for custom tools, MCPs, MCP servers, server tools, skills, skill variables, and publishing state.
-- Implement full remote MCP runtime, SSE discovery, stateful streamable proxying beyond `tools/list`, OpenAPI invocation, and callback/OpenAPI runtime endpoints.
+- Implement full remote MCP runtime, SSE discovery, stateful streamable proxying beyond `tools/list`, built-in/direct OpenAPI MCP Server execution, and callback runtime parity.
 - Implement real skill package parsing, validation, storage, execution, and model-backed prompt/skill generation.

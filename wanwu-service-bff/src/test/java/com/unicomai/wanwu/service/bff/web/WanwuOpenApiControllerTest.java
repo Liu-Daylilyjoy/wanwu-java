@@ -818,6 +818,55 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void mcpOpenApiToolCallDelegatesToMcpServiceRuntime() throws Exception {
+        when(appService.getAppKeyByKey("runtime-key"))
+                .thenReturn(appKey("app-key-runtime", "runtime-key", "mcpserver-002", "mcpserver"));
+        Map<String, Object> serverTool = new LinkedHashMap<>();
+        serverTool.put("methodName", "get_weather");
+        serverTool.put("desc", "Get weather by city");
+        serverTool.put("type", "custom");
+        serverTool.put("id", "tool-weather-runtime");
+        Map<String, Object> mcpServer = new LinkedHashMap<>();
+        mcpServer.put("mcpServerId", "mcpserver-002");
+        mcpServer.put("tools", Collections.singletonList(serverTool));
+        when(mcpService.getMcpServer(eq("dev-admin"), eq("default-org"), eq("mcpserver-002")))
+                .thenReturn(mcpServer);
+
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "text");
+        content.put("text", "{\"weather\":\"sunny\"}");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("weather", "sunny");
+        Map<String, Object> structured = new LinkedHashMap<>();
+        structured.put("mcpServerId", "mcpserver-002");
+        structured.put("name", "get_weather");
+        structured.put("response", response);
+        Map<String, Object> runtimeResult = new LinkedHashMap<>();
+        runtimeResult.put("content", Collections.singletonList(content));
+        runtimeResult.put("structuredContent", structured);
+        runtimeResult.put("isError", false);
+        when(mcpService.callMcpServerTool(eq("dev-admin"), eq("default-org"), eq("mcpserver-002"), any()))
+                .thenReturn(runtimeResult);
+
+        mockMvc.perform(post("/service/api/openapi/v1/mcp/server/message")
+                        .param("key", "runtime-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":\"mcp-call-runtime\",\"method\":\"tools/call\","
+                                + "\"params\":{\"name\":\"get_weather\",\"arguments\":{\"query-city\":\"Hangzhou\"}}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("mcp-call-runtime"))
+                .andExpect(jsonPath("$.result.content[0].text").value("{\"weather\":\"sunny\"}"))
+                .andExpect(jsonPath("$.result.structuredContent.response.weather").value("sunny"))
+                .andExpect(jsonPath("$.result.isError").value(false));
+
+        ArgumentCaptor<Map> requestCaptor = forClass(Map.class);
+        verify(mcpService).callMcpServerTool(eq("dev-admin"), eq("default-org"), eq("mcpserver-002"),
+                requestCaptor.capture());
+        assertEquals("get_weather", requestCaptor.getValue().get("name"));
+        assertEquals("Hangzhou", ((Map<?, ?>) requestCaptor.getValue().get("arguments")).get("query-city"));
+    }
+
+    @Test
     public void oauthAuthorizationCodeFlowUsesManagedOauthApp() throws Exception {
         when(iamService.listOauthApps(anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(oauthPage());

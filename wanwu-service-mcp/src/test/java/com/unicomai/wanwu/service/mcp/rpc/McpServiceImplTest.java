@@ -123,6 +123,53 @@ public class McpServiceImplTest {
     }
 
     @Test
+    public void callMcpServerToolExecutesBoundCustomOpenApiTool() throws Exception {
+        AtomicReference<String> query = new AtomicReference<>("");
+        AtomicReference<String> authorization = new AtomicReference<>("");
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/weather", exchange -> {
+            query.set(exchange.getRequestURI().getQuery());
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] response = "{\"city\":\"Hangzhou\",\"weather\":\"sunny\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(response);
+            }
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            String schema = "{\"openapi\":\"3.0.1\",\"info\":{\"title\":\"Weather\",\"version\":\"1\"},"
+                    + "\"servers\":[{\"url\":\"" + baseUrl + "\"}],"
+                    + "\"paths\":{\"/weather\":{\"get\":{\"operationId\":\"get_weather\","
+                    + "\"parameters\":[{\"name\":\"city\",\"in\":\"query\",\"schema\":{\"type\":\"string\"}}],"
+                    + "\"responses\":{\"200\":{\"description\":\"ok\"}}}}}}";
+            Map<String, Object> toolRequest = map("name", "WeatherAPI", "description", "weather",
+                    "schema", schema, "apiAuth", map("authType", "api_key_header",
+                            "apiKeyHeaderPrefix", "bearer", "apiKeyHeader", "Authorization",
+                            "apiKeyValue", "token-001"));
+            String customToolId = text(service.createCustomTool(USER_ID, ORG_ID, toolRequest), "customToolId");
+            String mcpServerId = text(service.createMcpServer(USER_ID, ORG_ID, map("name", "Weather MCP")),
+                    "mcpServerId");
+            service.createMcpServerTool(USER_ID, ORG_ID, map("mcpServerId", mcpServerId, "id", customToolId,
+                    "type", "custom", "methodName", "get_weather", "name", "Weather"));
+
+            Map<String, Object> result = service.callMcpServerTool(USER_ID, ORG_ID, mcpServerId,
+                    map("name", "get_weather", "arguments", map("query-city", "Hangzhou")));
+
+            assertEquals(false, result.get("isError"));
+            assertTrue(text(firstList(result, "content"), "text").contains("\"weather\":\"sunny\""));
+            assertEquals("city=Hangzhou", query.get());
+            assertEquals("Bearer token-001", authorization.get());
+            Map<String, Object> structuredContent = mapValue(result.get("structuredContent"));
+            assertEquals("Hangzhou", text(mapValue(structuredContent.get("response")), "city"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void resourceLifecycleCoversSkillResourceAndConversation() {
         Map<String, Object> check = service.checkCustomSkill(USER_ID, ORG_ID,
                 map("zipUrl", "file-upload/skill.zip", "name", "Imported Skill", "desc", "imported"));
@@ -248,6 +295,11 @@ public class McpServiceImplTest {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> list(Object value) {
         return (List<Map<String, Object>>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        return (Map<String, Object>) value;
     }
 
     private String text(Map<String, Object> map, String key) {

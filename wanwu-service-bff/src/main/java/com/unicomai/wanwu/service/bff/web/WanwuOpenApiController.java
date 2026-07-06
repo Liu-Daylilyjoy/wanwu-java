@@ -1180,6 +1180,22 @@ public class WanwuOpenApiController {
     private Map<String, Object> mcpToolCallResult(AppKeyInfo appKey, Map<String, Object> params) {
         String name = firstText(params, "name", "toolName", "methodName");
         Map<String, Object> arguments = objectMap(params.get("arguments"));
+        if (mcpService != null) {
+            try {
+                Map<String, Object> call = new LinkedHashMap<>();
+                call.put("name", name);
+                call.put("arguments", arguments);
+                Map<String, Object> result = mcpService.callMcpServerTool(
+                        defaultIfBlank(appKey.getUserId(), DEV_ADMIN_ID),
+                        defaultIfBlank(appKey.getOrgId(), DEV_ORG_ID),
+                        defaultIfBlank(appKey.getAppId(), ""),
+                        call);
+                if (result != null && !result.isEmpty()) {
+                    return result;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
         Map<String, Object> matched = Collections.emptyMap();
         for (Map<String, Object> tool : mcpServerTools(appKey)) {
             String methodName = defaultIfBlank(text(tool, "methodName"), text(tool, "name"));
