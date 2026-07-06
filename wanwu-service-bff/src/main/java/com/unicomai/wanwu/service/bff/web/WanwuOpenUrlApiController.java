@@ -13,6 +13,9 @@ import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.AppUrlInfo;
 import com.unicomai.wanwu.api.app.dto.AppUrlSuffixQuery;
 import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
+import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.MediaType;
@@ -43,11 +46,21 @@ public class WanwuOpenUrlApiController {
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private AppService appService;
 
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
+
+    private final OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient();
+
     public WanwuOpenUrlApiController() {
     }
 
     public WanwuOpenUrlApiController(AppService appService) {
+        this(appService, null);
+    }
+
+    public WanwuOpenUrlApiController(AppService appService, ModelService modelService) {
         this.appService = appService;
+        this.modelService = modelService;
     }
 
     @GetMapping({OPENURL_PREFIX + "/agent/{suffix}", SERVICE_OPENURL_PREFIX + "/agent/{suffix}"})
@@ -182,6 +195,7 @@ public class WanwuOpenUrlApiController {
             command.setFileInfo(effectiveRequest.getFileInfo());
             command.setUserId(publicUserId(clientId));
             command.setOrgId(appUrl.getOrgId());
+            attachConfiguredModelResponse(appUrl, command, startedAt);
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
             success = true;
             return ResponseEntity.ok()
@@ -261,6 +275,72 @@ public class WanwuOpenUrlApiController {
         }
     }
 
+    private void attachConfiguredModelResponse(AppUrlInfo appUrl,
+                                               AssistantConversationStreamCommand command,
+                                               long startedAt) {
+        if (appUrl == null || command == null || modelService == null
+                || isBlank(command.getAssistantId()) || isBlank(command.getPrompt())) {
+            return;
+        }
+        try {
+            Map<String, Object> assistant = appService.getPublishedAssistant(new AssistantPublishedQuery(
+                    command.getAssistantId(), null, appUrl.getUserId(), appUrl.getOrgId()));
+            String modelId = configuredModelId(assistant);
+            if (isBlank(modelId)) {
+                return;
+            }
+            ModelInfo model = modelService.getModel(appUrl.getUserId(), appUrl.getOrgId(), modelId);
+            if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
+                return;
+            }
+            OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
+                    chatClient.complete(model, modelId, command.getPrompt());
+            String answer = defaultIfBlank(chatResult.getContent(), "");
+            if (isBlank(answer)) {
+                return;
+            }
+            command.setOverrideResponse(answer);
+            recordOpenUrlModelStatistic(appUrl, model, modelId, command.getPrompt(), answer,
+                    startedAt, chatResult.getUsage());
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void recordOpenUrlModelStatistic(AppUrlInfo appUrl,
+                                             ModelInfo model,
+                                             String modelId,
+                                             String prompt,
+                                             String answer,
+                                             long startedAt,
+                                             OpenAiCompatibleChatClient.Usage usage) {
+        if (appUrl == null || model == null || isBlank(modelId)) {
+            return;
+        }
+        try {
+            long promptTokens = usage == null ? chatClient.estimateTokens(prompt) : usage.getPromptTokens();
+            long completionTokens = usage == null ? chatClient.estimateTokens(answer) : usage.getCompletionTokens();
+            long totalTokens = usage == null || usage.getTotalTokens() <= 0L
+                    ? promptTokens + completionTokens : usage.getTotalTokens();
+            RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+            command.setUserId(appUrl.getUserId());
+            command.setOrgId(appUrl.getOrgId());
+            command.setModelId(modelId);
+            command.setModel(defaultIfBlank(model.getModel(), modelId));
+            command.setProvider(defaultIfBlank(model.getProvider(), ""));
+            command.setModelType(defaultIfBlank(model.getModelType(), "llm"));
+            command.setPromptTokens(promptTokens);
+            command.setCompletionTokens(completionTokens);
+            command.setTotalTokens(totalTokens);
+            command.setSuccess(true);
+            command.setStream(true);
+            command.setFirstTokenLatency(Math.max(0L, System.currentTimeMillis() - startedAt));
+            command.setCosts(0L);
+            command.setCallTime(startedAt);
+            appService.recordModelStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private String toSseFrame(AssistantConversationStreamResult result) {
         StringBuilder json = new StringBuilder();
         json.append("{");
@@ -321,6 +401,51 @@ public class WanwuOpenUrlApiController {
         }
         Object value = map.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private String configuredModelId(Map<String, Object> config) {
+        if (config == null) {
+            return "";
+        }
+        return firstNonBlank(
+                nestedText(config, "modelConfig", "modelId"),
+                nestedText(config, "modelConfig", "model_id"),
+                nestedText(config, "modelConfig", "config", "modelId"),
+                nestedText(config, "modelConfig", "config", "model_id"));
+    }
+
+    private String nestedText(Map<String, Object> map, String first, String second) {
+        return mapString(objectMap(map == null ? null : map.get(first)), second);
+    }
+
+    private String nestedText(Map<String, Object> map, String first, String second, String third) {
+        return mapString(objectMap(objectMap(map == null ? null : map.get(first)).get(second)), third);
+    }
+
+    private Map<String, Object> objectMap(Object value) {
+        if (!(value instanceof Map)) {
+            return Collections.emptyMap();
+        }
+        Map<?, ?> source = (Map<?, ?>) value;
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (entry.getKey() != null) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String compactText(String value, int maxLength) {
