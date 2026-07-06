@@ -21,7 +21,7 @@
 
 This avoids creating a second RAG persistence model. Drafts, configs, snapshots, publish status, and chat records remain owned by `wanwu-service-app`.
 
-The frontend RAG chat path also mirrors the Go runtime's use of the configured model ID far enough for a real zero-change frontend loop: BFF reads the draft/published RAG `modelConfig.modelId`, calls the Java model experience OpenAI-compatible upstream path with `stream:true`, aggregates the provider deltas, and passes that answer into AppService before knowledge/QA enrichment, safety output replacement, and chat-record persistence. If the model config is absent, inactive, or unreachable, AppService keeps the deterministic local fallback so development Docker remains usable offline.
+The frontend and public OpenAPI RAG chat paths also mirror the Go runtime's use of the configured model ID far enough for real development loops: BFF reads the draft/published RAG `modelConfig.modelId`, calls the Java OpenAI-compatible upstream path with `stream:true`, aggregates the provider deltas, and passes that answer into AppService before knowledge/QA enrichment, safety output replacement, and chat-record persistence. If the model config is absent, inactive, or unreachable, AppService keeps the deterministic local fallback so development Docker remains usable offline.
 
 ## Verification
 
@@ -30,8 +30,9 @@ The frontend RAG chat path also mirrors the Go runtime's use of the configured m
 - `RagServiceImplTest#chatRagDelegatesPublishedRequestAndReturnsSearchLists`
 - `RagServiceImplTest#listPublishRagHistoryReturnsGoStyleHistoryItems`
 - `WanwuFrontendApiControllerTest#ragDraftChatUsesConfiguredOpenAiCompatibleModelBeforePersisting`
+- `WanwuOpenApiControllerTest#ragOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting`
 - `AppServiceImplTest#ragChatPersistsConfiguredModelUpstreamResponse`
 
 ## Remaining Gap
 
-This slice reproduces the Go RPC boundary, state transitions, and frontend configured-model answer loop, not the full Go runtime. True retrieval/rerank orchestration, provider token-by-token RAG streaming, exact stream chunk sequencing, file parser/indexer callbacks, object-storage lifecycle, and provider-specific adapter behavior remain later RAG runtime work.
+This slice reproduces the Go RPC boundary, state transitions, and frontend/OpenAPI configured-model answer loop, not the full Go runtime. True retrieval/rerank orchestration, provider token-by-token RAG streaming, exact stream chunk sequencing, file parser/indexer callbacks, object-storage lifecycle, and provider-specific adapter behavior remain later RAG runtime work.

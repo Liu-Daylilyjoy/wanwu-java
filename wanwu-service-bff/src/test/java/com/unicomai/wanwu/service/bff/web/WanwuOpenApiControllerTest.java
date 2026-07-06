@@ -21,6 +21,7 @@ import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
+import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.iam.IamService;
@@ -31,6 +32,8 @@ import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.operate.OperateService;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
@@ -39,9 +42,16 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -359,6 +369,67 @@ public class WanwuOpenApiControllerTest {
                 .andExpect(content().string(containsString("data: {\"code\":0")))
                 .andExpect(content().string(containsString("\"searchList\":[{\"kb_name\":\"Policy KB\",\"title\":\"PolicyGuide.txt\",\"snippet\":\"Policy hit\"")))
                 .andExpect(content().string(containsString("data: [DONE]")));
+    }
+
+    @Test
+    public void ragOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange.getRequestBody()));
+            respondSse(exchange, "data: {\"id\":\"chatcmpl-openapi-rag\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"openapi \"},"
+                    + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n"
+                    + "data: {\"id\":\"chatcmpl-openapi-rag\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"rag answer\"},"
+                    + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":3,\"total_tokens\":6}}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            Map<String, Object> modelConfig = new LinkedHashMap<>();
+            modelConfig.put("modelId", "model-openapi-rag-001");
+            Map<String, Object> rag = new LinkedHashMap<>();
+            rag.put("ragId", "rag-openapi-model-001");
+            rag.put("modelConfig", modelConfig);
+            when(appService.getPublishedRag(any(RagDetailQuery.class))).thenReturn(rag);
+
+            ModelInfo model = new ModelInfo();
+            model.setModelId("model-openapi-rag-001");
+            model.setModel("deepseek-chat");
+            model.setProvider("openai-compatible");
+            model.setModelType("llm");
+            model.setIsActive(true);
+            model.getConfig().put("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+            model.getConfig().put("apiKey", "local-key");
+            when(modelService.getModel(anyString(), anyString(), eq("model-openapi-rag-001"))).thenReturn(model);
+
+            when(appService.streamRagChat(any(RagChatCommand.class))).thenAnswer(invocation -> {
+                RagChatCommand command = invocation.getArgument(0);
+                RagChatResult result = new RagChatResult();
+                result.setRagId(command.getRagId());
+                result.setResponse(command.getOverrideResponse());
+                result.setSearchList(Collections.emptyList());
+                result.setQaSearchList(Collections.emptyList());
+                return result;
+            });
+
+            mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"uuid\":\"rag-openapi-model-001\",\"query\":\"what is policy\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.output").value("openapi rag answer"));
+
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
+            ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
+            verify(appService).streamRagChat(captor.capture());
+            assertEquals("openapi rag answer", captor.getValue().getOverrideResponse());
+            verify(appService).getPublishedRag(any(RagDetailQuery.class));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -952,6 +1023,25 @@ public class WanwuOpenApiControllerTest {
         verify(operateService, times(2)).consumeOAuthCode(eq(code));
         verify(operateService, times(2)).saveOAuthRefreshToken(anyString(), any());
         verify(operateService).consumeOAuthRefreshToken(eq(refreshToken));
+    }
+
+    private String readBody(InputStream stream) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = stream.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private void respondSse(HttpExchange exchange, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(bytes);
+        }
     }
 
     private Map<String, Object> appRow() {
