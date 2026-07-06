@@ -40,7 +40,8 @@ Covered route families:
 - Agent callback chat SSE shell
 - RAG callback knowledge and QA search now adapt Go RAG request fields to Java `KnowledgeService`
   local hits with Go-compatible response aliases; stream search returns a local-hit SSE event
-- WGA sandbox run/cleanup callback shells
+- WGA sandbox run emits a Go-style development SSE event plus `data: [DONE]`; cleanup returns a
+  JSON `sandbox_cleaned` result
 - App record shell plus skill detail/list callbacks backed by Java `McpService`, including Go-style `skillList` response bodies
 - v1 callback aliases for doc status, deploy info, category info, doc status init, and knowledge status
 
@@ -64,6 +65,8 @@ This slice is a compatibility shell:
   `content_type`, and `rerank_info`.
 - RAG stream search uses `text/event-stream` with a Go-style single-frame event containing
   `msg_id`, `finish`, `history`, `data.output`, `data.searchList`, and `data.score`.
+- WGA sandbox run uses `text/event-stream` and returns a non-sensitive local execution summary plus
+  `data: [DONE]`; cleanup returns `status`, `runId`, and `cleanedAt`.
 - Mutating callback routes echo status and request data for development observability.
 
 ## Remaining Gaps
@@ -73,5 +76,6 @@ This slice is a compatibility shell:
 - Image outline does not call DashScope Qwen image edit or MinIO yet; it returns a deterministic local PNG while preserving the Go response contract and `response_format` validation.
 - Real OCR/ASR/PDF parsing/GUI tasks are not implemented.
 - Full Python/vector/rerank RAG runtime and provider token-by-token stream generation are not implemented.
-- Real WGA sandbox execution and cleanup are not implemented.
+- Real WGA OpenCode/container sandbox execution, mounted workspace files, tool/MCP/skill execution,
+  and remote cleanup are not implemented.
 - Callback authentication, callback signature verification, and usage metrics are not reproduced yet.

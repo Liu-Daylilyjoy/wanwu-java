@@ -446,9 +446,15 @@ public class WanwuCallbackApiController {
         }
     }
 
-    @PostMapping({"/callback/v1/wga/sandbox/run", "/callback/v1/wga/sandbox/cleanup"})
-    public FrontendResponse<Map<String, Object>> sandbox(@RequestBody(required = false) Map<String, Object> request) {
-        return FrontendResponse.ok(echo("sandbox_ok", request));
+    @PostMapping("/callback/v1/wga/sandbox/run")
+    public ResponseEntity<String> sandboxRun(@RequestBody(required = false) Map<String, Object> request) {
+        return callbackSseWithDone(callbackWgaSandboxRunEvent(request));
+    }
+
+    @PostMapping("/callback/v1/wga/sandbox/cleanup")
+    public FrontendResponse<Map<String, Object>> sandboxCleanup(
+            @RequestBody(required = false) Map<String, Object> request) {
+        return FrontendResponse.ok(callbackWgaSandboxCleanup(request));
     }
 
     @PostMapping("/callback/v1/app/record")
@@ -529,6 +535,64 @@ public class WanwuCallbackApiController {
         return callbackRagResult(result, serviceRequest, false);
     }
 
+    private Map<String, Object> callbackWgaSandboxRunEvent(Map<String, Object> request) {
+        Map<String, Object> safe = copyStringMap(request);
+        Map<String, Object> model = objectMap(safe.get("model"));
+        String runId = defaultIfBlank(firstText(safe, "runId", "run_id"), compactId());
+        String threadId = firstText(safe, "threadId", "thread_id");
+        String task = defaultIfBlank(firstText(safe, "overallTask", "instruction", "task", "query", "prompt"),
+                lastSandboxMessageContent(safe));
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("threadId", threadId);
+        summary.put("runId", runId);
+        summary.put("modelId", firstText(model, "modelId", "model_id", "id"));
+        summary.put("model", firstText(model, "model", "name"));
+        summary.put("agentName", firstText(safe, "agentName", "agent_name"));
+        summary.put("messageCount", objectListSize(safe.get("messages")));
+        summary.put("toolCount", objectListSize(safe.get("tools")));
+        summary.put("skillCount", objectListSize(safe.get("skills")));
+        summary.put("mcpCount", objectListSize(safe.get("mcps")));
+        summary.put("inputDir", firstText(safe, "inputDir", "input_dir"));
+        summary.put("outputDir", firstText(safe, "outputDir", "output_dir"));
+        summary.put("enableThinking", booleanValue(firstValue(safe, "enableThinking", "enable_thinking"), false));
+        summary.put("skipCleanup", booleanValue(firstValue(safe, "skipCleanup", "skip_cleanup"), false));
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("output", "Local WGA sandbox accepted task: " + defaultIfBlank(task, "sandbox task"));
+        data.put("summary", summary);
+
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("code", 0);
+        event.put("message", "success");
+        event.put("threadId", threadId);
+        event.put("runId", runId);
+        event.put("status", "sandbox_completed");
+        event.put("data", data);
+        event.put("finish", 1);
+        return event;
+    }
+
+    private Map<String, Object> callbackWgaSandboxCleanup(Map<String, Object> request) {
+        Map<String, Object> safe = copyStringMap(request);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", "sandbox_cleaned");
+        data.put("runId", firstText(safe, "runId", "run_id"));
+        data.put("cleanedAt", Instant.now().toString());
+        return data;
+    }
+
+    private String lastSandboxMessageContent(Map<String, Object> request) {
+        List<?> messages = objectList(request.get("messages"));
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            String content = firstText(objectMap(messages.get(i)), "content", "text");
+            if (!isBlank(content)) {
+                return content;
+            }
+        }
+        return "";
+    }
+
     private Map<String, Object> callbackKnowledgeStreamEvent(Map<String, Object> request, Map<String, Object> hit) {
         String question = firstText(request, "question", "query", "prompt", "content");
         String output = callbackKnowledgeStreamOutput(question, hit);
@@ -577,6 +641,12 @@ public class WanwuCallbackApiController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_EVENT_STREAM)
                 .body("data: " + toJson(event) + "\n\n");
+    }
+
+    private ResponseEntity<String> callbackSseWithDone(Map<String, Object> event) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body("data: " + toJson(event) + "\n\ndata: [DONE]\n\n");
     }
 
     private String toJson(Object value) {
@@ -843,6 +913,10 @@ public class WanwuCallbackApiController {
             return (List<?>) value;
         }
         return Collections.singletonList(value);
+    }
+
+    private int objectListSize(Object value) {
+        return value == null ? 0 : objectList(value).size();
     }
 
     private void copyIfPresent(Map<String, Object> source, Map<String, Object> target,

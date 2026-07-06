@@ -917,9 +917,32 @@ public class WanwuCallbackApiControllerTest {
 
         mockMvc.perform(post("/callback/v1/wga/sandbox/run")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"print(1)\"}"))
+                        .content("{\"threadId\":\"thread-001\",\"runId\":\"run-001\","
+                                + "\"model\":{\"modelId\":\"model-llm\",\"model\":\"qwen\"},"
+                                + "\"overallTask\":\"Write a report\","
+                                + "\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],"
+                                + "\"tools\":[{\"schema\":\"{}\",\"operationIds\":[\"search\"]}],"
+                                + "\"skills\":[{\"dir\":\"/skills/summary\",\"variables\":[]}],"
+                                + "\"mcps\":[{\"name\":\"weather\",\"url\":\"http://mcp\"}],"
+                                + "\"inputDir\":\"/input\",\"outputDir\":\"/output\","
+                                + "\"enableThinking\":true,\"skipCleanup\":true,"
+                                + "\"agentName\":\"WanwuBot\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("sandbox_ok"));
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("\"runId\":\"run-001\"")))
+                .andExpect(content().string(containsString("\"threadId\":\"thread-001\"")))
+                .andExpect(content().string(containsString("\"status\":\"sandbox_completed\"")))
+                .andExpect(content().string(containsString("\"modelId\":\"model-llm\"")))
+                .andExpect(content().string(containsString("\"toolCount\":1")))
+                .andExpect(content().string(containsString("data: [DONE]")));
+
+        mockMvc.perform(post("/callback/v1/wga/sandbox/cleanup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"runId\":\"run-001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("sandbox_cleaned"))
+                .andExpect(jsonPath("$.data.runId").value("run-001"))
+                .andExpect(jsonPath("$.data.cleanedAt").isString());
 
         mockMvc.perform(post("/callback/v1/agent/assistant-001/chat")
                         .contentType(MediaType.APPLICATION_JSON)
