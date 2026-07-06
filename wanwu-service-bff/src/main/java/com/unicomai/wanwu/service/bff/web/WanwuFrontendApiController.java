@@ -2307,7 +2307,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.listDocSegments(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.listDocSegments(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_VIEW));
     }
 
     @GetMapping("/knowledge/doc/segment/child/list")
@@ -2315,7 +2316,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.listDocChildSegments(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.listDocChildSegments(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_VIEW));
     }
 
     @PostMapping("/knowledge/doc/url/analysis")
@@ -2421,7 +2423,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateDocSegmentStatus(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateDocSegmentStatus(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/labels")
@@ -2429,7 +2432,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateDocSegmentLabels(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateDocSegmentLabels(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/create")
@@ -2437,7 +2441,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.createDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.createDocSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/batch/create")
@@ -2445,7 +2450,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.batchCreateDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.batchCreateDocSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/update")
@@ -2453,7 +2459,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateDocSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @DeleteMapping("/knowledge/doc/segment/delete")
@@ -2461,7 +2468,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.deleteDocSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.deleteDocSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/child/create")
@@ -2469,7 +2477,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.createDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.createDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PostMapping("/knowledge/doc/segment/child/update")
@@ -2477,7 +2486,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @DeleteMapping("/knowledge/doc/segment/child/delete")
@@ -2485,7 +2495,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.deleteDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.deleteDocChildSegment(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("docId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @GetMapping("/knowledge/graph")
@@ -2660,7 +2671,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam Map<String, String> request) {
         return knowledgeResponse(authorization, request,
-                (ctx, body) -> knowledgeService.getDocByName(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.getDocByName(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledgeByName(KNOWLEDGE_PERMISSION_VIEW));
     }
 
     @PostMapping("/knowledge/qa/pair")
@@ -2677,7 +2689,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateQaPair(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateQaPair(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("qaPairId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @PutMapping("/knowledge/qa/pair/switch")
@@ -2685,7 +2698,8 @@ public class WanwuFrontendApiController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
         return knowledgeVoidResponse(authorization, request,
-                (ctx, body) -> knowledgeService.updateQaPairSwitch(ctx.getUserId(), ctx.getOrgId(), body));
+                (ctx, body) -> knowledgeService.updateQaPairSwitch(ctx.getUserId(), ctx.getOrgId(), body),
+                resolveKnowledge("qaPairId", KNOWLEDGE_PERMISSION_EDIT));
     }
 
     @DeleteMapping("/knowledge/qa/pair")
@@ -2930,13 +2944,17 @@ public class WanwuFrontendApiController {
         if (authorizationRule == null) {
             return;
         }
-        String knowledgeId = stringValue(body.get(authorizationRule.fieldName));
-        if (isBlank(knowledgeId)) {
+        String reference = stringValue(body.get(authorizationRule.fieldName));
+        if (isBlank(reference)) {
             if (authorizationRule.allowBlank) {
                 return;
             }
-            throw new IllegalArgumentException(authorizationRule.fieldName + " is required");
+            throw new IllegalArgumentException(authorizationRule.requiredMessage);
         }
+        String knowledgeId = authorizationRule.resolveReference
+                ? knowledgeService.resolveKnowledgeId(userContext.getUserId(), userContext.getOrgId(),
+                        singleton(authorizationRule.fieldName, reference))
+                : reference;
         knowledgeService.checkKnowledgeUserPermission(
                 userContext.getUserId(), userContext.getOrgId(), knowledgeId, authorizationRule.permissionType);
     }
@@ -3678,22 +3696,36 @@ public class WanwuFrontendApiController {
     }
 
     private KnowledgeAuthorization requireKnowledge(int permissionType) {
-        return new KnowledgeAuthorization("knowledgeId", permissionType, false);
+        return new KnowledgeAuthorization("knowledgeId", permissionType, false, false, "knowledgeId is required");
     }
 
     private KnowledgeAuthorization optionalKnowledge(int permissionType) {
-        return new KnowledgeAuthorization("knowledgeId", permissionType, true);
+        return new KnowledgeAuthorization("knowledgeId", permissionType, true, false, "knowledgeId is required");
+    }
+
+    private KnowledgeAuthorization resolveKnowledge(String fieldName, int permissionType) {
+        return new KnowledgeAuthorization(fieldName, permissionType, false, true, fieldName + " is required");
+    }
+
+    private KnowledgeAuthorization resolveKnowledgeByName(int permissionType) {
+        return new KnowledgeAuthorization("knowledgeName", permissionType, false, true, "knowledgeId is required");
     }
 
     private static class KnowledgeAuthorization {
         private final String fieldName;
         private final int permissionType;
         private final boolean allowBlank;
+        private final boolean resolveReference;
+        private final String requiredMessage;
 
-        private KnowledgeAuthorization(String fieldName, int permissionType, boolean allowBlank) {
+        private KnowledgeAuthorization(
+                String fieldName, int permissionType, boolean allowBlank,
+                boolean resolveReference, String requiredMessage) {
             this.fieldName = fieldName;
             this.permissionType = permissionType;
             this.allowBlank = allowBlank;
+            this.resolveReference = resolveReference;
+            this.requiredMessage = requiredMessage;
         }
     }
 

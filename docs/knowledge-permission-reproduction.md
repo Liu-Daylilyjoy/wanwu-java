@@ -27,14 +27,14 @@ The Java frontend BFF now performs route-level `checkKnowledgeUserPermission` be
 - Metadata, tag bind, permission grant pages, report pages, QA pair create/list/import/export/delete, export records, graph, and external knowledge update/delete.
 - Optional `knowledgeId` behavior for Go `AuthKnowledgeIfHas` routes such as tag list and doc metadata update.
 
-The checks return the normal frontend failure envelope with code `1001` and prevent the downstream service call when permission is denied or when a required direct `knowledgeId` is missing.
+The Java BFF also mirrors Go's reference-resolving knowledge middleware:
+
+- `AuthKnowledgeDoc("docId", ...)`: resolves `docId` through `KnowledgeService.resolveKnowledgeId` before checking view/edit permission.
+- `AuthKnowledgeQAPair("qaPairId", ...)`: resolves `qaPairId` before checking edit permission on QA pair update/switch routes.
+- `AuthKnowledgeRagName("knowledgeName", ...)`: resolves `knowledgeName` before checking view permission on `/knowledge/doc/by/name`.
+
+The checks return the normal frontend failure envelope with code `1001` and prevent the downstream service call when permission is denied or when a required knowledge reference is missing.
 
 ## Remaining Gap
 
-The next permission slice should cover the Go route families that do not carry a direct `knowledgeId`:
-
-- `AuthKnowledgeDoc("docId", ...)`, which resolves `docId` to `knowledgeId`.
-- `AuthKnowledgeQAPair("qaPairId", ...)`, which resolves `qaPairId` to `knowledgeId`.
-- `AuthKnowledgeRagName("knowledgeName", ...)`, which resolves RAG/knowledge name to `knowledgeId`.
-
-The knowledge service still uses a JSON snapshot compatibility repository rather than normalized Go-equivalent knowledge permission tables.
+The knowledge service still uses a JSON snapshot compatibility repository rather than normalized Go-equivalent knowledge permission tables. Service-layer RBAC parity beyond the frontend/BFF route middleware remains a later normalization slice.

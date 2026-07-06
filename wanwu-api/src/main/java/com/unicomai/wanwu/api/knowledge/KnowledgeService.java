@@ -18,6 +18,8 @@ public interface KnowledgeService {
 
     void checkKnowledgeUserPermission(String userId, String orgId, String knowledgeId, int permissionType);
 
+    String resolveKnowledgeId(String userId, String orgId, Map<String, Object> request);
+
     Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request);
 
     Map<String, Object> listKeywords(String userId, String orgId, Map<String, Object> request);

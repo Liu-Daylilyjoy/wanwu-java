@@ -271,6 +271,40 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     @Override
+    public synchronized String resolveKnowledgeId(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> safe = safe(request);
+        String knowledgeId = string(safe.get("knowledgeId"));
+        if (!isBlank(knowledgeId)) {
+            return existingKnowledge(knowledgeId).knowledgeId;
+        }
+        String docId = string(safe.get("docId"));
+        if (!isBlank(docId)) {
+            for (List<DocState> docs : docsByKnowledgeId.values()) {
+                for (DocState doc : docs) {
+                    if (docId.equals(doc.docId)) {
+                        return doc.knowledgeId;
+                    }
+                }
+            }
+            throw new IllegalArgumentException("doc not found: " + docId);
+        }
+        String qaPairId = string(safe.get("qaPairId"));
+        if (!isBlank(qaPairId)) {
+            return existingQaPair(qaPairId).knowledgeId;
+        }
+        String knowledgeName = string(safe.get("knowledgeName"));
+        if (!isBlank(knowledgeName)) {
+            for (KnowledgeState knowledge : knowledgeBases.values()) {
+                if (knowledgeName.equals(knowledge.name)) {
+                    return knowledge.knowledgeId;
+                }
+            }
+            throw new IllegalArgumentException("knowledge not found: " + knowledgeName);
+        }
+        throw new IllegalArgumentException("knowledgeId is required");
+    }
+
+    @Override
     public synchronized Map<String, Object> hitKnowledge(String userId, String orgId, Map<String, Object> request) {
         Map<String, Object> safe = safe(request);
         String question = string(safe.get("question"));

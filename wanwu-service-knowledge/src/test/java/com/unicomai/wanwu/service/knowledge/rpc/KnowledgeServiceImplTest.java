@@ -80,6 +80,32 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeServiceExposesKnowledgeIdResolutionForBffMiddlewareParity() throws Exception {
+        assertNotNull(com.unicomai.wanwu.api.knowledge.KnowledgeService.class.getMethod(
+                "resolveKnowledgeId", String.class, String.class, Map.class));
+    }
+
+    @Test
+    public void resolveKnowledgeIdFindsDirectDocQaPairAndNameReferences() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Resolve KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-resolve", "Resolve.txt"));
+        String qaPairId = (String) service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "What resolves?", "Knowledge IDs.")).get("qaPairId");
+
+        assertEquals(knowledgeId, service.resolveKnowledgeId("dev-admin", "default-org",
+                singleton("knowledgeId", knowledgeId)));
+        assertEquals(knowledgeId, service.resolveKnowledgeId("dev-admin", "default-org",
+                singleton("docId", "doc-resolve")));
+        assertEquals(knowledgeId, service.resolveKnowledgeId("dev-admin", "default-org",
+                singleton("qaPairId", qaPairId)));
+        assertEquals(knowledgeId, service.resolveKnowledgeId("dev-admin", "default-org",
+                singleton("knowledgeName", "Resolve KB")));
+        assertThrows(IllegalArgumentException.class, () -> service.resolveKnowledgeId("dev-admin", "default-org",
+                singleton("docId", "missing-doc")));
+    }
+
+    @Test
     public void keywordLifecycleFollowsFrontendAndGoContract() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Keyword KB", 0)).get("knowledgeId");

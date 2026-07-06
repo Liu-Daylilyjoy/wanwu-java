@@ -2804,6 +2804,68 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void knowledgeDocIdRouteResolvesKnowledgeBeforeService() throws Exception {
+        when(knowledgeService.resolveKnowledgeId(anyString(), anyString(), any(Map.class)))
+                .thenReturn("knowledge-from-doc");
+        when(knowledgeService.listDocSegments(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("list", Collections.emptyList()));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/segment/list")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("docId", "doc-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).resolveKnowledgeId(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(knowledgeService).checkKnowledgeUserPermission(
+                eq("dev-admin"), eq("default-org"), eq("knowledge-from-doc"), eq(0));
+        verify(knowledgeService).listDocSegments(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void knowledgeQaPairRouteStopsBeforeServiceWhenResolvedPermissionIsDenied() throws Exception {
+        when(knowledgeService.resolveKnowledgeId(anyString(), anyString(), any(Map.class)))
+                .thenReturn("knowledge-from-qa");
+        doThrow(new IllegalArgumentException("knowledge_perm: qa denied"))
+                .when(knowledgeService).checkKnowledgeUserPermission(
+                        eq("dev-app"), eq("default-org"), eq("knowledge-from-qa"), eq(10));
+
+        mockMvc.perform(put("/user/api/v1/knowledge/qa/pair")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"qaPairId\":\"qa-001\",\"question\":\"Q\",\"answer\":\"A\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg").value("knowledge_perm: qa denied"));
+
+        verify(knowledgeService).resolveKnowledgeId(eq("dev-app"), eq("default-org"), any(Map.class));
+        verify(knowledgeService, times(0)).updateQaPair(anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void knowledgeNameRouteResolvesKnowledgeBeforeService() throws Exception {
+        when(knowledgeService.resolveKnowledgeId(anyString(), anyString(), any(Map.class)))
+                .thenReturn("knowledge-from-name");
+        when(knowledgeService.getDocByName(anyString(), anyString(), any(Map.class)))
+                .thenReturn(singleton("knowledgeId", "knowledge-from-name"));
+
+        mockMvc.perform(get("/user/api/v1/knowledge/doc/by/name")
+                        .header("Authorization", "Bearer dev-token")
+                        .param("knowledgeName", "Resolve KB")
+                        .param("docName", "Guide.txt"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(knowledgeService).resolveKnowledgeId(eq("dev-admin"), eq("default-org"), any(Map.class));
+        verify(knowledgeService).checkKnowledgeUserPermission(
+                eq("dev-admin"), eq("default-org"), eq("knowledge-from-name"), eq(0));
+        verify(knowledgeService).getDocByName(eq("dev-admin"), eq("default-org"), any(Map.class));
+    }
+
+    @Test
     public void knowledgeQaPairRoutesReturnFrontendContracts() throws Exception {
         when(knowledgeService.createQaPair(anyString(), anyString(), any(Map.class)))
                 .thenReturn(singleton("qaPairId", "qa-001"));
