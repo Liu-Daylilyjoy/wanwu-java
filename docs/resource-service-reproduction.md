@@ -24,7 +24,7 @@ Date: 2026-07-01
   - MCP square list/detail/recommend seed data.
   - Custom Prompt create/list/detail/update/delete/copy.
   - Prompt template list/detail/copy-to-custom.
-  - Prompt optimize/reason/evaluate SSE compatibility with deterministic local responses.
+  - Prompt optimize/reason/evaluate SSE compatibility, using configured OpenAI-compatible `modelId` upstream responses when available and deterministic local responses as fallback.
   - Custom Skill ZIP import/check/list/detail/delete, including `SKILL.md` front matter extraction for `name` and `description`, kebab-case validation, returning the imported markdown in custom Skill detail, and persisting the original ZIP package bytes in the Docker MySQL snapshot.
   - Custom/Built-in/Acquired Skill variable config create/update/delete.
   - Built-in Skill list/detail/download seed data, with download returning a real ZIP containing `SKILL.md` front matter instead of a text placeholder.
@@ -55,7 +55,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Bound built-in Weather/Search tools to MCP Servers and verified `tools/call` returns MCP-compatible local `content`, `structuredContent.response`, and `isError=false`.
 - Verified `/service/api/openapi/v1/mcp/server/message` `tools/call` delegates to the MCP service runtime, and verified the service runtime calls local OpenAPI HTTP servers for both custom-tool and direct-schema bindings with `query-*` arguments, JSON body arguments, bearer auth, and query auth.
 - Created a custom Prompt and verified `/prompt/custom/list`.
-- Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`.
+- Verified `/prompt/optimize` returns an SSE `data:` frame with `finish`, and uses a configured OpenAI-compatible model upstream before falling back to the local response.
 - Checked and created a custom Skill from a ZIP package containing `SKILL.md`, verified front matter parsing, added a variable config, and verified `/agent/skill/custom/list`, `/agent/skill/custom/detail`, and `/agent/skill/select`.
 - Verified built-in Skill list/detail/download for `builtin-summary`, including unzipping the downloaded package and reading `SKILL.md`.
 - Verified imported custom Skill packages are saved in the MCP snapshot and remain downloadable after service restart.
@@ -64,7 +64,7 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` and `sse` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` and `sse` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Prompt optimize/reason/evaluate now honors configured OpenAI-compatible models before falling back to the local response. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
 
 It does not yet implement:
 
@@ -72,5 +72,5 @@ It does not yet implement:
 - Full remote MCP runtime, streamable/SSE stateful proxying beyond `tools/list`, and provider-backed built-in tool execution beyond the local Weather/Search runtime.
 - Real Skill package execution and package-to-runtime installation.
 - Real Skill conversation generation through a model provider.
-- Prompt optimization through a real model provider.
+- Provider-specific prompt optimization beyond OpenAI-compatible chat completions.
 - Callback MCP runtime parity beyond the public OpenAPI custom-tool execution path.

@@ -3,6 +3,7 @@ package com.unicomai.wanwu.service.bff.web;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.mcp.McpService;
+import com.unicomai.wanwu.api.model.dto.ModelInfo;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import org.apache.dubbo.config.annotation.DubboReference;
@@ -30,6 +31,7 @@ public class WanwuResourceApiController {
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_APP_USER_ID = "dev-app";
     private static final String DEV_ORG_ID = "default-org";
+    private final OpenAiCompatibleChatClient chatClient = new OpenAiCompatibleChatClient();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private McpService mcpService;
@@ -312,21 +314,27 @@ public class WanwuResourceApiController {
     public ResponseEntity<String> optimizePrompt(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return promptStream(authorization, request, (ctx, body) -> mcpService.optimizePrompt(ctx.userId, ctx.orgId, body));
+        return promptStream(authorization, request, (ctx, body) -> promptModelOrFallback(ctx, body, "optimize",
+                (fallbackCtx, fallbackBody) -> mcpService.optimizePrompt(fallbackCtx.userId, fallbackCtx.orgId,
+                        fallbackBody)));
     }
 
     @PostMapping(value = "/prompt/reason", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<String> reasonPrompt(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return promptStream(authorization, request, (ctx, body) -> mcpService.reasonPrompt(ctx.userId, ctx.orgId, body));
+        return promptStream(authorization, request, (ctx, body) -> promptModelOrFallback(ctx, body, "reason",
+                (fallbackCtx, fallbackBody) -> mcpService.reasonPrompt(fallbackCtx.userId, fallbackCtx.orgId,
+                        fallbackBody)));
     }
 
     @PostMapping(value = "/prompt/evaluate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<String> evaluatePrompt(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        return promptStream(authorization, request, (ctx, body) -> mcpService.evaluatePrompt(ctx.userId, ctx.orgId, body));
+        return promptStream(authorization, request, (ctx, body) -> promptModelOrFallback(ctx, body, "evaluate",
+                (fallbackCtx, fallbackBody) -> mcpService.evaluatePrompt(fallbackCtx.userId, fallbackCtx.orgId,
+                        fallbackBody)));
     }
 
     private FrontendResponse<Map<String, Object>> ok(String authorization, ResourceCall call) {
@@ -371,6 +379,58 @@ public class WanwuResourceApiController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body("{\"code\":1001,\"msg\":\"" + ex.getMessage() + "\"}");
         }
+    }
+
+    private Map<String, Object> promptModelOrFallback(UserContext context, Map<String, Object> request,
+                                                      String operation, ResourceBodyCall fallback) {
+        Map<String, Object> upstream = promptModelPayload(context, request, operation);
+        if (upstream != null) {
+            return upstream;
+        }
+        return fallback.execute(context, request);
+    }
+
+    private Map<String, Object> promptModelPayload(UserContext context, Map<String, Object> request,
+                                                   String operation) {
+        String modelId = text(request, "modelId");
+        if (modelService == null || isBlank(modelId)) {
+            return null;
+        }
+        try {
+            ModelInfo model = modelService.getModel(context.userId, context.orgId, modelId);
+            if (model == null) {
+                return null;
+            }
+            String prompt = promptInstruction(operation, request);
+            OpenAiCompatibleChatClient.ChatCompletionResult result = chatClient.complete(model, modelId, prompt);
+            if (result == null || isBlank(result.getContent())) {
+                return null;
+            }
+            return promptPayload(result.getContent());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> promptPayload(String response) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("response", response);
+        payload.put("finish", 1);
+        return payload;
+    }
+
+    private String promptInstruction(String operation, Map<String, Object> request) {
+        if ("evaluate".equals(operation)) {
+            return "Evaluate whether the answer matches the expected output. Return concise findings.\n\n"
+                    + "Expected output:\n" + text(request, "expectedOutput") + "\n\n"
+                    + "Answer:\n" + text(request, "answer");
+        }
+        if ("reason".equals(operation)) {
+            return "Run the following prompt and return the resulting answer.\n\nPrompt:\n"
+                    + text(request, "prompt");
+        }
+        return "Optimize the following prompt. Return only the improved prompt.\n\nPrompt:\n"
+                + text(request, "prompt");
     }
 
     private Map<String, Object> body(Map<String, Object> request) {

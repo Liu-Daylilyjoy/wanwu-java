@@ -1086,6 +1086,45 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void promptOptimizeUsesConfiguredOpenAiCompatibleModelWhenAvailable() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            upstreamBody.set(readBody(exchange));
+            respondJson(exchange, "{\"id\":\"chatcmpl-prompt\",\"object\":\"chat.completion\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                    + "\"content\":\"optimized by upstream\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}");
+        });
+        server.start();
+        try {
+            ModelInfo model = modelInfo("model-001", "DeepSeek Chat", "llm");
+            model.setProvider("openai-compatible");
+            model.setConfig(map("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                    "apiKey", "local-key"));
+            when(modelService.getModel(anyString(), anyString(), eq("model-001"))).thenReturn(model);
+
+            mockMvc.perform(post("/user/api/v1/prompt/optimize")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"modelId\":\"model-001\",\"prompt\":\"review this\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                    .andExpect(content().string(containsString("\"response\":\"optimized by upstream\"")))
+                    .andExpect(content().string(containsString("\"finish\":1")));
+
+            assertEquals("Bearer local-key", authorization.get());
+            assertTrue(upstreamBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(upstreamBody.get().contains("Optimize the following prompt"));
+            verify(mcpService, times(0)).optimizePrompt(anyString(), anyString(), any(Map.class));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     public void promptSseRoutesCheckModelIdBeforeGeneration() throws Exception {
         when(mcpService.optimizePrompt(anyString(), anyString(), any(Map.class)))
