@@ -347,9 +347,12 @@ public class McpServiceImplTest {
         assertEquals(1, chat.get("finish"));
         assertEquals("upstream skill draft", text(chat, "response"));
         assertEquals(2, list(service.getSkillConversationDetail(USER_ID, ORG_ID, conversationId).get("list")).size());
-        assertFalse(text(service.saveSkillConversation(USER_ID, ORG_ID,
+        String savedSkillId = text(service.saveSkillConversation(USER_ID, ORG_ID,
                 map("conversationId", conversationId, "skillSaveId", "save-001", "name", "Generated Skill")),
-                "skillId").isEmpty());
+                "skillId");
+        assertFalse(savedSkillId.isEmpty());
+        assertTrue(skillMarkdown(service.downloadSquareSkill(USER_ID, ORG_ID, savedSkillId))
+                .contains("upstream skill draft"));
     }
 
     @Test

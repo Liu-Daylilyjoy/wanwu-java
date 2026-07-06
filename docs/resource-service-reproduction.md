@@ -30,7 +30,7 @@ Date: 2026-07-01
   - Built-in Skill list/detail/download seed data, with download returning a real ZIP containing `SKILL.md` front matter instead of a text placeholder.
   - Skill select endpoint for Agent configuration.
   - Skill square list/detail/share/download seed data and acquired Skill list/detail/delete.
-  - Skill conversation create/list/detail/delete/clear/chat/save with configured OpenAI-compatible model responses when `modelConfig.modelId` is available and deterministic local SSE responses as fallback.
+  - Skill conversation create/list/detail/delete/clear/chat/save with configured OpenAI-compatible model responses when `modelConfig.modelId` is available, deterministic local SSE responses as fallback, and save-to-custom Skill generation of a real ZIP package containing `SKILL.md`.
 - `wanwu-service-bff` exposes the original frontend paths under `/user/api/v1/tool`, `/user/api/v1/mcp`, `/user/api/v1/prompt`, `/user/api/v1/agent/skill`, `/user/api/v1/agent/acquired/skill`, and `/user/api/v1/square/skill`.
 - `wanwu-service-bff` also exposes `/user/api/v1/workflow/tool/select`, `/workflow/tool/action`, and `/workflow/tool/box`, adapting the same MCP Tool data into the Go Workflow editor response shapes.
 - `wanwu-service-bff` exposes the public MCP Server OpenAPI endpoints with app-key validation plus JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call`. `tools/call` now delegates to `McpService.callMcpServerTool`; bound custom OpenAPI tools and direct OpenAPI schema tools execute real HTTP requests with query/header/path/body argument mapping and Go-style API-key auth, bound built-in Weather/Search tools execute through the Java local runtime, while unsupported bindings keep the deterministic compatibility fallback.
@@ -60,17 +60,17 @@ Frontend-entry smoke test through `http://localhost:3000/user/api/v1`:
 - Verified built-in Skill list/detail/download for `builtin-summary`, including unzipping the downloaded package and reading `SKILL.md`.
 - Verified imported custom Skill packages are saved in the MCP snapshot and remain downloadable after service restart.
 - Verified Skill square list, share-to-resource, acquired Skill list, and acquired Skill config.
-- Verified Skill conversation create/chat SSE/save through `/agent/skill/conversation/*`, including configured OpenAI-compatible model response override before the MCP local fallback.
+- Verified Skill conversation create/chat SSE/save through `/agent/skill/conversation/*`, including configured OpenAI-compatible model response override before the MCP local fallback and saved conversation ZIP download containing the generated `SKILL.md`.
 
 ## Current Boundary
 
-This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` and `sse` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Prompt optimize/reason/evaluate and Skill conversation chat now honor configured OpenAI-compatible models before falling back to the local response. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, and Skill downloads now return real ZIP packages.
+This slice is a frontend-compatible management loop. It prevents zero-change frontend resource pages and Workflow editor tool panels from receiving backend 404s, and lets Agent/Workflow configuration select real locally-created Tool/MCP/Skill resources. Mutable custom Tool, MCP, MCP Server/tool, Prompt, Skill variable, acquired Skill, built-in Tool API-key, Skill package bytes, and Skill conversation state now survives Docker restarts through `mcp_service.mcp_records`. Custom MCP `streamable` and `sse` endpoints now try the real remote `tools/list` path before falling back to local development sample tools. Public MCP Server clients can now call bound built-in Weather/Search tools, bound custom OpenAPI tools, and direct OpenAPI schema tools through `tools/call`. Prompt optimize/reason/evaluate and Skill conversation chat now honor configured OpenAI-compatible models before falling back to the local response. Custom Skill ZIP checks and creates now parse the uploaded package's `SKILL.md` front matter using the same user-visible constraints as the Go `ExtractSkillMarkdownFromZip` path, Skill conversation save now emits a minimal generated Skill package from the conversation transcript, and Skill downloads now return real ZIP packages.
 
 It does not yet implement:
 
 - Normalized Go-equivalent MySQL tables for resource records.
 - Full remote MCP runtime, streamable/SSE stateful proxying beyond `tools/list`, and provider-backed built-in tool execution beyond the local Weather/Search runtime.
 - Real Skill package execution and package-to-runtime installation.
-- Skill conversation workspace/runtime generation beyond OpenAI-compatible response text.
+- Skill conversation workspace/runtime generation beyond the minimal generated `SKILL.md` package.
 - Provider-specific prompt optimization beyond OpenAI-compatible chat completions.
 - Callback MCP runtime parity beyond the public OpenAPI custom-tool execution path.

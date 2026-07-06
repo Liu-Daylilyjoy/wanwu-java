@@ -953,11 +953,21 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public Map<String, Object> saveSkillConversation(String userId, String orgId, Map<String, Object> request) {
+        Map<String, Object> conversation = require(skillConversations, orgId, text(request, "conversationId"),
+                "skill conversation");
+        String displayName = defaultText(request, "name", defaultText(conversation, "title", "Generated Skill"));
+        String desc = defaultText(request, "desc", "Saved from local skill conversation");
+        String skillName = skillNameFromTitle(displayName);
+        String markdown = generatedSkillMarkdown(displayName, desc, listValue(conversation.get("messages")));
+        byte[] zip = zipSkillArchive(skillName, "conversation", desc, markdown);
         Map<String, Object> create = new LinkedHashMap<>();
-        create.put("name", defaultText(request, "name", "Generated Skill"));
-        create.put("desc", defaultText(request, "desc", "Saved from local skill conversation"));
+        create.put("name", displayName);
+        create.put("desc", desc);
         create.put("author", defaultText(request, "author", "Wanwu"));
-        create.put("zipUrl", defaultText(request, "skillSaveId", ""));
+        create.put("objectPath", "snapshot://skill-conversation/"
+                + defaultText(request, "skillSaveId", skillName + ".zip"));
+        create.put("skillMarkdown", markdown);
+        create.put("skillPackageBase64", Base64.getEncoder().encodeToString(zip));
         create.put("sourceType", "skill_conversation");
         return createCustomSkill(userId, orgId, create);
     }
@@ -1011,11 +1021,13 @@ public class McpServiceImpl implements McpService {
         item.put("desc", skillPackage == null ? defaultText(request, "desc", "Imported local skill package.")
                 : skillPackage.description);
         item.put("zipUrl", zipUrl);
-        item.put("objectPath", zipUrl);
+        item.put("objectPath", defaultText(request, "objectPath", zipUrl));
         item.put("skillMarkdown", skillPackage == null ? defaultText(request, "skillMarkdown", "")
                 : skillPackage.markdown);
         if (skillPackage != null) {
             item.put("skillPackageBase64", Base64.getEncoder().encodeToString(skillPackage.zipData));
+        } else if (!blank(text(request, "skillPackageBase64"))) {
+            item.put("skillPackageBase64", text(request, "skillPackageBase64"));
         }
         item.put("sourceType", defaultText(request, "sourceType", "skill_import"));
         item.put("threadId", defaultText(request, "threadId", ""));
@@ -1385,6 +1397,35 @@ public class McpServiceImpl implements McpService {
         }
         return "---\nname: " + skillId + "\ndescription: " + desc + "\nsource: " + source
                 + "\n---\n" + defaultString(markdown, "") + "\n";
+    }
+
+    private String generatedSkillMarkdown(String displayName, String desc, List<Map<String, Object>> messages) {
+        String skillName = skillNameFromTitle(displayName);
+        StringBuilder markdown = new StringBuilder();
+        markdown.append("---\nname: ").append(skillName)
+                .append("\ndescription: ").append(yamlLine(desc))
+                .append("\n---\n# ").append(defaultString(displayName, "Generated Skill"))
+                .append("\n\n").append(defaultString(desc, "Saved from local skill conversation"))
+                .append("\n\n## Conversation Notes\n");
+        for (Map<String, Object> message : messages) {
+            String role = defaultString(text(message, "role"), "message");
+            String content = defaultString(text(message, "content"), "");
+            if (!blank(content)) {
+                markdown.append("\n### ").append(role).append("\n\n").append(content).append("\n");
+            }
+        }
+        return markdown.toString();
+    }
+
+    private String skillNameFromTitle(String title) {
+        String name = defaultString(title, "generated-skill").toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+        return blank(name) || !SKILL_NAME_PATTERN.matcher(name).matches() ? "generated-skill" : name;
+    }
+
+    private String yamlLine(String value) {
+        return defaultString(value, "").replace('\r', ' ').replace('\n', ' ').trim();
     }
 
     private Map<String, Object> conversationMessage(String role, String content,
