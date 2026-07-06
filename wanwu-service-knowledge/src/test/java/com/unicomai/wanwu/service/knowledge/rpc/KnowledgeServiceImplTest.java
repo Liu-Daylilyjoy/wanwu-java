@@ -221,6 +221,26 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaImportParsesXlsxBase64Rows() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Imported QA XLSX", 1)).get("knowledgeId");
+
+        service.importQaPairs("dev-admin", "default-org",
+                qaImportBase64(knowledgeId, "qa.xlsx",
+                        xlsxBase64(
+                                new String[]{"question", "answer"},
+                                new String[]{"What imports spreadsheets?", "Wanwu Java QA import."},
+                                new String[]{"How are XLSX rows parsed?", "As question-answer pairs."})));
+
+        Map<String, Object> parsed = service.listQaPairs("dev-admin", "default-org",
+                qaPairList(knowledgeId, "XLSX rows", Collections.singletonList(-1)));
+        assertEquals(1, parsed.get("total"));
+        Map<String, Object> parsedPair = listOfMaps(parsed.get("list")).get(0);
+        assertEquals("How are XLSX rows parsed?", parsedPair.get("question"));
+        assertEquals("As question-answer pairs.", parsedPair.get("answer"));
+    }
+
+    @Test
     public void qaHitRanksQuestionMatchesBeforeAnswerMatches() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Ranking QA", 1)).get("knowledgeId");
@@ -1265,6 +1285,17 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> doc = new LinkedHashMap<String, Object>();
         doc.put("docName", "qa.csv");
         doc.put("content", content);
+        request.put("docInfoList", Collections.singletonList(doc));
+        return request;
+    }
+
+    private Map<String, Object> qaImportBase64(String knowledgeId, String docName, String base64) {
+        Map<String, Object> request = new LinkedHashMap<String, Object>();
+        request.put("knowledgeId", knowledgeId);
+        Map<String, Object> doc = new LinkedHashMap<String, Object>();
+        doc.put("docName", docName);
+        doc.put("docType", testFileType(docName));
+        doc.put("contentBase64", base64);
         request.put("docInfoList", Collections.singletonList(doc));
         return request;
     }

@@ -2928,7 +2928,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String qaImportContent(Map<String, Object> docInfo) {
         String content = firstText(docInfo, "content", "text", "docContent", "csv", "tsv");
         if (isBlank(content)) {
-            content = decodedText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"));
+            content = decodedDocumentText(firstText(docInfo, "contentBase64", "base64", "docContentBase64", "textBase64"),
+                    documentExtension(docInfo));
         }
         return content;
     }

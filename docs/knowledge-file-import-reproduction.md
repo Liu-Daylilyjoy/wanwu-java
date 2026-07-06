@@ -25,6 +25,8 @@ The Java knowledge service now keeps the existing synchronous development import
 
 This covers the frontend's development-time spreadsheet, Word, and PDF document import without an external parser service.
 
+QA pair import also reuses the same base64 file decoding path for `.xlsx`, converting spreadsheet rows into the existing question/answer parser. CSV/TSV inline content and UTF-8 base64 text remain unchanged.
+
 ## Remaining Gap
 
 Legacy DOC, MinIO object lifecycle, parser model execution, async task state, vector indexing, and Go-equivalent normalized import tables remain later slices.
