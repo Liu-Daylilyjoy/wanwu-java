@@ -50,6 +50,7 @@ This slice is a compatibility shell:
 - Routes no longer return `Not Found`.
 - Response envelopes follow the frontend/BFF success shape where Go handlers are frontend-facing.
 - File callbacks now read and upload real bytes through a local Docker-development store: `file/url/base64` supports `fileUrl/addPrefix/customPrefix`, and `file/upload/base64` returns Go-style `url/uri` while retaining Java compatibility ids.
+- Tourism POI search now mirrors the Go local ranking service with `query/results`, category and keyword filtering, radius filtering, rating/distance sorting, and limit normalization.
 - Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
 - Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Image outline returns the Go `ImageOutlineExtractResp` shape (`message`, `prompt`, `markdown`, `result`, `mimeType`, `url`, `uri`, `usage`) and stores a local downloadable PNG under `/callback/v1/file/{fileId}` for Docker development.

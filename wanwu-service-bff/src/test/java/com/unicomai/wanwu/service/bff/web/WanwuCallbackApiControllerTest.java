@@ -611,6 +611,44 @@ public class WanwuCallbackApiControllerTest {
     }
 
     @Test
+    public void tourismPoiCallbackReturnsGoCompatibleRanking() throws Exception {
+        mockMvc.perform(post("/callback/v1/tourism/poi/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"location\":\"Mogao Caves\",\"category\":\"restaurant\","
+                                + "\"radiusMeters\":40000,\"limit\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.query.resolvedLocation").value("Mogao Caves"))
+                .andExpect(jsonPath("$.data.query.category").value("restaurant"))
+                .andExpect(jsonPath("$.data.query.radiusMeters").value(40000))
+                .andExpect(jsonPath("$.data.query.limit").value(3))
+                .andExpect(jsonPath("$.data.query.sort").value("rating_desc,distance_asc"))
+                .andExpect(jsonPath("$.data.results.length()").value(3))
+                .andExpect(jsonPath("$.data.results[0].rank").value(1))
+                .andExpect(jsonPath("$.data.results[0].id").value("dh-restaurant-jingyuan-lamb"))
+                .andExpect(jsonPath("$.data.results[0].category").value("restaurant"))
+                .andExpect(jsonPath("$.data.results[0].rating").value(4.8))
+                .andExpect(jsonPath("$.data.results[0].distanceMeters").isNumber())
+                .andExpect(jsonPath("$.data.results[0].tags").isArray())
+                .andExpect(jsonPath("$.data.list").doesNotExist());
+
+        mockMvc.perform(post("/callback/v1/tourism/poi/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":40.0834,\"longitude\":94.6734,\"category\":\"all\",\"limit\":30}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.query.resolvedLocation").value("Custom Coordinates"))
+                .andExpect(jsonPath("$.data.query.limit").value(20))
+                .andExpect(jsonPath("$.data.results[0].rank").value(1));
+
+        mockMvc.perform(post("/callback/v1/tourism/poi/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":120,\"longitude\":94.6734}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.msg", containsString("latitude or longitude out of range")));
+    }
+
+    @Test
     public void specializedModelCallbacksReturnGoCompatibleBodies() throws Exception {
         mockMvc.perform(post("/callback/v1/model/model-ocr/ocr")
                         .contentType(MediaType.APPLICATION_JSON)

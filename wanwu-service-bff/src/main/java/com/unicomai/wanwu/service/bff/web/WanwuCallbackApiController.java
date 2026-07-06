@@ -30,8 +30,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,12 +48,18 @@ public class WanwuCallbackApiController {
     private static final String DEFAULT_CALLBACK_MODEL_BASE_URL = "http://bff:8080/callback/v1/model";
     private static final int MODEL_PROXY_CONNECT_TIMEOUT_MILLIS = 3000;
     private static final int MODEL_PROXY_READ_TIMEOUT_MILLIS = 10000;
+    private static final int TOURISM_DEFAULT_RADIUS_METERS = 30000;
+    private static final int TOURISM_MAX_RADIUS_METERS = 100000;
+    private static final int TOURISM_DEFAULT_LIMIT = 10;
+    private static final int TOURISM_MAX_LIMIT = 20;
     private static final String IMAGE_OUTLINE_PROMPT =
             "Generate a clean black-and-white digital line art outline from the input image.";
     private static final byte[] IMAGE_OUTLINE_PLACEHOLDER_PNG = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=");
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final UploadedFileStore CALLBACK_FILE_STORE = UploadedFileStore.defaultStore();
+    private static final List<TourismLocation> TOURISM_LOCATIONS = tourismLocations();
+    private static final List<TourismPoi> TOURISM_POIS = tourismPois();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
@@ -144,10 +152,11 @@ public class WanwuCallbackApiController {
 
     @PostMapping("/callback/v1/tourism/poi/search")
     public FrontendResponse<Map<String, Object>> tourismPoi(@RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("name", defaultIfBlank(firstText(request, "keyword", "query"), "tourism-poi"));
-        row.put("score", 1);
-        return FrontendResponse.ok(listResult(Collections.singletonList(row)));
+        try {
+            return FrontendResponse.ok(localTourismPoiSearch(request));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @GetMapping("/callback/v1/model/{modelId}")
@@ -1036,6 +1045,173 @@ public class WanwuCallbackApiController {
         return data;
     }
 
+    private Map<String, Object> localTourismPoiSearch(Map<String, Object> request) {
+        TourismLocation location = resolveTourismLocation(request);
+        String category = normalizeTourismCategory(firstText(request, "category"));
+        int radius = normalizeTourismRadius(intValue(request, "radiusMeters", "radius_meters"));
+        int limit = normalizeTourismLimit(intValue(request, "limit"));
+        String keyword = firstText(request, "keyword", "query").trim().toLowerCase();
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (TourismPoi poi : TOURISM_POIS) {
+            if (!"all".equals(category) && !poi.category.equals(category)) {
+                continue;
+            }
+            if (!keyword.isEmpty() && !poi.matches(keyword)) {
+                continue;
+            }
+            int distance = distanceMeters(location.latitude, location.longitude, poi.latitude, poi.longitude);
+            if (distance > radius) {
+                continue;
+            }
+            results.add(tourismPoiResult(poi, distance));
+        }
+        Collections.sort(results, new Comparator<Map<String, Object>>() {
+            @Override
+            public int compare(Map<String, Object> left, Map<String, Object> right) {
+                int rating = Double.compare((Double) right.get("rating"), (Double) left.get("rating"));
+                if (rating != 0) {
+                    return rating;
+                }
+                int distance = Integer.compare((Integer) left.get("distanceMeters"), (Integer) right.get("distanceMeters"));
+                if (distance != 0) {
+                    return distance;
+                }
+                return String.valueOf(left.get("name")).compareTo(String.valueOf(right.get("name")));
+            }
+        });
+        if (results.size() > limit) {
+            results = new ArrayList<>(results.subList(0, limit));
+        }
+        for (int i = 0; i < results.size(); i++) {
+            results.get(i).put("rank", i + 1);
+        }
+
+        Map<String, Object> query = new LinkedHashMap<>();
+        query.put("resolvedLocation", location.name);
+        query.put("latitude", location.latitude);
+        query.put("longitude", location.longitude);
+        query.put("category", category);
+        if (!keyword.isEmpty()) {
+            query.put("keyword", keyword);
+        }
+        query.put("radiusMeters", radius);
+        query.put("limit", limit);
+        query.put("sort", "rating_desc,distance_asc");
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("query", query);
+        data.put("results", results);
+        return data;
+    }
+
+    private Map<String, Object> tourismPoiResult(TourismPoi poi, int distance) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("rank", 0);
+        result.put("id", poi.id);
+        result.put("name", poi.name);
+        result.put("category", poi.category);
+        result.put("categoryLabel", poi.categoryLabel);
+        result.put("rating", poi.rating);
+        result.put("distanceMeters", distance);
+        result.put("latitude", poi.latitude);
+        result.put("longitude", poi.longitude);
+        result.put("address", poi.address);
+        result.put("description", poi.description);
+        result.put("recommendedFor", poi.recommendedFor);
+        result.put("openHours", poi.openHours);
+        result.put("priceLevel", poi.priceLevel);
+        result.put("tags", poi.tags);
+        return result;
+    }
+
+    private TourismLocation resolveTourismLocation(Map<String, Object> request) {
+        double latitude = doubleValue(request, "latitude");
+        double longitude = doubleValue(request, "longitude");
+        if (latitude != 0.0 || longitude != 0.0) {
+            if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+                throw new IllegalArgumentException("latitude or longitude out of range");
+            }
+            return new TourismLocation("Custom Coordinates", latitude, longitude);
+        }
+        String locationText = defaultIfBlank(firstText(request, "location"), "Dunhuang");
+        TourismLocation parsed = parseTourismCoordinates(locationText);
+        if (parsed != null) {
+            return parsed;
+        }
+        String normalized = locationText.toLowerCase();
+        for (TourismLocation candidate : TOURISM_LOCATIONS) {
+            String candidateName = candidate.name.toLowerCase();
+            if (normalized.contains(candidateName) || candidateName.contains(normalized)) {
+                return candidate;
+            }
+        }
+        return new TourismLocation("Dunhuang", 40.1421, 94.6619);
+    }
+
+    private TourismLocation parseTourismCoordinates(String locationText) {
+        if (isBlank(locationText)) {
+            return null;
+        }
+        String[] parts = locationText.trim().split("[,;:\\s]+");
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            double latitude = Double.parseDouble(parts[0]);
+            double longitude = Double.parseDouble(parts[1]);
+            if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+                return null;
+            }
+            return new TourismLocation(locationText.trim(), latitude, longitude);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private String normalizeTourismCategory(String category) {
+        String value = defaultIfBlank(category, "").trim().toLowerCase();
+        if (value.isEmpty() || "all".equals(value) || "recommend".equals(value)) {
+            return "all";
+        }
+        if ("attraction".equals(value) || "scenic".equals(value) || "spot".equals(value)) {
+            return "attraction";
+        }
+        if ("hotel".equals(value) || "lodging".equals(value)) {
+            return "hotel";
+        }
+        if ("restaurant".equals(value) || "food".equals(value) || "dining".equals(value)) {
+            return "restaurant";
+        }
+        return "all";
+    }
+
+    private int normalizeTourismRadius(int radius) {
+        if (radius <= 0) {
+            return TOURISM_DEFAULT_RADIUS_METERS;
+        }
+        return Math.min(radius, TOURISM_MAX_RADIUS_METERS);
+    }
+
+    private int normalizeTourismLimit(int limit) {
+        if (limit <= 0) {
+            return TOURISM_DEFAULT_LIMIT;
+        }
+        return Math.min(limit, TOURISM_MAX_LIMIT);
+    }
+
+    private int distanceMeters(double lat1, double lon1, double lat2, double lon2) {
+        double earthRadiusMeters = 6371000.0;
+        double lat1Rad = Math.toRadians(lat1);
+        double lat2Rad = Math.toRadians(lat2);
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return (int) Math.round(earthRadiusMeters * c);
+    }
+
     private Map<String, Object> localImageOutline(Map<String, Object> request) {
         if (isBlank(firstText(request, "image"))) {
             throw new IllegalArgumentException("image is required");
@@ -1280,6 +1456,42 @@ public class WanwuCallbackApiController {
         }
     }
 
+    private int intValue(Map<?, ?> map, String... keys) {
+        if (map == null || keys == null) {
+            return 0;
+        }
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value == null) {
+                continue;
+            }
+            if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+            try {
+                return Integer.parseInt(String.valueOf(value));
+            } catch (RuntimeException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private double doubleValue(Map<?, ?> map, String key) {
+        if (map == null || key == null) {
+            return 0.0;
+        }
+        Object value = map.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (RuntimeException ignored) {
+            return 0.0;
+        }
+    }
+
     private String compactId() {
         return UUID.randomUUID().toString().replace("-", "");
     }
@@ -1318,6 +1530,101 @@ public class WanwuCallbackApiController {
         return isBlank(value) ? fallback : value;
     }
 
+    private static List<TourismLocation> tourismLocations() {
+        return Arrays.asList(
+                new TourismLocation("Mogao Caves", 40.0472, 94.8090),
+                new TourismLocation("Mingsha Mountain Crescent Spring", 40.0834, 94.6734),
+                new TourismLocation("Crescent Spring", 40.0834, 94.6734),
+                new TourismLocation("Shazhou Night Market", 40.1424, 94.6618),
+                new TourismLocation("Dunhuang", 40.1421, 94.6619)
+        );
+    }
+
+    private static List<TourismPoi> tourismPois() {
+        return Arrays.asList(
+                new TourismPoi("dh-attraction-mogao-caves", "Mogao Caves", "attraction", "Attraction", 4.9,
+                        40.0472, 94.8090, "25km southeast of Dunhuang",
+                        "World heritage caves famous for murals, painted sculptures, and Buddhist art.",
+                        "Culture research, first-time Dunhuang visits, half-day deep tours",
+                        "See daily scenic-area notice", "Ticketed",
+                        Arrays.asList("world heritage", "caves", "murals")),
+                new TourismPoi("dh-attraction-mingsha-yueya", "Mingsha Mountain and Crescent Spring",
+                        "attraction", "Attraction", 4.8, 40.0834, 94.6734,
+                        "South of Dunhuang city",
+                        "Classic desert and spring landscape, especially suitable around sunset.",
+                        "Family trips, photography, sunset, desert experience",
+                        "See daily scenic-area notice", "Ticketed",
+                        Arrays.asList("desert", "crescent spring", "sunset")),
+                new TourismPoi("dh-attraction-museum", "Dunhuang Museum", "attraction", "Attraction", 4.7,
+                        40.1398, 94.6742, "Mingshan North Road, Dunhuang",
+                        "Indoor museum for Silk Road history, Dunhuang relics, and Mogao background.",
+                        "Pre-trip context, family trips, heat shelter",
+                        "See venue notice", "Usually free reservation",
+                        Arrays.asList("museum", "silk road", "indoor")),
+                new TourismPoi("dh-attraction-leiyin-temple", "Leiyin Temple", "attraction", "Attraction", 4.5,
+                        40.0986, 94.6715, "Near Mingsha Mountain, Dunhuang",
+                        "A quiet temple near Mingsha Mountain and Crescent Spring.",
+                        "Short stopover, calm visits",
+                        "See attraction notice", "Low",
+                        Arrays.asList("temple", "near mingsha", "quiet")),
+                new TourismPoi("dh-attraction-west-thousand-buddha-caves", "West Thousand Buddha Caves",
+                        "attraction", "Attraction", 4.4, 40.0138, 94.3671,
+                        "West bank of Dang River canyon, Dunhuang",
+                        "Smaller cave site with fewer visitors.",
+                        "Cave-art fans, niche routes",
+                        "See daily scenic-area notice", "Ticketed",
+                        Arrays.asList("caves", "niche", "culture")),
+                new TourismPoi("dh-hotel-dunhuang-villa", "Dunhuang Villa", "hotel", "Hotel", 4.8,
+                        40.0921, 94.6759, "Mingsha Mountain Road, Dunhuang",
+                        "Resort-style hotel near Mingsha Mountain and Crescent Spring.",
+                        "Sunset viewing, vacation, near-scenic-area stays",
+                        "All day", "High",
+                        Arrays.asList("resort", "near mingsha", "view")),
+                new TourismPoi("dh-hotel-international", "Dunhuang International Hotel", "hotel", "Hotel", 4.7,
+                        40.1455, 94.6720, "Yangguan Middle Road area, Dunhuang",
+                        "Urban hotel suitable as a transfer base for multiple attractions.",
+                        "Business, family, city transfer",
+                        "All day", "Mid-high",
+                        Arrays.asList("city", "transfer", "business")),
+                new TourismPoi("dh-hotel-dunhuang-hotel", "Dunhuang Hotel", "hotel", "Hotel", 4.6,
+                        40.1427, 94.6628, "Yangguan Middle Road, Dunhuang",
+                        "Traditional city hotel close to the night market and dining streets.",
+                        "City touring, night market, public transport",
+                        "All day", "Mid",
+                        Arrays.asList("city", "night market", "transport")),
+                new TourismPoi("dh-hotel-silk-road-yiyuan", "Silk Road Yiyuan Hotel", "hotel", "Hotel", 4.5,
+                        40.1444, 94.6535, "Downtown Dunhuang",
+                        "Stable downtown stay for family or group itineraries.",
+                        "Families, groups, city transfer",
+                        "All day", "Mid",
+                        Arrays.asList("city", "group", "family")),
+                new TourismPoi("dh-restaurant-jingyuan-lamb", "Jingyuan Lamb Restaurant", "restaurant",
+                        "Restaurant", 4.8, 40.1451, 94.6627, "Downtown Dunhuang",
+                        "Local lamb dishes suited for a filling meal.",
+                        "Lunch or dinner, groups, local flavor",
+                        "See daily restaurant notice", "Mid",
+                        Arrays.asList("lamb", "local cuisine", "meal")),
+                new TourismPoi("dh-restaurant-shunzhang-noodles", "Shunzhang Yellow Noodles", "restaurant",
+                        "Restaurant", 4.7, 40.1438, 94.6610, "Downtown Dunhuang",
+                        "Local noodle restaurant known for donkey-meat yellow noodles.",
+                        "Lunch, local snacks, quick meals",
+                        "See daily restaurant notice", "Mid-low",
+                        Arrays.asList("yellow noodles", "donkey meat", "local snack")),
+                new TourismPoi("dh-restaurant-shazhou-night-market", "Shazhou Night Market Food Street",
+                        "restaurant", "Restaurant", 4.6, 40.1424, 94.6618, "Shazhou Town, Dunhuang",
+                        "Night food, souvenirs, and visitor atmosphere in one area.",
+                        "Night visit, snack collection, shopping",
+                        "Mainly evening", "Mid-low",
+                        Arrays.asList("night market", "snacks", "souvenir")),
+                new TourismPoi("dh-restaurant-daji-donkey-noodles", "Daji Donkey Yellow Noodles",
+                        "restaurant", "Restaurant", 4.5, 40.1463, 94.6603, "Downtown Dunhuang",
+                        "Local donkey-meat yellow noodle restaurant.",
+                        "Local flavor, lunch or dinner",
+                        "See daily restaurant notice", "Mid-low",
+                        Arrays.asList("donkey noodles", "local cuisine", "noodles"))
+        );
+    }
+
     private static class CallbackFileContent {
         private final byte[] bytes;
         private final String contentType;
@@ -1325,6 +1632,57 @@ public class WanwuCallbackApiController {
         private CallbackFileContent(byte[] bytes, String contentType) {
             this.bytes = bytes == null ? new byte[0] : bytes;
             this.contentType = contentType;
+        }
+    }
+
+    private static class TourismLocation {
+        private final String name;
+        private final double latitude;
+        private final double longitude;
+
+        private TourismLocation(String name, double latitude, double longitude) {
+            this.name = name;
+            this.latitude = latitude;
+            this.longitude = longitude;
+        }
+    }
+
+    private static class TourismPoi {
+        private final String id;
+        private final String name;
+        private final String category;
+        private final String categoryLabel;
+        private final double rating;
+        private final double latitude;
+        private final double longitude;
+        private final String address;
+        private final String description;
+        private final String recommendedFor;
+        private final String openHours;
+        private final String priceLevel;
+        private final List<String> tags;
+
+        private TourismPoi(String id, String name, String category, String categoryLabel, double rating,
+                           double latitude, double longitude, String address, String description,
+                           String recommendedFor, String openHours, String priceLevel, List<String> tags) {
+            this.id = id;
+            this.name = name;
+            this.category = category;
+            this.categoryLabel = categoryLabel;
+            this.rating = rating;
+            this.latitude = latitude;
+            this.longitude = longitude;
+            this.address = address;
+            this.description = description;
+            this.recommendedFor = recommendedFor;
+            this.openHours = openHours;
+            this.priceLevel = priceLevel;
+            this.tags = tags;
+        }
+
+        private boolean matches(String keyword) {
+            String target = (name + " " + address + " " + description + " " + tags).toLowerCase();
+            return target.contains(keyword);
         }
     }
 }
