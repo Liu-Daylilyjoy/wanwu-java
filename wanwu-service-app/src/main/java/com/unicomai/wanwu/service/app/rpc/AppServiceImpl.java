@@ -163,6 +163,7 @@ import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -6172,6 +6173,10 @@ public class AppServiceImpl implements AppService {
             output.putAll(merged);
             output.put("text", String.valueOf(merged));
             output.put("result", merged);
+        } else if (workflowIsJsonSerializeNode(node, type, lowerType)) {
+            output.putAll(workflowJsonSerializeOutput(input));
+        } else if (workflowIsJsonDeserializeNode(node, type, lowerType)) {
+            output.putAll(workflowJsonDeserializeOutput(input));
         } else {
             String source = input.isEmpty() ? "input" : String.valueOf(input);
             if (source.length() > 120) {
@@ -6209,6 +6214,94 @@ public class AppServiceImpl implements AppService {
     private boolean workflowIsMergeNode(String type, String lowerType) {
         return "32".equals(type) || lowerType.contains("merge") || lowerType.contains("variable")
                 || lowerType.contains("assign");
+    }
+
+    private boolean workflowIsJsonSerializeNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        if ("1058".equals(type)) {
+            return true;
+        }
+        return (semantic.contains("json_serialize") || semantic.contains("json-serialize")
+                || semantic.contains("jsonserialize") || semantic.contains("to_json")
+                || semantic.contains("to json") || semantic.contains("json 序列化")
+                || (semantic.contains("json") && semantic.contains("serialize")))
+                && !workflowIsJsonDeserializeNode(node, type, lowerType);
+    }
+
+    private boolean workflowIsJsonDeserializeNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "1059".equals(type) || semantic.contains("json_deserialize")
+                || semantic.contains("json-deserialize") || semantic.contains("jsondeserialize")
+                || semantic.contains("from_json") || semantic.contains("from json")
+                || semantic.contains("parse json") || semantic.contains("json parse")
+                || semantic.contains("json 反序列化") || semantic.contains("反序列化");
+    }
+
+    private String workflowNodeSemanticText(Map<String, Object> node, String type, String lowerType) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> nodeMeta = mapValue(data.get("nodeMeta"));
+        return (defaultIfBlank(type, "") + " " + defaultIfBlank(lowerType, "") + " "
+                + textValue(node, "name", "label", "title", "subTitle", "description") + " "
+                + textValue(data, "name", "label", "title", "subTitle", "description") + " "
+                + textValue(nodeMeta, "name", "label", "title", "subTitle", "description"))
+                .toLowerCase(java.util.Locale.ENGLISH);
+    }
+
+    private Map<String, Object> workflowJsonSerializeOutput(Map<String, Object> input) {
+        Object value = workflowPrimaryNodeInput(input);
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("workflow json serialize failed", ex);
+        }
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("output", json);
+        output.put("json", json);
+        output.put("text", json);
+        output.put("result", json);
+        output.put("response", json);
+        return output;
+    }
+
+    private Map<String, Object> workflowJsonDeserializeOutput(Map<String, Object> input) {
+        Object raw = workflowPrimaryNodeInput(input);
+        Object parsed;
+        if (raw instanceof Map || raw instanceof List) {
+            parsed = raw;
+        } else {
+            String json = defaultIfBlank(raw == null ? "" : String.valueOf(raw), "{}");
+            try {
+                parsed = objectMapper.readValue(json, Object.class);
+            } catch (IOException ex) {
+                throw new IllegalArgumentException("workflow json deserialize failed", ex);
+            }
+        }
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("output", parsed);
+        output.put("result", parsed);
+        output.put("text", workflowJsonText(parsed));
+        output.put("response", parsed);
+        return output;
+    }
+
+    private Object workflowPrimaryNodeInput(Map<String, Object> input) {
+        Object value = firstPresent(input, "input", "data", "body", "value", "object", "json", "output");
+        if (value != null) {
+            return value;
+        }
+        return input;
+    }
+
+    private String workflowJsonText(Object value) {
+        if (value instanceof String) {
+            return String.valueOf(value);
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            return String.valueOf(value);
+        }
     }
 
     private String workflowLlmPrompt(Map<String, Object> node, Map<String, Object> input) {

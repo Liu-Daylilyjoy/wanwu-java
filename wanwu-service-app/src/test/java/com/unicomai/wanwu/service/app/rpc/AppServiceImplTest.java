@@ -813,6 +813,60 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesJsonSerializeAndDeserializeNodes() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("JsonNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"profile\"}]}},"
+                + "{\"id\":\"110001\",\"type\":\"json_serialize\",\"data\":{\"nodeMeta\":{\"title\":\"To JSON\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"object\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"profile\"}}}}]}}},"
+                + "{\"id\":\"120001\",\"type\":\"1059\",\"data\":{\"nodeMeta\":{\"title\":\"From JSON\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110001\",\"name\":\"output\"}}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"object\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"120001\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110001\"},"
+                + "{\"sourceNodeID\":\"110001\",\"targetNodeID\":\"120001\"},"
+                + "{\"sourceNodeID\":\"120001\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"object\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("name", "Alice");
+        profile.put("score", 98);
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("profile", profile));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        String json = String.valueOf(castMap(nodeOutputs.get("110001")).get("output"));
+        assertTrue(json.contains("\"name\":\"Alice\""), json);
+        Map<String, Object> parsed = castMap(castMap(nodeOutputs.get("120001")).get("output"));
+        assertEquals("Alice", parsed.get("name"));
+        assertEquals(98, parsed.get("score"));
+        assertEquals(parsed, output.get("output"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
