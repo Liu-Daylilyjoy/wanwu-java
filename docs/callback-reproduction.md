@@ -38,7 +38,8 @@ Covered route families:
 - Workflow/chatflow callback lists and MCP-backed workflow tool detail callbacks
 - MCP callback details backed by Java `McpService`
 - Agent callback chat SSE shell
-- RAG callback search and stream search shells
+- RAG callback knowledge and QA search now adapt Go RAG request fields to Java `KnowledgeService`
+  local hits with Go-compatible response aliases; stream search remains a shell
 - WGA sandbox run/cleanup callback shells
 - App record shell plus skill detail/list callbacks backed by Java `McpService`, including Go-style `skillList` response bodies
 - v1 callback aliases for doc status, deploy info, category info, doc status init, and knowledge status
@@ -54,6 +55,13 @@ This slice is a compatibility shell:
 - Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
 - Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Image outline returns the Go `ImageOutlineExtractResp` shape (`message`, `prompt`, `markdown`, `result`, `mimeType`, `url`, `uri`, `usage`) and stores a local downloadable PNG under `/callback/v1/file/{fileId}` for Docker development.
+- RAG callback knowledge and QA search routes now call Java `KnowledgeService.hitKnowledge` and
+  `hitQaPairs`, translating `knowledgeIdList`, `knowledge_base_info`, `QABaseInfo`, `topK`,
+  `threshold`, `use_graph`, rerank, retrieve, weight, and metadata filter fields into Java
+  `knowledgeList` and `knowledgeMatchParams`.
+- RAG callback responses preserve Java camelCase fields and add Go callback aliases such as
+  `use_graph`, `kb_name`, `user_kb_name`, `meta_data`, `child_content_list`, `child_score`,
+  `content_type`, and `rerank_info`.
 - Stream routes use `text/event-stream` with deterministic development payloads.
 - Mutating callback routes echo status and request data for development observability.
 
@@ -63,6 +71,6 @@ This slice is a compatibility shell:
 - Callback file upload/download is BFF-local, not MinIO/object-storage-backed yet.
 - Image outline does not call DashScope Qwen image edit or MinIO yet; it returns a deterministic local PNG while preserving the Go response contract and `response_format` validation.
 - Real OCR/ASR/PDF parsing/GUI tasks are not implemented.
-- Real RAG recall and knowledge-base stream search are not implemented.
+- Full Python/vector/rerank RAG runtime and knowledge-base stream generation are not implemented.
 - Real WGA sandbox execution and cleanup are not implemented.
 - Callback authentication, callback signature verification, and usage metrics are not reproduced yet.

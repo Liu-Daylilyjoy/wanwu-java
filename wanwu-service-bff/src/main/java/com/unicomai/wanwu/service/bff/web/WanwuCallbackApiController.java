@@ -35,8 +35,10 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -396,10 +398,24 @@ public class WanwuCallbackApiController {
     @PostMapping({"/callback/v1/rag/search-knowledge-base",
             "/callback/v1/rag/search-QA-base",
             "/callback/v1/wga/rag/search-knowledge-base"})
-    public FrontendResponse<Map<String, Object>> callbackList(@RequestBody(required = false) Map<String, Object> request) {
-        Map<String, Object> data = listResult(Collections.emptyList());
-        data.put("request", request == null ? Collections.emptyMap() : request);
-        return FrontendResponse.ok(data);
+    public FrontendResponse<Map<String, Object>> callbackList(
+            @RequestBody(required = false) Map<String, Object> request,
+            HttpServletRequest httpRequest) {
+        try {
+            String uri = httpRequest == null ? "" : httpRequest.getRequestURI();
+            Map<String, Object> safe = copyStringMap(request);
+            if (uri.contains("/wga/")) {
+                applyWgaKnowledgeDefaults(safe);
+            }
+            if (uri.contains("search-QA-base")) {
+                return FrontendResponse.ok(callbackQaSearch(safe, httpRequest));
+            }
+            return FrontendResponse.ok(callbackKnowledgeSearch(safe, httpRequest));
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        } catch (RuntimeException ex) {
+            return FrontendResponse.failure(1001, defaultIfBlank(ex.getMessage(), "rag callback failed"));
+        }
     }
 
     @PostMapping("/callback/v1/skill/builtin/list")
@@ -483,6 +499,339 @@ public class WanwuCallbackApiController {
         } catch (RuntimeException ex) {
             return FrontendResponse.failure(1001, ex.getMessage());
         }
+    }
+
+    private Map<String, Object> callbackKnowledgeSearch(Map<String, Object> request, HttpServletRequest httpRequest) {
+        Map<String, Object> serviceRequest = callbackRagServiceRequest(request, false);
+        Map<String, Object> result = knowledgeService == null
+                ? Collections.<String, Object>emptyMap()
+                : knowledgeService.hitKnowledge(callbackUserId(request, httpRequest), callbackOrgId(request, httpRequest),
+                serviceRequest);
+        return callbackRagResult(result, serviceRequest, true);
+    }
+
+    private Map<String, Object> callbackQaSearch(Map<String, Object> request, HttpServletRequest httpRequest) {
+        Map<String, Object> serviceRequest = callbackRagServiceRequest(request, true);
+        Map<String, Object> result = knowledgeService == null
+                ? Collections.<String, Object>emptyMap()
+                : knowledgeService.hitQaPairs(callbackUserId(request, httpRequest), callbackOrgId(request, httpRequest),
+                serviceRequest);
+        return callbackRagResult(result, serviceRequest, false);
+    }
+
+    private Map<String, Object> callbackRagServiceRequest(Map<String, Object> request, boolean qa) {
+        Map<String, Object> body = copyStringMap(request);
+        Map<String, Object> matchParams = objectMap(body.get("knowledgeMatchParams"));
+        copyIfPresent(body, matchParams, "topK", "topK");
+        copyIfPresent(body, matchParams, "threshold", "threshold");
+        copyIfPresent(body, matchParams, "score", "score");
+        copyIfPresent(body, matchParams, "use_graph", "useGraph");
+        copyIfPresent(body, matchParams, "useGraph", "useGraph");
+        copyIfPresent(body, matchParams, "rerank_model_id", "rerankModelId");
+        copyIfPresent(body, matchParams, "rerankModelId", "rerankModelId");
+        copyIfPresent(body, matchParams, "rerank_mod", "rerankMod");
+        copyIfPresent(body, matchParams, "rerankMod", "rerankMod");
+        copyIfPresent(body, matchParams, "retrieve_method", "retrieveMethod");
+        copyIfPresent(body, matchParams, "retrieveMethod", "retrieveMethod");
+        copyIfPresent(body, matchParams, "weights", "weights");
+        copyIfPresent(body, matchParams, "metadata_filtering", "metadataFiltering");
+        copyIfPresent(body, matchParams, "metadataFiltering", "metadataFiltering");
+        copyIfPresent(body, matchParams, "metadata_filtering_conditions", "metadataFilteringConditions");
+        copyIfPresent(body, matchParams, "metadataFilteringConditions", "metadataFilteringConditions");
+
+        String retrieveMethod = firstText(matchParams, "retrieveMethod");
+        if (!isBlank(retrieveMethod) && !hasValue(matchParams.get("matchType"))) {
+            matchParams.put("matchType", retrieveMethod);
+        }
+        body.put("knowledgeMatchParams", matchParams);
+
+        List<String> knowledgeIds = callbackRagKnowledgeIds(body, qa);
+        if (!knowledgeIds.isEmpty()) {
+            body.put("knowledgeIdList", knowledgeIds);
+        }
+        List<Map<String, Object>> knowledgeList = callbackKnowledgeList(body.get("knowledgeList"), knowledgeIds);
+        if (!knowledgeList.isEmpty()) {
+            body.put("knowledgeList", knowledgeList);
+        }
+        return body;
+    }
+
+    private Map<String, Object> callbackRagResult(Map<String, Object> result, Map<String, Object> request,
+                                                  boolean includeUseGraph) {
+        Map<String, Object> data = copyStringMap(result);
+        if (!hasValue(data.get("prompt"))) {
+            data.put("prompt", "");
+        }
+        data.put("searchList", callbackRagSearchList(data.get("searchList")));
+        if (!hasValue(data.get("score"))) {
+            data.put("score", Collections.emptyList());
+        }
+        if (includeUseGraph) {
+            Map<String, Object> matchParams = objectMap(request.get("knowledgeMatchParams"));
+            boolean useGraph = booleanValue(firstValue(data, "use_graph", "useGraph"),
+                    booleanValue(matchParams.get("useGraph"), false));
+            data.put("use_graph", useGraph);
+            data.put("useGraph", useGraph);
+        }
+        return data;
+    }
+
+    private List<Map<String, Object>> callbackRagSearchList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object raw : objectList(value)) {
+            Map<String, Object> item = objectMap(raw);
+            callbackRagSearchItemAliases(item);
+            result.add(item);
+        }
+        return result;
+    }
+
+    private void callbackRagSearchItemAliases(Map<String, Object> item) {
+        putAlias(item, "knowledgeName", "knowledgeName", "kb_name", "qaBase", "QABase");
+        putAlias(item, "kb_name", "kb_name", "knowledgeName", "qaBase", "QABase");
+        putAlias(item, "user_kb_name", "user_kb_name", "userKbName", "knowledgeName", "kb_name", "qaBase", "QABase");
+        putAlias(item, "userKbName", "userKbName", "user_kb_name");
+        putAlias(item, "meta_data", "meta_data", "metaData", "metaDataList");
+        putAlias(item, "metaDataList", "metaDataList", "meta_data");
+
+        List<Map<String, Object>> childContentList = callbackChildContentList(
+                firstValue(item, "child_content_list", "childContentList"));
+        item.put("child_content_list", childContentList);
+        item.put("childContentList", childContentList);
+
+        Object childScore = firstValue(item, "child_score", "childScore");
+        if (!hasValue(childScore)) {
+            childScore = Collections.emptyList();
+        }
+        item.put("child_score", childScore);
+        item.put("childScore", childScore);
+
+        Object contentType = firstValue(item, "content_type", "contentType");
+        if (!hasValue(contentType)) {
+            contentType = hasValue(firstValue(item, "answer")) ? "qa" : "text";
+        }
+        item.put("content_type", contentType);
+        item.put("contentType", contentType);
+
+        List<Map<String, Object>> rerankInfo = callbackRerankInfoList(firstValue(item, "rerank_info", "rerankInfo"));
+        item.put("rerank_info", rerankInfo);
+        item.put("rerankInfo", rerankInfo);
+    }
+
+    private List<Map<String, Object>> callbackChildContentList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object raw : objectList(value)) {
+            Map<String, Object> child = objectMap(raw);
+            if (child.isEmpty() && raw != null) {
+                child.put("childSnippet", String.valueOf(raw));
+            }
+            putAlias(child, "child_snippet", "child_snippet", "childSnippet");
+            putAlias(child, "childSnippet", "childSnippet", "child_snippet");
+            result.add(child);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> callbackRerankInfoList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object raw : objectList(value)) {
+            Map<String, Object> rerank = objectMap(raw);
+            putAlias(rerank, "file_url", "file_url", "fileUrl");
+            putAlias(rerank, "fileUrl", "fileUrl", "file_url");
+            result.add(rerank);
+        }
+        return result;
+    }
+
+    private List<String> callbackRagKnowledgeIds(Map<String, Object> request, boolean qa) {
+        Set<String> ids = new LinkedHashSet<>();
+        ids.addAll(stringList(request.get("knowledgeIdList")));
+        ids.addAll(stringList(request.get("knowledgeIds")));
+        ids.addAll(stringList(request.get("knowledge_ids")));
+        collectRagInfoIds(request.get(qa ? "QABaseInfo" : "knowledge_base_info"), qa, ids);
+        return new ArrayList<>(ids);
+    }
+
+    private void collectRagInfoIds(Object value, boolean qa, Set<String> ids) {
+        if (value instanceof Map) {
+            Map<String, Object> map = objectMap(value);
+            String id = qa
+                    ? firstText(map, "QAId", "qaId", "knowledgeId", "kb_id")
+                    : firstText(map, "kb_id", "knowledgeId", "knowledge_id", "QAId");
+            if (!isBlank(id)) {
+                ids.add(id);
+                return;
+            }
+            for (Object child : map.values()) {
+                collectRagInfoIds(child, qa, ids);
+            }
+            return;
+        }
+        if (value instanceof List) {
+            for (Object item : (List<?>) value) {
+                collectRagInfoIds(item, qa, ids);
+            }
+        }
+    }
+
+    private List<Map<String, Object>> callbackKnowledgeList(Object existing, List<String> knowledgeIds) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Object raw : objectList(existing)) {
+            Map<String, Object> item = objectMap(raw);
+            String knowledgeId = firstText(item, "knowledgeId", "kb_id", "QAId", "qaId");
+            if (isBlank(knowledgeId)) {
+                continue;
+            }
+            item.put("knowledgeId", knowledgeId);
+            result.add(item);
+            seen.add(knowledgeId);
+        }
+        for (String knowledgeId : knowledgeIds) {
+            if (seen.add(knowledgeId)) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("knowledgeId", knowledgeId);
+                result.add(item);
+            }
+        }
+        return result;
+    }
+
+    private void applyWgaKnowledgeDefaults(Map<String, Object> request) {
+        if (!request.containsKey("topK")) {
+            request.put("topK", 5);
+        }
+        if (!request.containsKey("threshold")) {
+            request.put("threshold", 0.4D);
+        }
+        if (isBlank(firstText(request, "retrieve_method", "retrieveMethod"))) {
+            request.put("retrieve_method", "hybrid_search");
+        }
+        if (isBlank(firstText(request, "rerank_mod", "rerankMod"))) {
+            request.put("rerank_mod", "weighted_score");
+        }
+        if (!hasValue(request.get("weights"))) {
+            Map<String, Object> weights = new LinkedHashMap<>();
+            weights.put("vector_weight", 0.2D);
+            weights.put("text_weight", 0.8D);
+            request.put("weights", weights);
+        }
+    }
+
+    private String callbackUserId(Map<String, Object> request, HttpServletRequest httpRequest) {
+        String userId = firstText(request, "userId", "user_id");
+        if (!isBlank(userId)) {
+            return userId;
+        }
+        return firstHeader(httpRequest, "X-uid", "X-Uid", "x-uid");
+    }
+
+    private String callbackOrgId(Map<String, Object> request, HttpServletRequest httpRequest) {
+        String orgId = firstText(request, "orgId", "org_id");
+        if (!isBlank(orgId)) {
+            return orgId;
+        }
+        return firstHeader(httpRequest, "X-org-id", "X-Org-Id", "x-org-id");
+    }
+
+    private String firstHeader(HttpServletRequest request, String... names) {
+        if (request == null || names == null) {
+            return "";
+        }
+        for (String name : names) {
+            String value = request.getHeader(name);
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private Map<String, Object> copyStringMap(Map<?, ?> source) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (source == null) {
+            return result;
+        }
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (entry.getKey() != null) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> objectMap(Object value) {
+        if (value instanceof Map) {
+            return copyStringMap((Map<?, ?>) value);
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private List<?> objectList(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        if (value instanceof List) {
+            return (List<?>) value;
+        }
+        return Collections.singletonList(value);
+    }
+
+    private void copyIfPresent(Map<String, Object> source, Map<String, Object> target,
+                               String sourceKey, String targetKey) {
+        if (source.containsKey(sourceKey) && source.get(sourceKey) != null) {
+            target.put(targetKey, source.get(sourceKey));
+        }
+    }
+
+    private Object firstValue(Map<?, ?> map, String... keys) {
+        if (map == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (!map.containsKey(key)) {
+                continue;
+            }
+            Object value = map.get(key);
+            if (hasValue(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private void putAlias(Map<String, Object> target, String alias, String... sourceKeys) {
+        if (hasValue(target.get(alias))) {
+            return;
+        }
+        Object value = firstValue(target, sourceKeys);
+        if (hasValue(value)) {
+            target.put(alias, value);
+        }
+    }
+
+    private boolean hasValue(Object value) {
+        return value != null && (!(value instanceof String) || !isBlank((String) value));
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        if (value == null) {
+            return fallback;
+        }
+        String text = String.valueOf(value);
+        if ("true".equalsIgnoreCase(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text)) {
+            return false;
+        }
+        return fallback;
     }
 
     private Map<String, Object> callbackDetailOrFallback(

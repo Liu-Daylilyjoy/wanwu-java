@@ -19,7 +19,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -27,6 +29,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -646,6 +649,119 @@ public class WanwuCallbackApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1001))
                 .andExpect(jsonPath("$.msg", containsString("latitude or longitude out of range")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void ragCallbacksAdaptGoRequestsToKnowledgeServiceAndReturnGoAliases() throws Exception {
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(knowledgeService.hitKnowledge(eq("u1"), eq(""), anyMap())).thenReturn(map(
+                "prompt", "Prompt text",
+                "searchList", Collections.singletonList(map(
+                        "title", "Guide.txt",
+                        "snippet", "Wanwu Java guide",
+                        "knowledgeName", "Dev KB",
+                        "childContentList", Collections.singletonList(map("childSnippet", "Child text", "score", 0.7)),
+                        "childScore", Collections.singletonList(0.7),
+                        "contentType", "text",
+                        "score", 0.91,
+                        "rerankInfo", Collections.singletonList(map("fileUrl", "/files/1", "score", 0.91)),
+                        "metaDataList", Collections.singletonList(map("key", "city", "value", "Dunhuang")))),
+                "score", Collections.singletonList(0.91),
+                "useGraph", true));
+        when(knowledgeService.hitKnowledge(eq("wga-user"), eq(""), anyMap())).thenReturn(map(
+                "prompt", "",
+                "searchList", Collections.emptyList(),
+                "score", Collections.emptyList(),
+                "useGraph", false));
+        when(knowledgeService.hitQaPairs(eq("qa-user"), eq(""), anyMap())).thenReturn(map(
+                "searchList", Collections.singletonList(map(
+                        "title", "What is Wanwu?",
+                        "question", "What is Wanwu?",
+                        "answer", "AI platform",
+                        "qaBase", "FAQ",
+                        "qaId", "qa-1",
+                        "contentType", "qa")),
+                "score", Collections.singletonList(0.88)));
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, null, knowledgeService))
+                .build();
+
+        callbackMvc.perform(post("/callback/v1/rag/search-knowledge-base")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"u1\",\"question\":\"How to use Wanwu?\","
+                                + "\"knowledgeIdList\":[\"kb-1\"],"
+                                + "\"knowledge_base_info\":{\"u1\":[{\"kb_id\":\"kb-1\",\"kb_name\":\"Dev KB\"}]},"
+                                + "\"topK\":3,\"threshold\":0.2,\"use_graph\":true,"
+                                + "\"retrieve_method\":\"hybrid_search\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.prompt").value("Prompt text"))
+                .andExpect(jsonPath("$.data.use_graph").value(true))
+                .andExpect(jsonPath("$.data.useGraph").value(true))
+                .andExpect(jsonPath("$.data.searchList[0].title").value("Guide.txt"))
+                .andExpect(jsonPath("$.data.searchList[0].kb_name").value("Dev KB"))
+                .andExpect(jsonPath("$.data.searchList[0].user_kb_name").value("Dev KB"))
+                .andExpect(jsonPath("$.data.searchList[0].child_content_list[0].child_snippet").value("Child text"))
+                .andExpect(jsonPath("$.data.searchList[0].childContentList[0].childSnippet").value("Child text"))
+                .andExpect(jsonPath("$.data.searchList[0].content_type").value("text"))
+                .andExpect(jsonPath("$.data.searchList[0].rerank_info[0].file_url").value("/files/1"))
+                .andExpect(jsonPath("$.data.searchList[0].meta_data[0].key").value("city"))
+                .andExpect(jsonPath("$.data.request").doesNotExist());
+
+        ArgumentCaptor<Map> knowledgeCaptor = forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("u1"), eq(""), knowledgeCaptor.capture());
+        Map<String, Object> knowledgeRequest = knowledgeCaptor.getValue();
+        assertEquals("How to use Wanwu?", knowledgeRequest.get("question"));
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) knowledgeRequest.get("knowledgeList");
+        assertEquals("kb-1", knowledgeList.get(0).get("knowledgeId"));
+        Map<String, Object> matchParams = (Map<String, Object>) knowledgeRequest.get("knowledgeMatchParams");
+        assertEquals(3, ((Number) matchParams.get("topK")).intValue());
+        assertEquals(0.2, ((Number) matchParams.get("threshold")).doubleValue());
+        assertEquals(true, matchParams.get("useGraph"));
+        assertEquals("hybrid_search", matchParams.get("retrieveMethod"));
+
+        callbackMvc.perform(post("/callback/v1/wga/rag/search-knowledge-base")
+                        .header("X-uid", "wga-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeIdList\":[\"kb-wga\"],\"question\":\"Where?\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.searchList").isArray());
+
+        ArgumentCaptor<Map> wgaCaptor = forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("wga-user"), eq(""), wgaCaptor.capture());
+        Map<String, Object> wgaRequest = wgaCaptor.getValue();
+        Map<String, Object> wgaMatchParams = (Map<String, Object>) wgaRequest.get("knowledgeMatchParams");
+        assertEquals(5, ((Number) wgaMatchParams.get("topK")).intValue());
+        assertEquals(0.4, ((Number) wgaMatchParams.get("threshold")).doubleValue());
+        assertEquals("hybrid_search", wgaMatchParams.get("retrieveMethod"));
+        assertEquals("weighted_score", wgaMatchParams.get("rerankMod"));
+        Map<String, Object> weights = (Map<String, Object>) wgaMatchParams.get("weights");
+        assertEquals(0.2, ((Number) weights.get("vector_weight")).doubleValue());
+        assertEquals(0.8, ((Number) weights.get("text_weight")).doubleValue());
+
+        callbackMvc.perform(post("/callback/v1/rag/search-QA-base")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"qa-user\",\"question\":\"Wanwu?\","
+                                + "\"QABaseInfo\":{\"qa-user\":[{\"QAId\":\"qa-1\",\"QABase\":\"FAQ\"}]},"
+                                + "\"topK\":1,\"threshold\":0.3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.prompt").value(""))
+                .andExpect(jsonPath("$.data.searchList[0].qaBase").value("FAQ"))
+                .andExpect(jsonPath("$.data.searchList[0].user_kb_name").value("FAQ"))
+                .andExpect(jsonPath("$.data.searchList[0].content_type").value("qa"))
+                .andExpect(jsonPath("$.data.score[0]").value(0.88));
+
+        ArgumentCaptor<Map> qaCaptor = forClass(Map.class);
+        verify(knowledgeService).hitQaPairs(eq("qa-user"), eq(""), qaCaptor.capture());
+        Map<String, Object> qaRequest = qaCaptor.getValue();
+        List<Map<String, Object>> qaKnowledgeList = (List<Map<String, Object>>) qaRequest.get("knowledgeList");
+        assertEquals("qa-1", qaKnowledgeList.get(0).get("knowledgeId"));
+        Map<String, Object> qaMatchParams = (Map<String, Object>) qaRequest.get("knowledgeMatchParams");
+        assertEquals(1, ((Number) qaMatchParams.get("topK")).intValue());
+        assertEquals(0.3, ((Number) qaMatchParams.get("threshold")).doubleValue());
     }
 
     @Test
