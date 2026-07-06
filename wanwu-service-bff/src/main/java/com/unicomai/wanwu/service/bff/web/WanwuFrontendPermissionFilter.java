@@ -158,7 +158,7 @@ public class WanwuFrontendPermissionFilter extends OncePerRequestFilter {
     }
 
     private Set<String> permissions(HttpServletRequest request) {
-        String token = extractToken(request.getHeader("Authorization"));
+        String token = BffUserContextResolver.extractToken(request.getHeader("Authorization"));
         if (iamService != null) {
             try {
                 return permissions(iamService.permission(token));
@@ -204,17 +204,6 @@ public class WanwuFrontendPermissionFilter extends OncePerRequestFilter {
 
     private String path(HttpServletRequest request) {
         return request.getRequestURI();
-    }
-
-    private String extractToken(String authorization) {
-        if (authorization == null) {
-            return "";
-        }
-        String value = authorization.trim();
-        if (value.toLowerCase().startsWith("bearer ")) {
-            return value.substring(7).trim();
-        }
-        return value;
     }
 
     private boolean starts(String route, String... prefixes) {

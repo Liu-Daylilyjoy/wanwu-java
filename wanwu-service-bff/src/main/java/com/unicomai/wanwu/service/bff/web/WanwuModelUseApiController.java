@@ -553,11 +553,8 @@ public class WanwuModelUseApiController {
     }
 
     private UserContext userContext(String authorization) {
-        String token = authorization == null ? "" : authorization.replace("Bearer", "").trim();
-        if ("dev-token-app".equals(token)) {
-            return new UserContext(DEV_APP_USER_ID, DEV_ORG_ID);
-        }
-        return new UserContext(DEV_USER_ID, DEV_ORG_ID);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(authorization);
+        return new UserContext(resolved.getUserId(), resolved.getOrgId());
     }
 
     @SuppressWarnings("unchecked")

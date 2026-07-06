@@ -1291,10 +1291,9 @@ public class WanwuGeneralAgentApiController {
     }
 
     private UserContext userContext(String authorization, String headerUserId, String headerOrgId) {
-        String token = extractToken(authorization);
-        String userId = defaultIfBlank(headerUserId, "dev-token-app".equals(token) ? DEV_APP_USER_ID : DEV_USER_ID);
-        String orgId = defaultIfBlank(headerOrgId, DEV_ORG_ID);
-        return new UserContext(userId, orgId);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(
+                authorization, headerUserId, headerOrgId);
+        return new UserContext(resolved.getUserId(), resolved.getOrgId());
     }
 
     private String extractToken(String authorization) {

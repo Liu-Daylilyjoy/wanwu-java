@@ -374,9 +374,8 @@ public class WanwuResourceApiController {
     }
 
     private UserContext userContext(String authorization) {
-        String token = extractToken(authorization);
-        String userId = "dev-token-app".equals(token) ? DEV_APP_USER_ID : DEV_USER_ID;
-        return new UserContext(userId, DEV_ORG_ID);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(authorization);
+        return new UserContext(resolved.getUserId(), resolved.getOrgId());
     }
 
     private String extractToken(String authorization) {

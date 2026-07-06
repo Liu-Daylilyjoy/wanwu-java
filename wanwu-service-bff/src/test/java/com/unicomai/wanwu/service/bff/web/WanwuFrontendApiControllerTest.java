@@ -2724,6 +2724,24 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void createAssistantUsesAppUserForAppToken() throws Exception {
+        when(appService.createAssistant(any(AssistantCreateCommand.class)))
+                .thenReturn(new AssistantCreateResult("assistant-app-001"));
+
+        mockMvc.perform(post("/user/api/v1/assistant")
+                        .header("Authorization", "Bearer dev-token-app")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"category\":1,\"name\":\"AppAgent\",\"desc\":\"app scoped\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-app-001"));
+
+        org.mockito.ArgumentCaptor<AssistantCreateCommand> captor = forClass(AssistantCreateCommand.class);
+        verify(appService).createAssistant(captor.capture());
+        assertEquals("dev-app", captor.getValue().getUserId());
+        assertEquals("default-org", captor.getValue().getOrgId());
+    }
+
+    @Test
     public void updateAssistantReturnsFrontendSuccessAndMapsRequest() throws Exception {
         mockMvc.perform(put("/user/api/v1/assistant")
                         .header("Authorization", "Bearer dev-token")

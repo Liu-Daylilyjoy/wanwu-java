@@ -3520,11 +3520,8 @@ public class WanwuFrontendApiController {
     }
 
     private UserContext userContext(String authorization) {
-        String token = extractToken(authorization);
-        if (token == null || token.isEmpty()) {
-            return new UserContext(DEV_USER_ID, DEV_ORG_ID);
-        }
-        return new UserContext(DEV_USER_ID, DEV_ORG_ID);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(authorization);
+        return new UserContext(resolved.getUserId(), resolved.getOrgId());
     }
 
     private boolean isBlank(String value) {

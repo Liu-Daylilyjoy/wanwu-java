@@ -1276,10 +1276,8 @@ public class WanwuStatisticApiController {
     }
 
     private UserContext userContext(String authorization) {
-        if (authorization != null && authorization.contains("dev-token-app")) {
-            return new UserContext(DEV_APP_USER_ID, DEV_ORG_ID);
-        }
-        return new UserContext(DEV_USER_ID, DEV_ORG_ID);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(authorization);
+        return new UserContext(resolved.getUserId(), resolved.getOrgId());
     }
 
     private ResponseEntity<byte[]> xlsx(String fileName, String sheetName, List<List<Object>> rows) {

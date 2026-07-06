@@ -25,4 +25,4 @@ Frontend permissions are intentionally narrower than `web/src/router/constants.j
 
 The WGA compatibility controller now also omits the `ontology` global-config section from `/service/api/v1/general/agent/config`; legacy submissions containing `ontology` are accepted but discarded, so the unchanged frontend cannot render a hidden ontology-agent configuration tab from stale server state.
 
-Current limitation: BFF business write operations still map request context to the shared development organization and user until full token-to-user/org resolution is reproduced.
+Current limitation: built-in BFF requests now map `dev-token` to `dev-admin` and `dev-token-app` to `dev-app`, but both still share the Docker development organization `default-org`. Full Go-style token/session validation, multi-organization selection, dynamic IAM users, role membership, audit fields, and service-layer authorization remain later.

@@ -683,15 +683,8 @@ public class WanwuCommonApiController {
     }
 
     private UserContext userContext(String authorization, String userId) {
-        String token = authorization == null ? "" : authorization.replace("Bearer", "").trim();
-        boolean app = DEV_APP_TOKEN.equals(token) || DEV_APP_ID.equals(userId);
-        if (app) {
-            return new UserContext(DEV_APP_ID, "app", false);
-        }
-        if (DEV_ADMIN_TOKEN.equals(token) || isBlank(userId) || DEV_ADMIN_ID.equals(userId)) {
-            return new UserContext(DEV_ADMIN_ID, "admin", true);
-        }
-        return new UserContext(userId, userId, true);
+        BffUserContextResolver.ResolvedUser resolved = BffUserContextResolver.resolve(authorization, userId, DEV_ORG_ID);
+        return new UserContext(resolved.getUserId(), resolved.getUsername(), resolved.isAdmin());
     }
 
     private String loginUserId(Map<String, Object> request) {
