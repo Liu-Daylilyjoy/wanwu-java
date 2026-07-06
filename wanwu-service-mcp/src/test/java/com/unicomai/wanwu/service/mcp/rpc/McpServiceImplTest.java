@@ -131,6 +131,36 @@ public class McpServiceImplTest {
     }
 
     @Test
+    public void callMcpServerToolExecutesBoundBuiltinTools() {
+        String weatherServerId = text(service.createMcpServer(USER_ID, ORG_ID, map("name", "Builtin Weather MCP")),
+                "mcpServerId");
+        service.createMcpServerTool(USER_ID, ORG_ID, map("mcpServerId", weatherServerId, "id", "builtin-weather",
+                "type", "builtin", "methodName", "get_weather"));
+
+        Map<String, Object> weather = service.callMcpServerTool(USER_ID, ORG_ID, weatherServerId,
+                map("name", "get_weather", "arguments", map("city", "Hangzhou")));
+
+        assertEquals(false, weather.get("isError"));
+        assertTrue(text(firstList(weather, "content"), "text").contains("\"city\":\"Hangzhou\""));
+        Map<String, Object> weatherResponse = mapValue(mapValue(weather.get("structuredContent")).get("response"));
+        assertEquals("Hangzhou", text(weatherResponse, "city"));
+        assertEquals("wanwu-java-local", text(weatherResponse, "source"));
+
+        String searchServerId = text(service.createMcpServer(USER_ID, ORG_ID, map("name", "Builtin Search MCP")),
+                "mcpServerId");
+        service.createMcpServerTool(USER_ID, ORG_ID, map("mcpServerId", searchServerId, "id", "builtin-search",
+                "type", "builtin", "methodName", "search"));
+
+        Map<String, Object> search = service.callMcpServerTool(USER_ID, ORG_ID, searchServerId,
+                map("name", "search", "arguments", map("query", "resource")));
+
+        assertEquals(false, search.get("isError"));
+        Map<String, Object> searchResponse = mapValue(mapValue(search.get("structuredContent")).get("response"));
+        assertEquals("resource", text(searchResponse, "query"));
+        assertEquals(3, list(searchResponse.get("results")).size());
+    }
+
+    @Test
     public void callMcpServerToolExecutesBoundCustomOpenApiTool() throws Exception {
         AtomicReference<String> query = new AtomicReference<>("");
         AtomicReference<String> authorization = new AtomicReference<>("");

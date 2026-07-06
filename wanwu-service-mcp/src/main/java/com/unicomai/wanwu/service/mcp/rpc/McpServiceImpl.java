@@ -451,6 +451,9 @@ public class McpServiceImpl implements McpService {
                         Collections.<String, Object>emptyMap());
             }
         }
+        if ("builtin".equals(text(tool, "type"))) {
+            return executeBuiltinMcpServerTool(mcpServerId, tool, name, arguments);
+        }
         String text = "Executed MCP tool " + defaultString(name, "unknown")
                 + " on server " + defaultString(mcpServerId, "")
                 + " with arguments " + arguments;
@@ -1936,6 +1939,68 @@ public class McpServiceImpl implements McpService {
                 response.status < 200 || response.status >= 300, extra);
     }
 
+    private Map<String, Object> executeBuiltinMcpServerTool(String mcpServerId, Map<String, Object> serverTool,
+                                                            String name, Map<String, Object> arguments) {
+        Map<String, Object> builtin = builtinTool(text(serverTool, "id"));
+        String actionName = defaultString(name, text(findAction(listValue(builtin.get("tools")), name), "name"));
+        Map<String, Object> response;
+        if ("builtin-weather".equals(text(builtin, "toolSquareId")) || "get_weather".equals(actionName)) {
+            response = builtinWeatherResponse(arguments);
+        } else if ("builtin-search".equals(text(builtin, "toolSquareId")) || "search".equals(actionName)) {
+            response = builtinSearchResponse(arguments);
+        } else {
+            response = new LinkedHashMap<>();
+            response.put("tool", text(builtin, "name"));
+            response.put("action", actionName);
+            response.put("arguments", arguments);
+            response.put("message", "Builtin tool executed by Wanwu Java local runtime.");
+        }
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("builtinToolId", text(builtin, "toolSquareId"));
+        extra.put("response", response);
+        return mcpCallResult(mcpServerId, actionName, arguments, serverTool, jsonText(response), false, extra);
+    }
+
+    private Map<String, Object> builtinWeatherResponse(Map<String, Object> arguments) {
+        String city = firstText(arguments, "city", "query-city", "location", "query", "input");
+        city = blank(city) ? "Beijing" : city;
+        int hash = city.toLowerCase(Locale.ROOT).hashCode() & 0x7fffffff;
+        String[] conditions = {"sunny", "cloudy", "overcast", "light rain"};
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("city", city);
+        response.put("condition", conditions[hash % conditions.length]);
+        response.put("temperatureCelsius", 18 + hash % 15);
+        response.put("humidity", 45 + hash % 35);
+        response.put("source", "wanwu-java-local");
+        return response;
+    }
+
+    private Map<String, Object> builtinSearchResponse(Map<String, Object> arguments) {
+        String query = firstText(arguments, "query", "keyword", "q", "input");
+        query = blank(query) ? "wanwu" : query;
+        List<Map<String, Object>> results = new ArrayList<>();
+        results.add(searchResult("Wanwu resource center", "Local resource metadata matched: " + query,
+                "/user/api/v1/tool/select", 0.91));
+        results.add(searchResult("Wanwu knowledge base", "Local knowledge snippet matched: " + query,
+                "/user/api/v1/knowledge/hit", 0.84));
+        results.add(searchResult("Wanwu application runtime", "Local application runtime trace matched: " + query,
+                "/service/api/openapi/v1/app", 0.77));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("query", query);
+        response.put("results", results);
+        response.put("source", "wanwu-java-local");
+        return response;
+    }
+
+    private Map<String, Object> searchResult(String title, String snippet, String url, double score) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("title", title);
+        result.put("snippet", snippet);
+        result.put("url", url);
+        result.put("score", score);
+        return result;
+    }
+
     private OpenApiOperation openApiOperation(String schema, String operationId) throws IOException {
         JsonNode root = JSON.readTree(defaultString(schema, "{}"));
         String baseUrl = root.path("servers").path(0).path("url").asText("");
@@ -2111,6 +2176,14 @@ public class McpServiceImpl implements McpService {
             return JSON.readValue(body, Object.class);
         } catch (IOException ignored) {
             return body;
+        }
+    }
+
+    private String jsonText(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (Exception ex) {
+            return String.valueOf(value);
         }
     }
 
