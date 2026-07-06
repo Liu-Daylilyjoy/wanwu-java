@@ -10,6 +10,8 @@ import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -3170,6 +3172,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 return docxText;
             }
         }
+        if ("pdf".equals(extension)) {
+            String pdfText = pdfText(bytes);
+            if (!isBlank(pdfText)) {
+                return pdfText;
+            }
+        }
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
@@ -3220,6 +3228,19 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
             return joinText(document.getDocumentElement(), "t").trim();
         } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String pdfText(byte[] bytes) {
+        try {
+            PDDocument document = PDDocument.load(bytes);
+            try {
+                return new PDFTextStripper().getText(document).trim();
+            } finally {
+                document.close();
+            }
+        } catch (IOException ex) {
             return "";
         }
     }

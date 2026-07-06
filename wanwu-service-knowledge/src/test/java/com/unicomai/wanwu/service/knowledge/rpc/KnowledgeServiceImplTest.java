@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.DeflaterOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -637,6 +638,30 @@ public class KnowledgeServiceImplTest {
         assertEquals(1, searchList.size());
         assertEquals("Guide.docx", searchList.get(0).get("title"));
         assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find DOCX paragraphs."));
+    }
+
+    @Test
+    public void documentImportExtractsPdfBase64IntoSearchableSegments() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Pdf Docs", 0)).get("knowledgeId");
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-pdf", "Guide.pdf",
+                        pdfBase64("Wanwu Java imports PDF documents.",
+                                "RAG search can find PDF streams.")));
+
+        Map<String, Object> segments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-pdf", "PDF documents"));
+        assertEquals(1, segments.get("segmentTotalNum"));
+        assertTrue(String.valueOf(listOfMaps(segments.get("contentList")).get(0).get("content"))
+                .contains("Wanwu Java imports PDF documents."));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "PDF streams"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.pdf", searchList.get(0).get("title"));
+        assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find PDF streams."));
     }
 
     @Test
@@ -1397,6 +1422,62 @@ public class KnowledgeServiceImplTest {
         addZipEntry(zip, "word/document.xml", documentXml(paragraphs));
         zip.close();
         return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private String pdfBase64(String... lines) throws Exception {
+        byte[] content = deflate(pdfContentStream(lines).getBytes(StandardCharsets.US_ASCII));
+        ByteArrayOutputStream pdf = new ByteArrayOutputStream();
+        List<Integer> offsets = new java.util.ArrayList<Integer>();
+        writeAscii(pdf, "%PDF-1.4\n");
+        offsets.add(pdf.size());
+        writeAscii(pdf, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        offsets.add(pdf.size());
+        writeAscii(pdf, "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        offsets.add(pdf.size());
+        writeAscii(pdf, "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                + "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
+        offsets.add(pdf.size());
+        writeAscii(pdf, "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+        offsets.add(pdf.size());
+        writeAscii(pdf, "5 0 obj\n<< /Length " + content.length + " /Filter /FlateDecode >>\nstream\n");
+        pdf.write(content);
+        writeAscii(pdf, "\nendstream\nendobj\n");
+        int xref = pdf.size();
+        writeAscii(pdf, "xref\n0 6\n0000000000 65535 f \n");
+        for (Integer offset : offsets) {
+            writeAscii(pdf, String.format(java.util.Locale.ENGLISH, "%010d 00000 n \n", offset));
+        }
+        writeAscii(pdf, "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        return Base64.getEncoder().encodeToString(pdf.toByteArray());
+    }
+
+    private String pdfContentStream(String[] lines) {
+        StringBuilder stream = new StringBuilder("BT /F1 12 Tf 72 720 Td ");
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                stream.append("0 -18 Td ");
+            }
+            stream.append('(').append(escapePdf(lines[i])).append(") Tj ");
+        }
+        return stream.append("ET").toString();
+    }
+
+    private byte[] deflate(byte[] content) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        DeflaterOutputStream deflater = new DeflaterOutputStream(output);
+        deflater.write(content);
+        deflater.close();
+        return output.toByteArray();
+    }
+
+    private void writeAscii(ByteArrayOutputStream output, String text) throws Exception {
+        output.write(text.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private String escapePdf(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("(", "\\(")
+                .replace(")", "\\)");
     }
 
     private void addZipEntry(ZipOutputStream zip, String name, String content) throws Exception {
