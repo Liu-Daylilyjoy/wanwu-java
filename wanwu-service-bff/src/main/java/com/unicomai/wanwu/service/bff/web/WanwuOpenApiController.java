@@ -434,6 +434,7 @@ public class WanwuOpenApiController {
             command.setFileInfo(fileInfo);
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
+            attachConfiguredOpenApiAgentModelResponse(ctx, command, draft, startedAt);
             AssistantConversationStreamResult result = appService.streamAssistantConversation(command);
             boolean stream = forceStream || booleanValue(body.get("stream"), false);
             Map<String, Object> response = openApiAgentChat(result);
@@ -1379,6 +1380,48 @@ public class WanwuOpenApiController {
             command.setNonStreamCosts(stream ? 0L : costs);
             command.setSource(STAT_SOURCE_OPENAPI);
             appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void attachConfiguredOpenApiAgentModelResponse(OpenApiContext ctx,
+                                                           AssistantConversationStreamCommand command,
+                                                           boolean draft,
+                                                           long startedAt) {
+        if (ctx == null || command == null || appService == null || modelService == null
+                || isBlank(command.getAssistantId()) || isBlank(command.getPrompt())) {
+            return;
+        }
+        try {
+            Map<String, Object> assistant;
+            if (draft) {
+                assistant = appService.getAssistantDraft(new AssistantDetailQuery(
+                        command.getAssistantId(), ctx.userId, ctx.orgId));
+            } else {
+                assistant = appService.getPublishedAssistant(new AssistantPublishedQuery(
+                        command.getAssistantId(), null, ctx.userId, ctx.orgId));
+            }
+            String modelId = configuredModelId(assistant);
+            if (isBlank(modelId)) {
+                return;
+            }
+            ModelInfo model = modelService.getModel(ctx.userId, ctx.orgId, modelId);
+            if (model == null || !Boolean.TRUE.equals(model.getIsActive())) {
+                return;
+            }
+            OpenApiModelStreamResult streamResult = openApiModelUpstreamStream(model, modelId, command.getPrompt());
+            String answer = defaultIfBlank(streamResult.content, "");
+            OpenApiModelUsage usage = streamResult.usage;
+            if (isBlank(answer)) {
+                OpenApiModelAnswer modelAnswer = openApiModelUpstreamAnswer(model, modelId, command.getPrompt());
+                answer = defaultIfBlank(modelAnswer.content, "");
+                usage = modelAnswer.usage;
+            }
+            if (isBlank(answer)) {
+                return;
+            }
+            command.setOverrideResponse(answer);
+            recordModelStatistic(ctx, model, modelId, command.getPrompt(), answer, startedAt, usage);
         } catch (RuntimeException ignored) {
         }
     }

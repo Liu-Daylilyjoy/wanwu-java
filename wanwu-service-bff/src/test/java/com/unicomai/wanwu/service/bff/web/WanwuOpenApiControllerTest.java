@@ -14,6 +14,7 @@ import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantConversationStreamResult;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantCreateResult;
+import com.unicomai.wanwu.api.app.dto.AssistantPublishedQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationChatCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationCreateCommand;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationDeleteByIdCommand;
@@ -318,6 +319,70 @@ public class WanwuOpenApiControllerTest {
         assertEquals("hi", assistantCaptor.getValue().getPrompt());
         assertEquals(false, assistantCaptor.getValue().isDraft());
         assertEquals(1, assistantCaptor.getValue().getFileInfo().size());
+    }
+
+    @Test
+    public void agentOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+        AtomicReference<String> upstreamBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            upstreamBody.set(readBody(exchange.getRequestBody()));
+            respondSse(exchange, "data: {\"id\":\"chatcmpl-openapi-agent\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"openapi \"},"
+                    + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n"
+                    + "data: {\"id\":\"chatcmpl-openapi-agent\",\"object\":\"chat.completion.chunk\","
+                    + "\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"agent answer\"},"
+                    + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\n"
+                    + "data: [DONE]\n\n");
+        });
+        server.start();
+        try {
+            Map<String, Object> modelConfig = new LinkedHashMap<>();
+            modelConfig.put("modelId", "model-openapi-agent-001");
+            Map<String, Object> assistant = new LinkedHashMap<>();
+            assistant.put("assistantId", "assistant-openapi-model-001");
+            assistant.put("modelConfig", modelConfig);
+            when(appService.getPublishedAssistant(any(AssistantPublishedQuery.class))).thenReturn(assistant);
+
+            ModelInfo model = new ModelInfo();
+            model.setModelId("model-openapi-agent-001");
+            model.setModel("deepseek-chat");
+            model.setProvider("openai-compatible");
+            model.setModelType("llm");
+            model.setIsActive(true);
+            model.getConfig().put("endpointUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+            model.getConfig().put("apiKey", "local-key");
+            when(modelService.getModel(anyString(), anyString(), eq("model-openapi-agent-001"))).thenReturn(model);
+
+            when(appService.streamAssistantConversation(any(AssistantConversationStreamCommand.class)))
+                    .thenAnswer(invocation -> {
+                        AssistantConversationStreamCommand command = invocation.getArgument(0);
+                        AssistantConversationStreamResult result = new AssistantConversationStreamResult();
+                        result.setConversationId("conversation-openapi-model-001");
+                        result.setDetailId("detail-openapi-model-001");
+                        result.setResponse(command.getOverrideResponse());
+                        result.setSearchList(Collections.emptyList());
+                        return result;
+                    });
+
+            mockMvc.perform(post("/service/api/openapi/v1/agent/chat")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"uuid\":\"assistant-openapi-model-001\",\"query\":\"hello agent\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.response").value("openapi agent answer"))
+                    .andExpect(jsonPath("$.conversation_id").value("conversation-openapi-model-001"));
+
+            assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"content\":\"hello agent\""));
+            ArgumentCaptor<AssistantConversationStreamCommand> captor =
+                    forClass(AssistantConversationStreamCommand.class);
+            verify(appService).streamAssistantConversation(captor.capture());
+            assertEquals("openapi agent answer", captor.getValue().getOverrideResponse());
+            verify(appService).getPublishedAssistant(any(AssistantPublishedQuery.class));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
