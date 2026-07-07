@@ -5515,65 +5515,6 @@ public class AppServiceImpl implements AppService {
         }
 
         Map<String, Map<String, Object>> nodesById = workflowNodesById(nodes);
-        List<String> runNodeIds = workflowRunNodeIds(nodes, edges, input, edgeEvaluations);
-        if (runNodeIds.isEmpty()) {
-            for (Map<String, Object> node : nodes) {
-                runNodeIds.add(workflowNodeId(node, runNodeIds.size() + 1));
-            }
-        }
-
-        int order = 1;
-        Map<String, Object> context = new LinkedHashMap<>(input);
-        for (String nodeId : runNodeIds) {
-            Map<String, Object> node = nodesById.get(nodeId);
-            if (node == null) {
-                continue;
-            }
-            String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
-            String name = workflowNodeName(node, nodeId);
-            Map<String, Object> step = new LinkedHashMap<>();
-            Map<String, Object> nodeInput = workflowNodeInput(node, context);
-            Map<String, Object> nodeOutput = workflowNodeOutput(
-                    workflow, node, nodeId, type, name, nodeInput, order, userId, orgId);
-            step.put("order", order);
-            step.put("nodeId", nodeId);
-            step.put("name", name);
-            step.put("type", type);
-            step.put("status", "success");
-            step.put("input", nodeInput);
-            step.put("output", nodeOutput);
-            steps.add(step);
-            context.put(nodeId, nodeOutput);
-            context.putAll(nodeOutput);
-            order++;
-        }
-
-        for (int i = 0; i < nodes.size(); i++) {
-            String nodeId = workflowNodeId(nodes.get(i), i + 1);
-            if (!runNodeIds.contains(nodeId)) {
-                Map<String, Object> skipped = new LinkedHashMap<>();
-                skipped.put("nodeId", nodeId);
-                skipped.put("name", workflowNodeName(nodes.get(i), nodeId));
-                skipped.put("type", defaultIfBlank(textValue(nodes.get(i), "type", "nodeType"), "node"));
-                skippedNodeIds.add(skipped);
-            }
-        }
-        return new WorkflowExecution(steps, edgeEvaluations, skippedNodeIds);
-    }
-
-    private Map<String, Map<String, Object>> workflowNodesById(List<Map<String, Object>> nodes) {
-        Map<String, Map<String, Object>> nodesById = new LinkedHashMap<>();
-        for (int i = 0; i < nodes.size(); i++) {
-            nodesById.put(workflowNodeId(nodes.get(i), i + 1), nodes.get(i));
-        }
-        return nodesById;
-    }
-
-    private List<String> workflowRunNodeIds(List<Map<String, Object>> nodes,
-                                            List<Map<String, Object>> edges,
-                                            Map<String, Object> input,
-                                            List<Map<String, Object>> edgeEvaluations) {
-        List<String> runNodeIds = new ArrayList<>();
         Map<String, List<Map<String, Object>>> edgesBySource = new LinkedHashMap<>();
         List<String> targetIds = new ArrayList<>();
         for (Map<String, Object> edge : edges) {
@@ -5604,20 +5545,45 @@ public class AppServiceImpl implements AppService {
             queue.add(workflowNodeId(nodes.get(0), 1));
         }
 
+        int order = 1;
+        Map<String, Object> context = new LinkedHashMap<>(input);
+        List<String> runNodeIds = new ArrayList<>();
         int cursor = 0;
         while (cursor < queue.size()) {
             String nodeId = queue.get(cursor++);
             if (runNodeIds.contains(nodeId)) {
                 continue;
             }
+            Map<String, Object> node = nodesById.get(nodeId);
+            if (node == null) {
+                continue;
+            }
             runNodeIds.add(nodeId);
+            String type = defaultIfBlank(textValue(node, "type", "nodeType"), "node");
+            String name = workflowNodeName(node, nodeId);
+            Map<String, Object> step = new LinkedHashMap<>();
+            Map<String, Object> nodeInput = workflowNodeInput(node, context);
+            Map<String, Object> nodeOutput = workflowNodeOutput(
+                    workflow, node, nodeId, type, name, nodeInput, order, userId, orgId);
+            step.put("order", order);
+            step.put("nodeId", nodeId);
+            step.put("name", name);
+            step.put("type", type);
+            step.put("status", "success");
+            step.put("input", nodeInput);
+            step.put("output", nodeOutput);
+            steps.add(step);
+            context.put(nodeId, nodeOutput);
+            context.putAll(nodeOutput);
+            order++;
+
             List<Map<String, Object>> outgoing = edgesBySource.get(nodeId);
             if (outgoing == null || outgoing.isEmpty()) {
                 continue;
             }
             boolean hasExplicitCondition = workflowHasExplicitCondition(outgoing);
             for (Map<String, Object> edge : outgoing) {
-                boolean matched = workflowEdgeMatches(edge, input, hasExplicitCondition);
+                boolean matched = workflowEdgeMatches(edge, context, hasExplicitCondition);
                 edgeEvaluations.add(workflowEdgeEvaluation(edge, matched));
                 String target = workflowEdgeEndpoint(edge, false);
                 if (matched && !isBlank(target) && !runNodeIds.contains(target) && !queue.contains(target)) {
@@ -5625,7 +5591,26 @@ public class AppServiceImpl implements AppService {
                 }
             }
         }
-        return runNodeIds;
+
+        for (int i = 0; i < nodes.size(); i++) {
+            String nodeId = workflowNodeId(nodes.get(i), i + 1);
+            if (!runNodeIds.contains(nodeId)) {
+                Map<String, Object> skipped = new LinkedHashMap<>();
+                skipped.put("nodeId", nodeId);
+                skipped.put("name", workflowNodeName(nodes.get(i), nodeId));
+                skipped.put("type", defaultIfBlank(textValue(nodes.get(i), "type", "nodeType"), "node"));
+                skippedNodeIds.add(skipped);
+            }
+        }
+        return new WorkflowExecution(steps, edgeEvaluations, skippedNodeIds);
+    }
+
+    private Map<String, Map<String, Object>> workflowNodesById(List<Map<String, Object>> nodes) {
+        Map<String, Map<String, Object>> nodesById = new LinkedHashMap<>();
+        for (int i = 0; i < nodes.size(); i++) {
+            nodesById.put(workflowNodeId(nodes.get(i), i + 1), nodes.get(i));
+        }
+        return nodesById;
     }
 
     private boolean workflowHasExplicitCondition(List<Map<String, Object>> edges) {
@@ -5831,7 +5816,11 @@ public class AppServiceImpl implements AppService {
             return true;
         }
         String normalized = handle.trim().toLowerCase(java.util.Locale.ENGLISH);
+        Object branch = firstPresent(input, "branch", "route", "condition", "result", "status");
         if ("default".equals(normalized)) {
+            if (branch != null) {
+                return "default".equals(String.valueOf(branch).trim().toLowerCase(java.util.Locale.ENGLISH));
+            }
             return !workflowInputTruthy(input);
         }
         if ("true".equals(normalized) || "yes".equals(normalized) || "success".equals(normalized)
@@ -5842,7 +5831,6 @@ public class AppServiceImpl implements AppService {
                 || "failed".equals(normalized) || "rejected".equals(normalized)) {
             return !workflowInputTruthy(input);
         }
-        Object branch = firstPresent(input, "branch", "route", "condition", "result", "status");
         return branch != null && normalized.equals(String.valueOf(branch).trim().toLowerCase(java.util.Locale.ENGLISH));
     }
 
@@ -6176,6 +6164,8 @@ public class AppServiceImpl implements AppService {
             output.put("result", text);
             output.put("response", text);
             output.put("output", text);
+        } else if (workflowIsIntentNode(node, type, lowerType)) {
+            output.putAll(workflowIntentOutput(node, input));
         } else if (workflowIsConcatNode(type, lowerType)) {
             String text = workflowConcatText(node, input);
             output.put("text", text);
@@ -6224,6 +6214,107 @@ public class AppServiceImpl implements AppService {
 
     private boolean workflowIsLlmNode(String type, String lowerType) {
         return "3".equals(type) || lowerType.contains("llm") || lowerType.contains("model");
+    }
+
+    private boolean workflowIsIntentNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "22".equals(type) || semantic.contains("intent");
+    }
+
+    private Map<String, Object> workflowIntentOutput(Map<String, Object> node, Map<String, Object> input) {
+        Object queryValue = firstPresent(input, "query", "Query", "question", "input", "text");
+        String query = queryValue == null ? "" : String.valueOf(queryValue);
+        List<String> intents = workflowIntentNames(node);
+        int classificationId = workflowIntentClassification(query, intents);
+        String branch = classificationId >= 0 ? "branch_" + classificationId : "default";
+        String intent = classificationId >= 0 && classificationId < intents.size() ? intents.get(classificationId) : "";
+        String reason = isBlank(intent)
+                ? "No configured intent matched"
+                : "Matched intent " + intent;
+
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("classificationId", classificationId);
+        output.put("intent", intent);
+        output.put("branch", branch);
+        output.put("reason", reason);
+        output.put("output", intent);
+        output.put("result", intent);
+        output.put("response", intent);
+        output.put("text", intent);
+        return output;
+    }
+
+    private List<String> workflowIntentNames(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        List<Object> rawIntents = listValue(inputs.get("intents"));
+        if (rawIntents.isEmpty()) {
+            rawIntents = listValue(data.get("intents"));
+        }
+        if (rawIntents.isEmpty()) {
+            rawIntents = listValue(node.get("intents"));
+        }
+        List<String> intents = new ArrayList<>();
+        for (Object item : rawIntents) {
+            Map<String, Object> row = mapValue(item);
+            String name = row.isEmpty() ? stringValue(item) : textValue(row, "name", "label", "value", "intent");
+            if (!isBlank(name)) {
+                intents.add(name);
+            }
+        }
+        return intents;
+    }
+
+    private int workflowIntentClassification(String query, List<String> intents) {
+        if (intents.isEmpty()) {
+            return -1;
+        }
+        String normalizedQuery = defaultIfBlank(query, "").toLowerCase(java.util.Locale.ENGLISH);
+        for (int i = 0; i < intents.size(); i++) {
+            String intent = intents.get(i);
+            if (!isBlank(intent) && normalizedQuery.contains(intent.toLowerCase(java.util.Locale.ENGLISH))) {
+                return i;
+            }
+        }
+        for (int i = 0; i < intents.size(); i++) {
+            if (workflowIntentKeywordMatches(normalizedQuery, intents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean workflowIntentKeywordMatches(String query, String intent) {
+        String normalizedIntent = defaultIfBlank(intent, "").toLowerCase(java.util.Locale.ENGLISH);
+        if (normalizedIntent.contains("consult") || normalizedIntent.contains("question")
+                || normalizedIntent.contains("咨询")) {
+            return containsAny(query, "请问", "如何", "怎么", "政策", "流程", "材料", "咨询", "question", "how");
+        }
+        if (normalizedIntent.contains("complaint") || normalizedIntent.contains("投诉")) {
+            return containsAny(query, "投诉", "举报", "扰民", "噪音", "油烟", "不满", "差评", "complain", "complaint");
+        }
+        if (normalizedIntent.contains("help") || normalizedIntent.contains("求助")) {
+            return containsAny(query, "求助", "帮帮", "帮忙", "紧急", "急救", "困难", "help", "emergency");
+        }
+        if (normalizedIntent.contains("suggest") || normalizedIntent.contains("建议")) {
+            return containsAny(query, "建议", "希望", "增加", "优化", "改进", "suggest", "proposal");
+        }
+        if (normalizedIntent.contains("risk") || normalizedIntent.contains("风险")) {
+            return containsAny(query, "风险", "违约", "解除", "付款", "验收", "不公", "risk", "clause");
+        }
+        if (normalizedIntent.contains("compliance") || normalizedIntent.contains("合规")) {
+            return containsAny(query, "合规", "规定", "标准", "合法", "是否符合", "compliance", "legal");
+        }
+        return false;
+    }
+
+    private boolean containsAny(String text, String... candidates) {
+        for (String candidate : candidates) {
+            if (!isBlank(candidate) && text.contains(candidate.toLowerCase(java.util.Locale.ENGLISH))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean workflowIsConcatNode(String type, String lowerType) {

@@ -1243,6 +1243,80 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunUsesIntentNodeBranchOutputForHandles() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("IntentBranchFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"150610\",\"type\":\"22\",\"data\":{\"nodeMeta\":{\"title\":\"Intent\"},"
+                + "\"outputs\":[{\"type\":\"integer\",\"name\":\"classificationId\"},{\"type\":\"string\",\"name\":\"reason\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"intents\":[{\"name\":\"咨询\"},{\"name\":\"投诉\"}]}}},"
+                + "{\"id\":\"consult\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Consult\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"consult {{String1}}\"}}}]}}},"
+                + "{\"id\":\"complaint\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Complaint\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"complaint {{String1}}\"}}}]}}},"
+                + "{\"id\":\"unknown\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Unknown\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"unknown {{String1}}\"}}}]}}},"
+                + "{\"id\":\"end-complaint\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"complaint\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"id\":\"start-intent\",\"sourceNodeID\":\"100001\",\"targetNodeID\":\"150610\"},"
+                + "{\"id\":\"intent-consult\",\"sourceNodeID\":\"150610\",\"targetNodeID\":\"consult\",\"sourcePortID\":\"branch_0\"},"
+                + "{\"id\":\"intent-complaint\",\"sourceNodeID\":\"150610\",\"targetNodeID\":\"complaint\",\"sourcePortID\":\"branch_1\"},"
+                + "{\"id\":\"intent-default\",\"sourceNodeID\":\"150610\",\"targetNodeID\":\"unknown\",\"sourcePortID\":\"default\"},"
+                + "{\"id\":\"complaint-end\",\"sourceNodeID\":\"complaint\",\"targetNodeID\":\"end-complaint\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "我要投诉楼下噪音扰民"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("complaint 我要投诉楼下噪音扰民", output.get("output"), String.valueOf(output));
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals(4, steps.size(), String.valueOf(output));
+        assertEquals("100001", steps.get(0).get("nodeId"));
+        assertEquals("150610", steps.get(1).get("nodeId"));
+        assertEquals("complaint", steps.get(2).get("nodeId"));
+        assertEquals("end-complaint", steps.get(3).get("nodeId"));
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        Map<String, Object> intentOutput = castMap(nodeOutputs.get("150610"));
+        assertEquals(1, intentOutput.get("classificationId"));
+        assertEquals("branch_1", intentOutput.get("branch"));
+        assertFalse(nodeOutputs.containsKey("consult"));
+        assertFalse(nodeOutputs.containsKey("unknown"));
+    }
+
+    @Test
     public void convertAppTypeMovesWorkflowBetweenWorkflowAndChatflowLists() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
