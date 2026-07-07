@@ -6170,6 +6170,10 @@ public class AppServiceImpl implements AppService {
             output.put("output", text);
         } else if (workflowIsIntentNode(node, type, lowerType)) {
             output.putAll(workflowIntentOutput(node, input));
+        } else if (workflowIsSelectorNode(node, type, lowerType)) {
+            output.putAll(workflowSelectorOutput(node, input));
+        } else if (workflowIsInputNode(node, type, lowerType)) {
+            output.putAll(workflowInputNodeOutput(node, input));
         } else if (workflowIsConcatNode(type, lowerType)) {
             String text = workflowConcatText(node, input);
             output.put("text", text);
@@ -6323,6 +6327,151 @@ public class AppServiceImpl implements AppService {
             }
         }
         return false;
+    }
+
+    private boolean workflowIsSelectorNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "8".equals(type) || semantic.contains("selector") || semantic.contains("condition");
+    }
+
+    private Map<String, Object> workflowSelectorOutput(Map<String, Object> node, Map<String, Object> input) {
+        boolean matched = workflowSelectorMatches(node, input);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("result", matched);
+        output.put("condition", matched);
+        output.put("branch", matched ? "true" : "false");
+        output.put("output", matched);
+        output.put("response", matched);
+        output.put("text", String.valueOf(matched));
+        return output;
+    }
+
+    private boolean workflowSelectorMatches(Map<String, Object> node, Map<String, Object> input) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        List<Object> branches = listValue(inputs.get("branches"));
+        if (branches.isEmpty()) {
+            return workflowInputTruthy(input);
+        }
+        for (Object branch : branches) {
+            Map<String, Object> row = mapValue(branch);
+            if (workflowSelectorConditionMatches(mapValue(row.get("condition")), input)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean workflowSelectorConditionMatches(Map<String, Object> condition, Map<String, Object> input) {
+        List<Object> conditions = listValue(condition.get("conditions"));
+        if (conditions.isEmpty()) {
+            Object value = workflowSelectorLeftValue(condition, input);
+            return value != null && !isBlank(String.valueOf(value));
+        }
+        boolean any = intValue(condition.get("logic"), 2) == 1;
+        boolean matchedAny = false;
+        for (Object item : conditions) {
+            boolean matched = workflowSelectorSingleConditionMatches(mapValue(item), input);
+            if (any && matched) {
+                return true;
+            }
+            if (!any && !matched) {
+                return false;
+            }
+            matchedAny = matchedAny || matched;
+        }
+        return matchedAny;
+    }
+
+    private boolean workflowSelectorSingleConditionMatches(Map<String, Object> condition, Map<String, Object> input) {
+        Object value = workflowSelectorLeftValue(condition, input);
+        int operator = intValue(condition.get("operator"), 10);
+        if (operator == 11) {
+            return value == null || isBlank(String.valueOf(value));
+        }
+        if (operator == 10) {
+            return value != null && !isBlank(String.valueOf(value));
+        }
+        Object expected = firstPresent(condition, "right", "value", "expected");
+        if (expected == null) {
+            return truthy(value);
+        }
+        return conditionEquals(value, String.valueOf(workflowResolveConfiguredInput(expected, input)));
+    }
+
+    private Object workflowSelectorLeftValue(Map<String, Object> condition, Map<String, Object> input) {
+        Map<String, Object> left = mapValue(condition.get("left"));
+        Object raw = left.isEmpty() ? condition.get("left") : firstPresent(left, "input", "value", "default");
+        return workflowResolveConfiguredInput(raw, input);
+    }
+
+    private boolean workflowIsInputNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "30".equals(type) || semantic.contains("input");
+    }
+
+    private Map<String, Object> workflowInputNodeOutput(Map<String, Object> node, Map<String, Object> input) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (Map<String, Object> declaration : workflowInputNodeDeclarations(node)) {
+            String name = textValue(declaration, "name", "key", "field", "variable");
+            if (isBlank(name)) {
+                continue;
+            }
+            Object value = workflowInputNodeValue(name, declaration, input);
+            fields.put(name, value);
+        }
+        Map<String, Object> output = new LinkedHashMap<>(fields);
+        output.put("output", new LinkedHashMap<>(fields));
+        output.put("result", new LinkedHashMap<>(fields));
+        output.put("response", new LinkedHashMap<>(fields));
+        output.put("text", workflowJsonText(fields));
+        return output;
+    }
+
+    private List<Map<String, Object>> workflowInputNodeDeclarations(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        List<Map<String, Object>> declarations = new ArrayList<>();
+        for (Object item : listValue(data.get("outputs"))) {
+            Map<String, Object> row = mapValue(item);
+            if (!row.isEmpty()) {
+                declarations.add(row);
+            }
+        }
+        if (!declarations.isEmpty()) {
+            return declarations;
+        }
+        String outputSchema = textValue(mapValue(data.get("inputs")), "outputSchema");
+        if (isBlank(outputSchema)) {
+            return declarations;
+        }
+        try {
+            for (Object item : objectMapper.readValue(outputSchema, OBJECT_LIST_TYPE)) {
+                Map<String, Object> row = mapValue(item);
+                if (!row.isEmpty()) {
+                    declarations.add(row);
+                }
+            }
+        } catch (IOException ignored) {
+            return declarations;
+        }
+        return declarations;
+    }
+
+    private Object workflowInputNodeValue(String name,
+                                          Map<String, Object> declaration,
+                                          Map<String, Object> input) {
+        Object value = firstPresent(input, name);
+        if (value == null || isBlank(String.valueOf(value))) {
+            value = workflowInputValue(input, name);
+        }
+        if ((value == null || isBlank(String.valueOf(value))) && "city".equalsIgnoreCase(name)) {
+            value = firstPresent(input, "location", "city");
+        }
+        if ((value == null || isBlank(String.valueOf(value)))
+                && Boolean.TRUE.equals(declaration.get("required"))) {
+            return "unknown";
+        }
+        return value == null ? "" : value;
     }
 
     private boolean workflowIsConcatNode(String type, String lowerType) {

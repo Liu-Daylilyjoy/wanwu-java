@@ -1161,6 +1161,63 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunRoutesSelectorToInputNodeWhenValueMissing() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("SelectorInputFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"city\"}]}},"
+                + "{\"id\":\"172810\",\"type\":\"8\",\"data\":{\"nodeMeta\":{\"title\":\"判断信息齐全\"},"
+                + "\"inputs\":{\"branches\":[{\"condition\":{\"logic\":2,\"conditions\":[{\"operator\":10,"
+                + "\"left\":{\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"city\"}}}}}]}}]}}},"
+                + "{\"id\":\"152577\",\"type\":\"30\",\"data\":{\"nodeMeta\":{\"title\":\"补充地区信息\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"city\",\"required\":true}],"
+                + "\"inputs\":{\"outputSchema\":\"[{\\\"type\\\":\\\"string\\\",\\\"name\\\":\\\"city\\\",\\\"required\\\":true}]\"}}},"
+                + "{\"id\":\"has-city\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Has City\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"city\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"city {{String1}}\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"152577\",\"name\":\"city\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"id\":\"start-selector\",\"sourceNodeID\":\"100001\",\"targetNodeID\":\"172810\"},"
+                + "{\"id\":\"selector-input\",\"sourceNodeID\":\"172810\",\"targetNodeID\":\"152577\",\"sourcePortID\":\"false\"},"
+                + "{\"id\":\"selector-has-city\",\"sourceNodeID\":\"172810\",\"targetNodeID\":\"has-city\",\"sourcePortID\":\"true\"},"
+                + "{\"id\":\"input-end\",\"sourceNodeID\":\"152577\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("city", ""));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("unknown", output.get("output"), String.valueOf(output));
+        List<Map<String, Object>> steps = castList(output.get("steps"));
+        assertEquals("152577", steps.get(2).get("nodeId"));
+        Map<String, Object> selectorOutput = castMap(castMap(output.get("nodeOutputs")).get("172810"));
+        assertEquals(Boolean.FALSE, selectorOutput.get("result"));
+        assertEquals("false", selectorOutput.get("branch"));
+        assertFalse(castMap(output.get("nodeOutputs")).containsKey("has-city"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
