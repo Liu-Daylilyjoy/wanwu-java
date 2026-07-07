@@ -12,7 +12,7 @@
 `wanwu-service-rag` now implements the RPC surface as a thin facade over `AppService`:
 
 - `CreateRag`, `UpdateRag`, `DeleteRag`, `CopyRag`, `GetRagDetail`, `ListRag`, and `GetRagByIds` delegate to the existing RAG draft lifecycle.
-- `UpdateRagConfig` accepts both Java lower-camel fields and Go proto fields such as `QArerankConfig`, `QAknowledgeBaseConfig`, and `sensitiveConfig`.
+- `UpdateRagConfig` accepts both Java lower-camel fields and Go proto fields such as `QArerankConfig`, `QAknowledgeBaseConfig`, and `sensitiveConfig`; AppService RAG chat now also consumes Go proto `perKnowledgeConfigs/globalConfig` knowledge and QA config shapes during local recall.
 - `PublishRag` maps to `publishApp(appType=rag)`.
 - `UpdatePublishRag` maps to `updateAppVersion(appType=rag)`.
 - `ListPublishRagHistory`, `GetPublishRagDesc`, and `GetPublishRagDescBatch` map to app version queries and return Go-style `historyList`, `version`, `desc`, and `createAt` fields.
@@ -21,7 +21,7 @@
 
 This avoids creating a second RAG persistence model. Drafts, configs, snapshots, publish status, and chat records remain owned by `wanwu-service-app`.
 
-The frontend and public OpenAPI RAG chat paths also mirror the Go runtime's use of the configured model ID far enough for real development loops: BFF reads the draft/published RAG `modelConfig.modelId`, calls the Java OpenAI-compatible upstream path with `stream:true`, aggregates the provider deltas, and passes that answer into AppService before knowledge/QA enrichment, safety output replacement, and chat-record persistence. If the model config is absent, inactive, or unreachable, AppService keeps the deterministic local fallback so development Docker remains usable offline.
+The frontend and public OpenAPI RAG chat paths also mirror the Go runtime's use of the configured model ID far enough for real development loops: BFF reads the draft/published RAG `modelConfig.modelId`, calls the Java OpenAI-compatible upstream path with `stream:true`, aggregates the provider deltas, and passes that answer into AppService before knowledge/QA enrichment, safety output replacement, and chat-record persistence. The enrichment step accepts both frontend `knowledgebases/config` and Go proto `perKnowledgeConfigs/globalConfig` shapes, preserving `graphSwitch` and metadata filters for the Java knowledge hit request. If the model config is absent, inactive, or unreachable, AppService keeps the deterministic local fallback so development Docker remains usable offline.
 
 ## Verification
 
@@ -32,6 +32,7 @@ The frontend and public OpenAPI RAG chat paths also mirror the Go runtime's use 
 - `WanwuFrontendApiControllerTest#ragDraftChatUsesConfiguredOpenAiCompatibleModelBeforePersisting`
 - `WanwuOpenApiControllerTest#ragOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting`
 - `AppServiceImplTest#ragChatPersistsConfiguredModelUpstreamResponse`
+- `AppServiceImplTest#ragChatAcceptsGoProtoKnowledgeAndQaConfigShapes`
 
 ## Remaining Gap
 

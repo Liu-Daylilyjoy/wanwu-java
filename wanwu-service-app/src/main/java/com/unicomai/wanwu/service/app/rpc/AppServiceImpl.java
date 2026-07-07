@@ -4031,7 +4031,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("question", question);
         request.put("knowledgeList", knowledgeList);
-        request.put("knowledgeMatchParams", mapValue(config.get("config")));
+        request.put("knowledgeMatchParams", knowledgeMatchParams(config));
         Map<String, Object> hit = qa
                 ? knowledgeService.hitQaPairs(userId, orgId, request)
                 : knowledgeService.hitKnowledge(userId, orgId, request);
@@ -4040,9 +4040,13 @@ public class AppServiceImpl implements AppService {
 
     private List<Map<String, Object>> knowledgeHitList(Map<String, Object> config) {
         List<Map<String, Object>> knowledgeList = new ArrayList<>();
-        for (Object item : listValue(config.get("knowledgebases"))) {
+        for (Object item : configuredKnowledgeItems(config)) {
             Map<String, Object> source = mapValue(item);
-            String knowledgeId = defaultIfBlank(stringValue(source.get("knowledgeId")), stringValue(source.get("id")));
+            String knowledgeId = firstNonBlank(
+                    stringValue(source.get("knowledgeId")),
+                    stringValue(source.get("id")),
+                    stringValue(source.get("knowledgeBaseId")),
+                    stringValue(source.get("qaId")));
             if (isBlank(knowledgeId)) {
                 continue;
             }
@@ -4054,9 +4058,69 @@ public class AppServiceImpl implements AppService {
             copyIfPresent(source, target, "external", "external");
             copyIfPresent(source, target, "graphSwitch", "graphSwitch");
             copyIfPresent(source, target, "metaDataFilterParams", "metaDataFilterParams");
+            copyIfPresent(source, target, "ragMetaFilter", "metaDataFilterParams");
             knowledgeList.add(target);
         }
         return knowledgeList;
+    }
+
+    private List<Object> configuredKnowledgeItems(Map<String, Object> config) {
+        List<Object> items = listValue(config.get("knowledgebases"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("knowledgeBases"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("knowledgeBaseList"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("knowledgeList"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("perKnowledgeConfigs"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("perQAKnowledgeConfigs"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        items = listValue(config.get("perQaKnowledgeConfigs"));
+        if (!items.isEmpty()) {
+            return items;
+        }
+        return listValue(config.get("perQAknowledgeConfigs"));
+    }
+
+    private Map<String, Object> knowledgeMatchParams(Map<String, Object> config) {
+        Map<String, Object> params = mapValue(config.get("config"));
+        if (!params.isEmpty()) {
+            return params;
+        }
+        params = mapValue(config.get("globalConfig"));
+        if (!params.isEmpty()) {
+            return params;
+        }
+        params = mapValue(config.get("knowledgeMatchParams"));
+        if (!params.isEmpty()) {
+            return params;
+        }
+        Map<String, Object> topLevel = new LinkedHashMap<>();
+        copyIfPresent(config, topLevel, "maxHistory", "maxHistory");
+        copyIfPresent(config, topLevel, "threshold", "threshold");
+        copyIfPresent(config, topLevel, "topK", "topK");
+        copyIfPresent(config, topLevel, "matchType", "matchType");
+        copyIfPresent(config, topLevel, "keywordPriority", "keywordPriority");
+        copyIfPresent(config, topLevel, "priorityMatch", "priorityMatch");
+        copyIfPresent(config, topLevel, "semanticsPriority", "semanticsPriority");
+        copyIfPresent(config, topLevel, "termWeight", "termWeight");
+        copyIfPresent(config, topLevel, "termWeightEnable", "termWeightEnable");
+        copyIfPresent(config, topLevel, "useGraph", "useGraph");
+        return topLevel;
     }
 
     private void copyIfPresent(Map<String, Object> source,

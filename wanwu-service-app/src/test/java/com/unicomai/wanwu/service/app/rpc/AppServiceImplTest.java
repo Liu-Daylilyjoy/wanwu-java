@@ -603,6 +603,73 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void ragChatAcceptsGoProtoKnowledgeAndQaConfigShapes() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("GoShapeRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setKnowledgeBaseConfig(goProtoKnowledgeConfig("kb-go-001", 3));
+        config.setQaKnowledgeBaseConfig(goProtoQaKnowledgeConfig("qa-go-001", 2));
+        service.updateRagConfig(config);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "GoKnowledge.txt");
+        hitItem.put("knowledgeName", "Go KB");
+        hitItem.put("content", "Go-shaped knowledge config should be searchable.");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(hitItem));
+        hit.put("prompt", "Go-shaped knowledge config should be searchable.");
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        Map<String, Object> qaItem = new LinkedHashMap<>();
+        qaItem.put("qaPairId", "qa-pair-go-001");
+        qaItem.put("QABase", "Go QA");
+        qaItem.put("answer", "Go-shaped QA config should be searchable.");
+        Map<String, Object> qaHit = new LinkedHashMap<>();
+        qaHit.put("searchList", Collections.singletonList(qaItem));
+        qaHit.put("prompt", "Go-shaped QA config should be searchable.");
+        when(knowledgeService.hitQaPairs(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(qaHit);
+
+        RagChatResult result = service.streamRagChat(ragChatCommand(created.getRagId(), "go shape question", true));
+
+        assertEquals(1, result.getSearchList().size());
+        assertEquals("GoKnowledge.txt", result.getSearchList().get(0).get("title"));
+        assertEquals(1, result.getQaSearchList().size());
+        assertEquals("qa-pair-go-001", result.getQaSearchList().get(0).get("qaPairId"));
+        assertTrue(result.getResponse().contains("Go-shaped knowledge config should be searchable."));
+
+        ArgumentCaptor<Map> knowledgeCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), knowledgeCaptor.capture());
+        Map<String, Object> knowledgeRequest = knowledgeCaptor.getValue();
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) knowledgeRequest.get("knowledgeList");
+        assertEquals("kb-go-001", knowledgeList.get(0).get("knowledgeId"));
+        assertEquals(1, knowledgeList.get(0).get("graphSwitch"));
+        assertEquals(Boolean.TRUE, ((Map<String, Object>) knowledgeList.get(0).get("metaDataFilterParams")).get("filterEnable"));
+        assertEquals(3, ((Map<String, Object>) knowledgeRequest.get("knowledgeMatchParams")).get("topK"));
+        assertEquals("mix", ((Map<String, Object>) knowledgeRequest.get("knowledgeMatchParams")).get("matchType"));
+
+        ArgumentCaptor<Map> qaCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitQaPairs(eq("dev-admin"), eq("default-org"), qaCaptor.capture());
+        Map<String, Object> qaRequest = qaCaptor.getValue();
+        List<Map<String, Object>> qaKnowledgeList = (List<Map<String, Object>>) qaRequest.get("knowledgeList");
+        assertEquals("qa-go-001", qaKnowledgeList.get(0).get("knowledgeId"));
+        assertEquals(Boolean.TRUE, ((Map<String, Object>) qaKnowledgeList.get(0).get("metaDataFilterParams")).get("filterEnable"));
+        assertEquals(2, ((Map<String, Object>) qaRequest.get("knowledgeMatchParams")).get("topK"));
+        assertEquals("text", ((Map<String, Object>) qaRequest.get("knowledgeMatchParams")).get("matchType"));
+    }
+
+    @Test
     public void workflowLifecycleSupportsFrontendAppspaceLoop() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
@@ -3948,6 +4015,64 @@ public class AppServiceImplTest {
         config.put("knowledgebases", Collections.singletonList(knowledge));
         config.put("config", params);
         return config;
+    }
+
+    private Map<String, Object> goProtoKnowledgeConfig(String knowledgeId, int topK) {
+        Map<String, Object> knowledge = new LinkedHashMap<>();
+        knowledge.put("knowledgeId", knowledgeId);
+        knowledge.put("graphSwitch", 1);
+        knowledge.put("ragMetaFilter", goProtoMetaFilter());
+
+        Map<String, Object> globalConfig = new LinkedHashMap<>();
+        globalConfig.put("maxHistory", 2);
+        globalConfig.put("threshold", 0.45);
+        globalConfig.put("topK", topK);
+        globalConfig.put("matchType", "mix");
+        globalConfig.put("keywordPriority", 0.7);
+        globalConfig.put("priorityMatch", 1);
+        globalConfig.put("semanticsPriority", 0.3);
+        globalConfig.put("termWeight", 0.5);
+        globalConfig.put("termWeightEnable", true);
+        globalConfig.put("useGraph", true);
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("perKnowledgeConfigs", Collections.singletonList(knowledge));
+        config.put("globalConfig", globalConfig);
+        return config;
+    }
+
+    private Map<String, Object> goProtoQaKnowledgeConfig(String knowledgeId, int topK) {
+        Map<String, Object> knowledge = new LinkedHashMap<>();
+        knowledge.put("knowledgeId", knowledgeId);
+        knowledge.put("ragMetaFilter", goProtoMetaFilter());
+
+        Map<String, Object> globalConfig = new LinkedHashMap<>();
+        globalConfig.put("maxHistory", 1);
+        globalConfig.put("threshold", 0.6);
+        globalConfig.put("topK", topK);
+        globalConfig.put("matchType", "text");
+        globalConfig.put("keywordPriority", 1.0);
+        globalConfig.put("priorityMatch", 0);
+        globalConfig.put("semanticsPriority", 0.0);
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("perKnowledgeConfigs", Collections.singletonList(knowledge));
+        config.put("globalConfig", globalConfig);
+        return config;
+    }
+
+    private Map<String, Object> goProtoMetaFilter() {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("key", "city");
+        item.put("type", "string");
+        item.put("value", "Beijing");
+        item.put("condition", "eq");
+
+        Map<String, Object> filter = new LinkedHashMap<>();
+        filter.put("filterEnable", true);
+        filter.put("filterLogicType", "and");
+        filter.put("filterItems", Collections.singletonList(item));
+        return filter;
     }
 
     private Map<String, Object> safetyConfig(String tableId) {
