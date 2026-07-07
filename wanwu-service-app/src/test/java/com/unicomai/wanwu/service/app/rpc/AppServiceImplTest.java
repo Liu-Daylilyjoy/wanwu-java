@@ -728,6 +728,57 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunUsesLatestPublishedSnapshotWhenDraftChanges() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("PublishedSnapshotFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"}}},"
+                + "{\"id\":\"llm\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Published\"},"
+                + "\"outputs\":[{\"name\":\"answer\",\"template\":\"published {{question}}\"}]}}"
+                + "],"
+                + "\"edges\":[{\"sourceNodeID\":\"start\",\"targetNodeID\":\"llm\"}],"
+                + "\"outputs\":[{\"name\":\"answer\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        AppPublishCommand publish = new AppPublishCommand();
+        publish.setAppId(created.getWorkflowId());
+        publish.setAppType("workflow");
+        publish.setUserId("dev-admin");
+        publish.setOrgId("default-org");
+        publish.setVersion("v1.0.0");
+        publish.setPublishType("public");
+        service.publishApp(publish);
+
+        WorkflowDraftRecord draft = repository.findWorkflowDraft("dev-admin", "default-org", created.getWorkflowId());
+        draft.setSchemaJson("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"}}},"
+                + "{\"id\":\"llm\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Draft\"},"
+                + "\"outputs\":[{\"name\":\"answer\",\"template\":\"draft {{question}}\"}]}}"
+                + "],"
+                + "\"edges\":[{\"sourceNodeID\":\"start\",\"targetNodeID\":\"llm\"}],"
+                + "\"outputs\":[{\"name\":\"answer\",\"type\":\"string\"}]"
+                + "}");
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.singletonMap("question", "hello"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("published hello", output.get("answer"));
+    }
+
+    @Test
     public void workflowRunMapsDeclaredNodeOutputsFromSchemaTemplates() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
@@ -781,6 +832,49 @@ public class AppServiceImplTest {
         assertEquals("llm", nodeResults.get(1).get("nodeId"));
         assertTrue(String.valueOf(nodeResults.get(1).get("output")).contains("Summary for hello"));
         assertEquals("900001", nodeResults.get(nodeResults.size() - 1).get("nodeId"));
+    }
+
+    @Test
+    public void workflowRunExecutesVariableMergeNodeFromGoTemplateSchema() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("VariableMergeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"start\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"}}},"
+                + "{\"id\":\"emptyCity\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Empty\"},"
+                + "\"outputs\":[{\"name\":\"city\",\"value\":\"\"}]}},"
+                + "{\"id\":\"fallbackCity\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Fallback\"},"
+                + "\"outputs\":[{\"name\":\"city\",\"value\":\"Beijing\"}]}},"
+                + "{\"id\":\"merge\",\"type\":\"32\",\"data\":{\"nodeMeta\":{\"title\":\"Variable Merge\",\"subTitle\":\"Variable Merge\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"Group1\"}],"
+                + "\"inputs\":{\"inputParameters\":null,\"mergeGroups\":[{\"name\":\"Group1\",\"variables\":["
+                + "{\"type\":\"string\",\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"emptyCity\",\"name\":\"city\"}}},"
+                + "{\"type\":\"string\",\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"fallbackCity\",\"name\":\"city\"}}}"
+                + "]}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"start\",\"targetNodeID\":\"emptyCity\"},"
+                + "{\"sourceNodeID\":\"start\",\"targetNodeID\":\"fallbackCity\"},"
+                + "{\"sourceNodeID\":\"emptyCity\",\"targetNodeID\":\"merge\"},"
+                + "{\"sourceNodeID\":\"fallbackCity\",\"targetNodeID\":\"merge\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"Group1\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("Beijing", output.get("Group1"));
     }
 
     @Test

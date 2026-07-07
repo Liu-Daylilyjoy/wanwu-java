@@ -1801,7 +1801,7 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("workflow draft not found");
         }
         long startedAt = clock.millis();
-        WorkflowDraftRecord draft = applicationRepository.findWorkflowDraft(userId, orgId, command.getWorkflowId());
+        WorkflowDraftRecord draft = workflowRuntimeDraft(userId, orgId, command.getWorkflowId());
         Map<String, Object> input = command.getInput() == null
                 ? Collections.<String, Object>emptyMap()
                 : command.getInput();
@@ -1830,6 +1830,19 @@ public class AppServiceImpl implements AppService {
         result.setFinishedAt(finishedAt);
         result.setCostMillis(record.getCostMillis());
         return result;
+    }
+
+    private WorkflowDraftRecord workflowRuntimeDraft(String userId, String orgId, String workflowId) {
+        WorkflowSnapshotRecord latest = applicationRepository.findLatestWorkflowSnapshot(userId, orgId, workflowId);
+        if (latest != null && !isBlank(latest.getWorkflowSchemaJson())) {
+            WorkflowDraftRecord draft = new WorkflowDraftRecord();
+            draft.setUserId(userId);
+            draft.setOrgId(orgId);
+            draft.setWorkflowId(workflowId);
+            draft.setSchemaJson(latest.getWorkflowSchemaJson());
+            return draft;
+        }
+        return applicationRepository.findWorkflowDraft(userId, orgId, workflowId);
     }
 
     @Override
