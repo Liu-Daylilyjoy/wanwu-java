@@ -784,6 +784,104 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunBuildsStructuredLlmObjectOutputsFromSchema() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("StructuredLlmObjectFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"111424\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Extract Parameters\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"output\",\"schema\":["
+                + "{\"type\":\"string\",\"name\":\"city\"},"
+                + "{\"type\":\"string\",\"name\":\"place\"}"
+                + "]}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}]}}},"
+                + "{\"id\":\"122024\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Join\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"111424\",\"name\":\"output.place\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"Place {{String1}}\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"122024\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"111424\"},"
+                + "{\"sourceNodeID\":\"111424\",\"targetNodeID\":\"122024\"},"
+                + "{\"sourceNodeID\":\"122024\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "Shanghai Tower"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("Place Shanghai Tower", output.get("output"));
+        Map<String, Object> llmOutput = castMap(castMap(output.get("nodeOutputs")).get("111424"));
+        Map<String, Object> structured = castMap(llmOutput.get("output"));
+        assertEquals("Shanghai Tower", structured.get("place"));
+        assertEquals("Shanghai Tower", structured.get("city"));
+    }
+
+    @Test
+    public void workflowRunBuildsLlmListOutputsFromSchema() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("StructuredLlmListFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"topic\"}]}},"
+                + "{\"id\":\"138600\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Generate Titles\"},"
+                + "\"outputs\":[{\"type\":\"list\",\"name\":\"output\",\"schema\":{\"type\":\"string\"}}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"topic\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"topic\"}}}}],"
+                + "\"llmParam\":[{\"name\":\"prompt\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"Ideas for {{topic}}\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"138600\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"138600\"},"
+                + "{\"sourceNodeID\":\"138600\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"list\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("topic", "new product"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals(Collections.singletonList("Ideas for new product"), output.get("output"));
+        Map<String, Object> llmOutput = castMap(castMap(output.get("nodeOutputs")).get("138600"));
+        assertEquals(Collections.singletonList("Ideas for new product"), llmOutput.get("output"));
+    }
+
+    @Test
     public void workflowRunPropagatesNodeOutputsToLaterNodes() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

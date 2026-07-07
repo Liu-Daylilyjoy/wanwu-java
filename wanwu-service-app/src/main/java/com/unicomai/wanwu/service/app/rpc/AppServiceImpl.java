@@ -7986,10 +7986,143 @@ public class AppServiceImpl implements AppService {
         if (raw == null || (raw instanceof String && isBlank(String.valueOf(raw)))) {
             raw = firstPresent(input, name);
         }
+        raw = workflowCoerceDeclaredOutput(declaration, raw, input, baseOutput);
         if (raw == null) {
             raw = workflowDefaultValue(textValue(declaration, "type", "valueType"));
         }
         target.put(name, workflowResolveNodeValue(raw, input, baseOutput));
+    }
+
+    private Object workflowCoerceDeclaredOutput(Map<String, Object> declaration,
+                                                Object raw,
+                                                Map<String, Object> input,
+                                                Map<String, Object> baseOutput) {
+        String type = textValue(declaration, "type", "valueType");
+        if (workflowIsObjectType(type) && !(raw instanceof Map)) {
+            return workflowDeclaredObjectValue(declaration, raw, input, baseOutput);
+        }
+        if (workflowIsListType(type) && !(raw instanceof List)) {
+            return workflowDeclaredListValue(raw, input, baseOutput);
+        }
+        return raw;
+    }
+
+    private boolean workflowIsObjectType(String type) {
+        String normalized = defaultIfBlank(type, "").toLowerCase(java.util.Locale.ENGLISH);
+        return "object".equals(normalized) || "map".equals(normalized);
+    }
+
+    private boolean workflowIsListType(String type) {
+        String normalized = defaultIfBlank(type, "").toLowerCase(java.util.Locale.ENGLISH);
+        return "array".equals(normalized) || "list".equals(normalized);
+    }
+
+    private Map<String, Object> workflowDeclaredObjectValue(Map<String, Object> declaration,
+                                                            Object raw,
+                                                            Map<String, Object> input,
+                                                            Map<String, Object> baseOutput) {
+        Map<String, Object> object = new LinkedHashMap<>();
+        Object seed = workflowStructuredObjectSeed(raw, input, baseOutput);
+        for (Object item : workflowDeclarationSchemaItems(declaration)) {
+            Map<String, Object> field = mapValue(item);
+            String name = textValue(field, "name", "key", "field", "variable");
+            if (isBlank(name)) {
+                continue;
+            }
+            object.put(name, workflowDeclaredFieldValue(name, field, seed, input, baseOutput));
+        }
+        if (object.isEmpty() && seed instanceof Map) {
+            object.putAll(mapValue(seed));
+        }
+        return object;
+    }
+
+    private Object workflowStructuredObjectSeed(Object raw,
+                                                Map<String, Object> input,
+                                                Map<String, Object> baseOutput) {
+        Object seed = firstPresent(input, "input", "query", "question", "text", "topic", "message", "prompt");
+        if (seed == null && !input.isEmpty()) {
+            seed = input.values().iterator().next();
+        }
+        return seed == null ? workflowStructuredSeed(raw, input, baseOutput) : seed;
+    }
+
+    private List<Object> workflowDeclarationSchemaItems(Map<String, Object> declaration) {
+        Object schema = declaration.get("schema");
+        List<Object> items = listValue(schema);
+        if (!items.isEmpty()) {
+            return items;
+        }
+        Map<String, Object> schemaMap = mapValue(schema);
+        return listValue(schemaMap.get("schema"));
+    }
+
+    private Object workflowDeclaredFieldValue(String name,
+                                              Map<String, Object> field,
+                                              Object seed,
+                                              Map<String, Object> input,
+                                              Map<String, Object> baseOutput) {
+        Object raw = firstPresent(field, "value", "default", "example");
+        if (raw == null) {
+            String source = workflowConditionText(field, "source", "from", "path", "input");
+            if (!isBlank(source)) {
+                raw = workflowContextValue(source, input, baseOutput);
+            }
+        }
+        if (raw == null) {
+            String template = workflowConditionText(field, "template", "text", "content", "expression");
+            if (!isBlank(template)) {
+                raw = template;
+            }
+        }
+        if (raw == null) {
+            raw = firstPresent(input, name);
+        }
+        if (raw == null) {
+            raw = firstPresent(baseOutput, name);
+        }
+        if (raw == null && seed instanceof Map) {
+            raw = mapValue(seed).get(name);
+        }
+        String type = textValue(field, "type", "valueType");
+        if ((raw == null || (raw instanceof String && isBlank(String.valueOf(raw))))
+                && "string".equals(defaultIfBlank(type, "string").toLowerCase(java.util.Locale.ENGLISH))
+                && seed != null) {
+            raw = seed;
+        }
+        if (raw == null) {
+            raw = workflowDefaultValue(type);
+        }
+        return workflowResolveNodeValue(raw, input, baseOutput);
+    }
+
+    private List<Object> workflowDeclaredListValue(Object raw,
+                                                   Map<String, Object> input,
+                                                   Map<String, Object> baseOutput) {
+        Object value = workflowStructuredSeed(raw, input, baseOutput);
+        if (value == null || (value instanceof String && isBlank(String.valueOf(value)))) {
+            return Collections.emptyList();
+        }
+        if (value instanceof List) {
+            return listValue(value);
+        }
+        return Collections.<Object>singletonList(value);
+    }
+
+    private Object workflowStructuredSeed(Object raw,
+                                          Map<String, Object> input,
+                                          Map<String, Object> baseOutput) {
+        if (raw != null && !(raw instanceof String && isBlank(String.valueOf(raw)))) {
+            return workflowResolveNodeValue(raw, input, baseOutput);
+        }
+        Object seed = firstPresent(input, "input", "query", "question", "text", "topic", "message", "prompt");
+        if (seed == null) {
+            seed = firstPresent(baseOutput, "text", "response", "result", "output");
+        }
+        if (seed == null && !input.isEmpty()) {
+            seed = input.values().iterator().next();
+        }
+        return seed;
     }
 
     private Object workflowResolveNodeValue(Object raw,
