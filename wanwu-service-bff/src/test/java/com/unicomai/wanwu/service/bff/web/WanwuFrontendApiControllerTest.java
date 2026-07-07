@@ -4493,6 +4493,10 @@ public class WanwuFrontendApiControllerTest {
                             .header("Authorization", "Bearer dev-token")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\","
+                                    + "\"fileInfo\":[{\"fileName\":\"diagram.png\",\"fileSize\":2048,"
+                                    + "\"fileUrl\":\"https://files.example.test/diagram.png\"},"
+                                    + "{\"fileName\":\"notes.txt\",\"fileSize\":512,"
+                                    + "\"fileUrl\":\"https://files.example.test/notes.txt\"}],"
                                     + "\"history\":[{\"query\":\"previous question\",\"response\":\"previous answer\",\"needHistory\":true},"
                                     + "{\"query\":\"ignored question\",\"response\":\"ignored answer\",\"needHistory\":false}]}"))
                     .andExpect(status().isOk())
@@ -4502,11 +4506,13 @@ public class WanwuFrontendApiControllerTest {
             assertTrue(upstreamBody.get().contains("\"stream\":true"));
             assertTrue(upstreamBody.get().contains("\"role\":\"user\",\"content\":\"previous question\""));
             assertTrue(upstreamBody.get().contains("\"role\":\"assistant\",\"content\":\"previous answer\""));
-            assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
+            assertTrue(upstreamBody.get().contains("\"type\":\"text\",\"text\":\"what is policy\""));
+            assertTrue(upstreamBody.get().contains("\"type\":\"image_url\",\"image_url\":{\"url\":\"https://files.example.test/diagram.png\"}"));
+            assertTrue(!upstreamBody.get().contains("notes.txt"));
             assertTrue(upstreamBody.get().indexOf("\"content\":\"previous question\"")
                     < upstreamBody.get().indexOf("\"content\":\"previous answer\""));
             assertTrue(upstreamBody.get().indexOf("\"content\":\"previous answer\"")
-                    < upstreamBody.get().indexOf("\"content\":\"what is policy\""));
+                    < upstreamBody.get().indexOf("\"type\":\"text\",\"text\":\"what is policy\""));
             assertTrue(!upstreamBody.get().contains("ignored question"));
             ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
             verify(appService).streamRagChat(captor.capture());

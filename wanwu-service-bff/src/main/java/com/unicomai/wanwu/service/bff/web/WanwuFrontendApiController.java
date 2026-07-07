@@ -4123,7 +4123,8 @@ public class WanwuFrontendApiController {
                 return;
             }
             OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
-                    chatClient.complete(model, modelId, ragChatMessages(command.getHistory(), command.getQuestion()));
+                    chatClient.complete(model, modelId,
+                            ragChatMessages(command.getHistory(), command.getQuestion(), command.getFileInfo()));
             String answer = defaultIfBlank(chatResult.getContent(), "");
             if (isBlank(answer)) {
                 return;
@@ -4134,7 +4135,9 @@ public class WanwuFrontendApiController {
         }
     }
 
-    private List<Map<String, Object>> ragChatMessages(List<Map<String, Object>> history, String question) {
+    private List<Map<String, Object>> ragChatMessages(List<Map<String, Object>> history,
+                                                      String question,
+                                                      List<Map<String, Object>> fileInfo) {
         List<Map<String, Object>> messages = new ArrayList<>();
         if (history != null) {
             for (Map<String, Object> item : history) {
@@ -4145,8 +4148,58 @@ public class WanwuFrontendApiController {
                 addChatMessage(messages, "assistant", firstText(item, "response", "answer", "content"));
             }
         }
-        addChatMessage(messages, "user", question);
+        addRagQuestionMessage(messages, question, fileInfo);
         return messages;
+    }
+
+    private void addRagQuestionMessage(List<Map<String, Object>> messages,
+                                       String question,
+                                       List<Map<String, Object>> fileInfo) {
+        List<Map<String, Object>> imageParts = ragImageParts(fileInfo);
+        if (imageParts.isEmpty()) {
+            addChatMessage(messages, "user", question);
+            return;
+        }
+        List<Map<String, Object>> content = new ArrayList<>();
+        if (!isBlank(question)) {
+            Map<String, Object> text = new LinkedHashMap<>();
+            text.put("type", "text");
+            text.put("text", question);
+            content.add(text);
+        }
+        content.addAll(imageParts);
+        if (content.isEmpty()) {
+            return;
+        }
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", content);
+        messages.add(message);
+    }
+
+    private List<Map<String, Object>> ragImageParts(List<Map<String, Object>> fileInfo) {
+        if (fileInfo == null || fileInfo.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> parts = new ArrayList<>();
+        for (Map<String, Object> file : fileInfo) {
+            String fileUrl = firstText(file, "fileUrl", "file_url", "url");
+            if (!isRagImageUrl(fileUrl)) {
+                continue;
+            }
+            Map<String, Object> imageUrl = new LinkedHashMap<>();
+            imageUrl.put("url", fileUrl);
+            Map<String, Object> part = new LinkedHashMap<>();
+            part.put("type", "image_url");
+            part.put("image_url", imageUrl);
+            parts.add(part);
+        }
+        return parts;
+    }
+
+    private boolean isRagImageUrl(String fileUrl) {
+        String value = defaultIfBlank(fileUrl, "").toLowerCase(Locale.ROOT);
+        return value.endsWith(".png") || value.endsWith(".jpg") || value.endsWith(".jpeg");
     }
 
     private void addChatMessage(List<Map<String, Object>> messages, String role, String content) {

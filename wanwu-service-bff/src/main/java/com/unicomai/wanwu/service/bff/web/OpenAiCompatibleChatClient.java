@@ -115,14 +115,60 @@ final class OpenAiCompatibleChatClient {
                 continue;
             }
             String role = firstText(source, "role");
-            String content = firstText(source, "content");
-            if (isBlank(role) || isBlank(content)) {
+            Object content = sanitizeContent(source.get("content"));
+            if (isBlank(role) || content == null) {
                 continue;
             }
             Map<String, Object> message = new LinkedHashMap<>();
             message.put("role", role);
             message.put("content", content);
             result.add(message);
+        }
+        return result;
+    }
+
+    private Object sanitizeContent(Object content) {
+        if (content instanceof List) {
+            List<Map<String, Object>> parts = sanitizeContentParts((List<?>) content);
+            return parts.isEmpty() ? null : parts;
+        }
+        String text = content == null ? "" : String.valueOf(content);
+        return isBlank(text) ? null : text;
+    }
+
+    private List<Map<String, Object>> sanitizeContentParts(List<?> parts) {
+        if (parts == null || parts.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object raw : parts) {
+            if (!(raw instanceof Map)) {
+                continue;
+            }
+            Map<String, Object> part = objectMap(raw);
+            String type = firstText(part, "type");
+            if ("text".equals(type)) {
+                String text = firstText(part, "text");
+                if (!isBlank(text)) {
+                    Map<String, Object> safe = new LinkedHashMap<>();
+                    safe.put("type", "text");
+                    safe.put("text", text);
+                    result.add(safe);
+                }
+                continue;
+            }
+            if ("image_url".equals(type)) {
+                Map<String, Object> imageUrl = objectMap(part.get("image_url"));
+                String url = firstNonBlank(firstText(imageUrl, "url"), firstText(part, "url", "fileUrl"));
+                if (!isBlank(url)) {
+                    Map<String, Object> safeImageUrl = new LinkedHashMap<>();
+                    safeImageUrl.put("url", url);
+                    Map<String, Object> safe = new LinkedHashMap<>();
+                    safe.put("type", "image_url");
+                    safe.put("image_url", safeImageUrl);
+                    result.add(safe);
+                }
+            }
         }
         return result;
     }
