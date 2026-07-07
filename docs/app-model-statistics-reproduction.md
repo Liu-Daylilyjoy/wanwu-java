@@ -41,6 +41,7 @@ Runtime recording currently covers:
 - frontend published assistant stream: `source=web`, `appType=agent`
 - frontend published RAG chat: `source=web`, `appType=rag`
 - frontend workflow run: `source=web`, `appType=workflow`
+- frontend `/workflow/api/api/workflow/use` compatibility run: `source=web`, `appType=workflow`
 - frontend model experience LLM: model statistic with provider `usage` when available, otherwise deterministic local token estimate
 - frontend assistant stream with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 - frontend RAG chat with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate

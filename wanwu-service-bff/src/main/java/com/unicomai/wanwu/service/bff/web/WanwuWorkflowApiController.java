@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowExportQuery;
 import com.unicomai.wanwu.api.app.dto.WorkflowExportResult;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
@@ -34,6 +35,8 @@ public class WanwuWorkflowApiController {
 
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
+    private static final String WORKFLOW_APP_TYPE = "workflow";
+    private static final String STAT_SOURCE_WEB = "web";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
@@ -75,17 +78,47 @@ public class WanwuWorkflowApiController {
             @RequestHeader(value = "x-user-id", required = false) String userId,
             @RequestHeader(value = "x-org-id", required = false) String orgId,
             @RequestBody(required = false) Map<String, Object> request) {
+        long startedAt = System.currentTimeMillis();
+        String safeUserId = defaultIfBlank(userId, DEV_USER_ID);
+        String safeOrgId = defaultIfBlank(orgId, DEV_ORG_ID);
+        String workflowId = "";
         try {
             Map<String, Object> body = request == null ? Collections.<String, Object>emptyMap() : request;
-            String workflowId = workflowId(body);
+            workflowId = workflowId(body);
             WorkflowRunCommand command = new WorkflowRunCommand();
             command.setWorkflowId(workflowId);
             command.setInput(workflowInput(body));
+            command.setUserId(safeUserId);
+            command.setOrgId(safeOrgId);
+            WorkflowRunResult result = appService.runWorkflow(command);
+            recordWorkflowStatistic(safeUserId, safeOrgId, workflowId, true, startedAt);
+            return FrontendResponse.ok(workflowRunResult(result));
+        } catch (IllegalArgumentException ex) {
+            recordWorkflowStatistic(safeUserId, safeOrgId, workflowId, false, startedAt);
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
+    }
+
+    private void recordWorkflowStatistic(String userId,
+                                         String orgId,
+                                         String workflowId,
+                                         boolean success,
+                                         long startedAt) {
+        if (appService == null || isBlank(workflowId)) {
+            return;
+        }
+        try {
+            RecordAppStatisticCommand command = new RecordAppStatisticCommand();
             command.setUserId(defaultIfBlank(userId, DEV_USER_ID));
             command.setOrgId(defaultIfBlank(orgId, DEV_ORG_ID));
-            return FrontendResponse.ok(workflowRunResult(appService.runWorkflow(command)));
-        } catch (IllegalArgumentException ex) {
-            return FrontendResponse.failure(1001, ex.getMessage());
+            command.setAppId(workflowId);
+            command.setAppType(WORKFLOW_APP_TYPE);
+            command.setSuccess(success);
+            command.setStream(false);
+            command.setNonStreamCosts(elapsedMillis(startedAt));
+            command.setSource(STAT_SOURCE_WEB);
+            appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
         }
     }
 
@@ -467,5 +500,9 @@ public class WanwuWorkflowApiController {
 
     private String defaultIfBlank(String value, String defaultValue) {
         return isBlank(value) ? defaultValue : value;
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return Math.max(0L, System.currentTimeMillis() - startedAt);
     }
 }

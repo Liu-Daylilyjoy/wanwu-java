@@ -31,7 +31,7 @@ Covered routes in this Java slice:
 - Model list data is sourced from `ModelService.listModels`.
 - API Key select/list data is sourced from `AppService.listApiKeys`.
 - API Key overview, trend, aggregate list, detailed records, and exports now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`; non-stream OpenAPI JSON/text responses are captured into detailed `responseBody`.
-- App/model overview, trend, aggregate lists, and exports now prefer AppService/MySQL runtime statistics written by frontend, OpenAPI, and OpenURL runtime paths.
+- App/model overview, trend, aggregate lists, and exports now prefer AppService/MySQL runtime statistics written by frontend, `/workflow/api` compatibility, OpenAPI, and OpenURL runtime paths.
 - `OpenApiUsageMeter` remains as a BFF-local fallback if the AppService statistic path is temporarily unavailable.
 - Export routes return single-sheet xlsx workbooks compatible with the Go excelize export contract.
 
@@ -56,7 +56,7 @@ The controller is also included in the Docker Compose BFF smoke path for:
 - `/statistic/app`, `/statistic/model`, and `/statistic/api` return overview/trend contracts.
 - App/model/API lists return frontend-compatible `list/total/pageNo/pageSize`.
 - OpenAPI API Key statistics record runtime calls through `OpenApiUsageRecordFilter`; see `docs/openapi-api-key-statistics-reproduction.md`.
-- App/model statistics record frontend, OpenAPI, and OpenURL runtime calls through AppService/MySQL; see `docs/app-model-statistics-reproduction.md`.
+- App/model statistics record frontend, `/workflow/api`, OpenAPI, and OpenURL runtime calls through AppService/MySQL; see `docs/app-model-statistics-reproduction.md`.
 
 ## Remaining Work
 

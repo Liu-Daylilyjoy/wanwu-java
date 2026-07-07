@@ -58,6 +58,7 @@ import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
@@ -1624,10 +1625,21 @@ public class WanwuFrontendApiControllerTest {
         org.mockito.ArgumentCaptor<WorkflowRunCommand> runCaptor = forClass(WorkflowRunCommand.class);
         verify(appService).runWorkflow(runCaptor.capture());
         verify(appService).getWorkflowRunProcess("dev-admin", "default-org", "workflow-001", "workflow-run-001");
+        org.mockito.ArgumentCaptor<RecordAppStatisticCommand> statisticCaptor =
+                forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(statisticCaptor.capture());
         assertEquals("workflow-001", runCaptor.getValue().getWorkflowId());
         assertEquals("hello", runCaptor.getValue().getInput().get("question"));
         assertEquals("dev-admin", runCaptor.getValue().getUserId());
         assertEquals("default-org", runCaptor.getValue().getOrgId());
+        assertEquals("workflow-001", statisticCaptor.getValue().getAppId());
+        assertEquals("workflow", statisticCaptor.getValue().getAppType());
+        assertEquals("dev-admin", statisticCaptor.getValue().getUserId());
+        assertEquals("default-org", statisticCaptor.getValue().getOrgId());
+        assertEquals("web", statisticCaptor.getValue().getSource());
+        assertEquals(false, statisticCaptor.getValue().isStream());
+        assertTrue(statisticCaptor.getValue().isSuccess());
+        assertTrue(statisticCaptor.getValue().getNonStreamCosts() >= 0L);
 
         MockMvc uploadMvc = MockMvcBuilders
                 .standaloneSetup(new WanwuBotUploadController())
