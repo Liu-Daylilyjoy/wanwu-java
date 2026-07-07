@@ -581,8 +581,14 @@ public class WanwuFrontendApiController {
     }
 
     @PostMapping("/model/validate-thinking")
-    public FrontendResponse<Map<String, Object>> validateModelThinking() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> validateModelThinking(
+            @RequestBody(required = false) ModelUpsertRequest request) {
+        try {
+            validateModelThinkingRequest(request);
+            return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+        } catch (IllegalArgumentException ex) {
+            return FrontendResponse.failure(1001, ex.getMessage());
+        }
     }
 
     @PostMapping("/model/experience/dialog")
@@ -4146,6 +4152,76 @@ public class WanwuFrontendApiController {
             return extractChatAnswer(response);
         } catch (RuntimeException | IOException ignored) {
             return ModelExperienceAnswer.empty();
+        }
+    }
+
+    private void validateModelThinkingRequest(ModelUpsertRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("model config is required");
+        }
+        String modelType = defaultIfBlank(request.getModelType(), "");
+        if (!"llm".equalsIgnoreCase(modelType)) {
+            throw new IllegalArgumentException("thinking validation requires llm model");
+        }
+        String model = defaultIfBlank(request.getModel(), "");
+        if (isBlank(model)) {
+            throw new IllegalArgumentException("model is required");
+        }
+        Map<String, Object> config = request.getConfig();
+        String endpoint = firstText(config, "endpointUrl", "inferUrl", "baseUrl", "url");
+        String apiKey = firstText(config, "apiKey");
+        if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
+            return;
+        }
+        validateModelThinkingAgainstUpstream(endpoint, apiKey, model, true);
+        validateModelThinkingAgainstUpstream(endpoint, apiKey, model, false);
+    }
+
+    private void validateModelThinkingAgainstUpstream(String endpoint, String apiKey, String model,
+                                                      boolean enableThinking) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", model);
+        payload.put("messages", Collections.singletonList(modelExperienceMessage("user", "say hi")));
+        payload.put("stream", false);
+        payload.put("enable_thinking", enableThinking);
+        String response;
+        try {
+            response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
+                    apiKey, JSON.writeValueAsString(payload));
+        } catch (RuntimeException | IOException ex) {
+            if (enableThinking) {
+                throw new IllegalArgumentException("thinking validation (enable) failed: "
+                        + defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName())
+                        + ", maybe model does not support thinking functionality");
+            }
+            throw new IllegalArgumentException("thinking validation (disable) failed: "
+                    + defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()));
+        }
+        validateModelThinkingResponse(response, enableThinking);
+    }
+
+    private void validateModelThinkingResponse(String response, boolean enableThinking) {
+        JsonNode root;
+        try {
+            root = JSON.readTree(defaultIfBlank(response, "{}"));
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("thinking validation: invalid response format");
+        }
+        JsonNode choice = root.path("choices").path(0);
+        JsonNode message = choice.path("message");
+        if (message.isMissingNode() || message.isNull()) {
+            message = choice.path("delta");
+        }
+        String reasoning = firstNonNull(textual(message.path("reasoning_content")),
+                textual(message.path("reasoningContent")));
+        if (enableThinking) {
+            if (isBlank(reasoning)) {
+                throw new IllegalArgumentException("model does not support thinking functionality when enable_thinking=true");
+            }
+            return;
+        }
+        if (!isBlank(reasoning)) {
+            throw new IllegalArgumentException("model does not support turning off thinking functionality");
         }
     }
 

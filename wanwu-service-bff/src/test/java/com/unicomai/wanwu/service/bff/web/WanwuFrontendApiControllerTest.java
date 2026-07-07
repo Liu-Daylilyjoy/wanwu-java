@@ -1880,6 +1880,96 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void modelValidateThinkingChecksEnableAndDisableResponses() throws Exception {
+        AtomicReference<String> enableBody = new AtomicReference<>();
+        AtomicReference<String> disableBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = readBody(exchange);
+            if (body.contains("\"enable_thinking\":true")) {
+                enableBody.set(body);
+                respondJson(exchange, "{\"id\":\"chatcmpl-enable\",\"object\":\"chat.completion\","
+                        + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"hi\",\"reasoning_content\":\"thinking\"},\"finish_reason\":\"stop\"}]}");
+            } else {
+                disableBody.set(body);
+                respondJson(exchange, "{\"id\":\"chatcmpl-disable\",\"object\":\"chat.completion\","
+                        + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+            }
+        });
+        server.start();
+        try {
+            mockMvc.perform(post("/user/api/v1/model/validate-thinking")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"provider\":\"openai-compatible\",\"modelType\":\"llm\","
+                                    + "\"model\":\"deepseek-chat\",\"displayName\":\"DeepSeek Chat\","
+                                    + "\"config\":{\"endpointUrl\":\"http://127.0.0.1:"
+                                    + server.getAddress().getPort()
+                                    + "/v1\",\"apiKey\":\"real-key\"}}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(0));
+
+            assertTrue(enableBody.get().contains("\"model\":\"deepseek-chat\""));
+            assertTrue(enableBody.get().contains("\"enable_thinking\":true"));
+            assertTrue(disableBody.get().contains("\"enable_thinking\":false"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void modelValidateThinkingRejectsProviderWithoutReasoningWhenEnabled() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> respondJson(exchange,
+                "{\"id\":\"chatcmpl-no-reasoning\",\"object\":\"chat.completion\","
+                        + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}"));
+        server.start();
+        try {
+            mockMvc.perform(post("/user/api/v1/model/validate-thinking")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"provider\":\"openai-compatible\",\"modelType\":\"llm\","
+                                    + "\"model\":\"plain-chat\",\"displayName\":\"Plain Chat\","
+                                    + "\"config\":{\"endpointUrl\":\"http://127.0.0.1:"
+                                    + server.getAddress().getPort()
+                                    + "/v1\",\"apiKey\":\"real-key\"}}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(1001))
+                    .andExpect(jsonPath("$.msg", containsString("enable_thinking=true")));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void modelValidateThinkingRejectsProviderThatCannotDisableReasoning() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> respondJson(exchange,
+                "{\"id\":\"chatcmpl-forced-reasoning\",\"object\":\"chat.completion\","
+                        + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"hi\",\"reasoning_content\":\"thinking\"},\"finish_reason\":\"stop\"}]}"));
+        server.start();
+        try {
+            mockMvc.perform(post("/user/api/v1/model/validate-thinking")
+                            .header("Authorization", "Bearer dev-token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"provider\":\"openai-compatible\",\"modelType\":\"llm\","
+                                    + "\"model\":\"forced-thinking\",\"displayName\":\"Forced Thinking\","
+                                    + "\"config\":{\"endpointUrl\":\"http://127.0.0.1:"
+                                    + server.getAddress().getPort()
+                                    + "/v1\",\"apiKey\":\"real-key\"}}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(1001))
+                    .andExpect(jsonPath("$.msg", containsString("turning off thinking")));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void workflowAsrModelSelectMapsPathTypeAndUserContext() throws Exception {
         when(modelService.listTypeModels(any()))
                 .thenReturn(new ModelListResult(Collections.singletonList(modelInfo("asr-001", "XunFei ASR", "sync-asr")), 1));
