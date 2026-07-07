@@ -551,9 +551,17 @@ public class WanwuOpenApiController {
         OpenApiContext ctx = context(headers);
         Map<String, Object> body = body(request);
         long startedAt = System.currentTimeMillis();
-        Map<String, Object> data = serviceChatflowChat(ctx, body);
-        recordAppStatistic(ctx, text(body, "uuid"), CHATFLOW_APP_TYPE, true, true, startedAt);
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + toJson(data) + "\n\n");
+        String chatflowId = text(body, "uuid");
+        try {
+            Map<String, Object> data = serviceChatflowChat(ctx, body);
+            recordAppStatistic(ctx, chatflowId, CHATFLOW_APP_TYPE, true, true, startedAt);
+            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + toJson(data) + "\n\n");
+        } catch (IllegalArgumentException ex) {
+            recordAppStatistic(ctx, chatflowId, CHATFLOW_APP_TYPE, false, true, startedAt);
+            return ResponseEntity.badRequest()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(toJson(errorBody(ex.getMessage())));
+        }
     }
 
     @PostMapping("/chatflow/file/upload")
@@ -1346,6 +1354,8 @@ public class WanwuOpenApiController {
                 if (result != null) {
                     return result;
                 }
+            } catch (IllegalArgumentException ex) {
+                throw ex;
             } catch (RuntimeException ignored) {
             }
         }

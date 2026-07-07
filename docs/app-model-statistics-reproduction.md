@@ -50,6 +50,7 @@ Runtime recording currently covers:
 - OpenAPI RAG chat: `source=openapi`, `appType=rag`
 - OpenAPI RAG chat with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 - OpenAPI workflow run: `source=openapi`, `appType=workflow`
+- OpenAPI Chatflow chat: `source=openapi`, `appType=chatflow`, including service-layer validation failures as failed stream calls
 - public OpenURL assistant stream: `source=webURL`, `appType=agent`
 - public OpenURL assistant stream with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 
@@ -86,4 +87,5 @@ Targeted tests:
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-app -am -DfailIfNoTests=false -Dtest=AppServiceImplTest#appAndModelStatisticsPersistAggregates test
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -DfailIfNoTests=false -Dtest=WanwuStatisticApiControllerTest test
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -DfailIfNoTests=false -Dtest=WanwuOpenUrlApiControllerTest test
+docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am "-Dtest=WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest" -DfailIfNoTests=false test
 ```

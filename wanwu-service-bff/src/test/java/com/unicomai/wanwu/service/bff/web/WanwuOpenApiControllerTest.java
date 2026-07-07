@@ -22,6 +22,7 @@ import com.unicomai.wanwu.api.app.dto.ChatflowConversationListQuery;
 import com.unicomai.wanwu.api.app.dto.ChatflowConversationMessageListQuery;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
@@ -659,6 +660,32 @@ public class WanwuOpenApiControllerTest {
         verify(appService).listChatflowOpenApiConversationMessages(any(ChatflowConversationMessageListQuery.class));
         verify(appService, times(2)).listChatflowOpenApiConversations(any(ChatflowConversationListQuery.class));
         verify(appService).deleteChatflowOpenApiConversation(any(ChatflowConversationDeleteByIdCommand.class));
+    }
+
+    @Test
+    public void chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest() throws Exception {
+        when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class)))
+                .thenThrow(new IllegalArgumentException("query is required"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_id\":\"conversation-chatflow-openapi-001\",\"query\":\"hello\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.message").value("query is required"));
+
+        ArgumentCaptor<RecordAppStatisticCommand> statisticCaptor = forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(statisticCaptor.capture());
+        assertEquals("dev-admin", statisticCaptor.getValue().getUserId());
+        assertEquals("default-org", statisticCaptor.getValue().getOrgId());
+        assertEquals("chatflow-openapi-001", statisticCaptor.getValue().getAppId());
+        assertEquals("chatflow", statisticCaptor.getValue().getAppType());
+        assertEquals(false, statisticCaptor.getValue().isSuccess());
+        assertEquals(true, statisticCaptor.getValue().isStream());
+        assertTrue(statisticCaptor.getValue().getStreamCosts() >= 0L);
+        assertEquals(0L, statisticCaptor.getValue().getNonStreamCosts());
+        assertEquals("openapi", statisticCaptor.getValue().getSource());
     }
 
     @Test
