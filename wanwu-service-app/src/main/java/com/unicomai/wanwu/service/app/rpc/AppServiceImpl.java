@@ -4042,6 +4042,15 @@ public class AppServiceImpl implements AppService {
         request.put("knowledgeList", knowledgeList);
         request.put("knowledgeMatchParams", knowledgeMatchParams(config, rerankConfigJson));
         request.put("attachmentList", ragAttachmentList(fileInfo));
+        request.put("returnMeta", true);
+        List<Map<String, Object>> metadataFilters = ragMetadataFilterConditions(knowledgeList, qa);
+        if (qa) {
+            request.put("metadataFiltering", !metadataFilters.isEmpty());
+            request.put("metadataFilteringConditions", metadataFilters);
+        } else {
+            request.put("metadata_filtering", !metadataFilters.isEmpty());
+            request.put("metadata_filtering_conditions", metadataFilters);
+        }
         Map<String, Object> hit = qa
                 ? knowledgeService.hitQaPairs(userId, orgId, request)
                 : knowledgeService.hitKnowledge(userId, orgId, request);
@@ -4072,6 +4081,86 @@ public class AppServiceImpl implements AppService {
     private boolean isRagImageAttachment(String fileUrl) {
         String value = defaultIfBlank(fileUrl, "").toLowerCase(Locale.ROOT);
         return value.endsWith(".png") || value.endsWith(".jpg") || value.endsWith(".jpeg");
+    }
+
+    private List<Map<String, Object>> ragMetadataFilterConditions(List<Map<String, Object>> knowledgeList,
+                                                                  boolean qa) {
+        if (knowledgeList == null || knowledgeList.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> filters = new ArrayList<>();
+        for (Map<String, Object> knowledge : knowledgeList) {
+            Map<String, Object> filter = mapValue(knowledge.get("metaDataFilterParams"));
+            if (filter.isEmpty() || !enabled(filter.get("filterEnable"))) {
+                continue;
+            }
+            List<Map<String, Object>> items = ragMetadataFilterItems(listValue(filter.get("filterItems")));
+            if (items.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put(qa ? "filtering_qa_base_name" : "filtering_kb_name", firstNonBlank(
+                    stringValue(knowledge.get("knowledgeName")),
+                    stringValue(knowledge.get("knowledgeId"))));
+            row.put("logical_operator", defaultIfBlank(stringValue(filter.get("filterLogicType")), "and"));
+            row.put("conditions", items);
+            filters.add(row);
+        }
+        return filters;
+    }
+
+    private List<Map<String, Object>> ragMetadataFilterItems(List<Object> rawItems) {
+        if (rawItems == null || rawItems.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Object raw : rawItems) {
+            Map<String, Object> source = mapValue(raw);
+            String key = firstNonBlank(stringValue(source.get("key")), stringValue(source.get("meta_name")));
+            String type = firstNonBlank(stringValue(source.get("type")), stringValue(source.get("meta_type")));
+            String condition = firstNonBlank(
+                    stringValue(source.get("condition")),
+                    stringValue(source.get("comparison_operator")));
+            if (isBlank(key) || isBlank(type) || isBlank(condition)) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("meta_name", key);
+            item.put("meta_type", type);
+            item.put("comparison_operator", condition);
+            item.put("value", ragMetadataValue(source.get("value"), type, condition));
+            items.add(item);
+        }
+        return items;
+    }
+
+    private Object ragMetadataValue(Object value, String type, String condition) {
+        if ("empty".equalsIgnoreCase(defaultIfBlank(condition, ""))) {
+            return null;
+        }
+        String text = stringValue(value);
+        if (isBlank(text)) {
+            return null;
+        }
+        if ("number".equalsIgnoreCase(type)) {
+            try {
+                return Integer.valueOf(text);
+            } catch (NumberFormatException ex) {
+                try {
+                    return Double.valueOf(text);
+                } catch (NumberFormatException ignored) {
+                    return text;
+                }
+            }
+        }
+        if ("time".equalsIgnoreCase(type)) {
+            try {
+                return Long.valueOf(text);
+            } catch (NumberFormatException ignored) {
+                return text;
+            }
+        }
+        return value;
     }
 
     private List<Map<String, Object>> knowledgeHitList(Map<String, Object> config) {

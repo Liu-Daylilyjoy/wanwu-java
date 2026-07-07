@@ -667,6 +667,19 @@ public class AppServiceImplTest {
         assertEquals(Boolean.TRUE, ((Map<String, Object>) qaKnowledgeList.get(0).get("metaDataFilterParams")).get("filterEnable"));
         assertEquals(2, ((Map<String, Object>) qaRequest.get("knowledgeMatchParams")).get("topK"));
         assertEquals("text", ((Map<String, Object>) qaRequest.get("knowledgeMatchParams")).get("matchType"));
+        assertEquals(Boolean.TRUE, qaRequest.get("returnMeta"));
+        assertEquals(Boolean.TRUE, qaRequest.get("metadataFiltering"));
+        List<Map<String, Object>> qaMetaFilters =
+                (List<Map<String, Object>>) qaRequest.get("metadataFilteringConditions");
+        assertEquals(1, qaMetaFilters.size());
+        assertEquals("qa-go-001", qaMetaFilters.get(0).get("filtering_qa_base_name"));
+        assertEquals("and", qaMetaFilters.get(0).get("logical_operator"));
+        List<Map<String, Object>> qaMetaItems =
+                (List<Map<String, Object>>) qaMetaFilters.get(0).get("conditions");
+        assertEquals("city", qaMetaItems.get(0).get("meta_name"));
+        assertEquals("string", qaMetaItems.get(0).get("meta_type"));
+        assertEquals("eq", qaMetaItems.get(0).get("comparison_operator"));
+        assertEquals("Beijing", qaMetaItems.get(0).get("value"));
     }
 
     @Test
