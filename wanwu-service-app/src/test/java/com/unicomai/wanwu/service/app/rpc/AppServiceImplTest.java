@@ -720,6 +720,57 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatBuildsImageAttachmentListFromFileInfo() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("AttachmentRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-attach-001"));
+        service.updateRagConfig(config);
+
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class)))
+                .thenReturn(Collections.<String, Object>emptyMap());
+
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("fileName", "diagram.png");
+        image.put("fileSize", 2048L);
+        image.put("fileUrl", "https://files.example.test/diagram.png");
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("fileName", "readme.txt");
+        document.put("fileSize", 512L);
+        document.put("fileUrl", "https://files.example.test/readme.txt");
+
+        RagChatCommand command = ragChatCommand(created.getRagId(), "describe the upload", true);
+        command.setFileInfo(Arrays.asList(image, document));
+
+        service.streamRagChat(command);
+
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), captor.capture());
+        Map<String, Object> request = captor.getValue();
+        List<Map<String, Object>> attachments = (List<Map<String, Object>>) request.get("attachmentList");
+        assertEquals(1, attachments.size());
+        assertEquals("image", attachments.get(0).get("fileType"));
+        assertEquals("https://files.example.test/diagram.png", attachments.get(0).get("fileUrl"));
+
+        List<RagChatRecord> chats = repository.listRagChats("dev-admin", "default-org", created.getRagId(), 10);
+        assertEquals(1, chats.size());
+        assertTrue(chats.get(0).getFileInfoJson().contains("diagram.png"));
+        assertTrue(chats.get(0).getFileInfoJson().contains("readme.txt"));
+    }
+
+    @Test
     public void workflowLifecycleSupportsFrontendAppspaceLoop() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

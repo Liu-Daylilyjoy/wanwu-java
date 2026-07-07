@@ -196,6 +196,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -1572,6 +1573,7 @@ public class AppServiceImpl implements AppService {
                 userId,
                 orgId,
                 command.getQuestion(),
+                command.getFileInfo(),
                 config == null ? null : config.getKnowledgeBaseConfigJson(),
                 config == null ? null : config.getRerankConfigJson(),
                 false);
@@ -1579,6 +1581,7 @@ public class AppServiceImpl implements AppService {
                 userId,
                 orgId,
                 command.getQuestion(),
+                command.getFileInfo(),
                 config == null ? null : config.getQaKnowledgeBaseConfigJson(),
                 config == null ? null : config.getQaRerankConfigJson(),
                 true);
@@ -2690,6 +2693,7 @@ public class AppServiceImpl implements AppService {
                     userId,
                     orgId,
                     command.getPrompt(),
+                    Collections.<Map<String, Object>>emptyList(),
                     config == null ? null : config.getKnowledgeBaseConfigJson(),
                     null,
                     false);
@@ -4021,6 +4025,7 @@ public class AppServiceImpl implements AppService {
     private Map<String, Object> hitConfiguredKnowledge(String userId,
                                                        String orgId,
                                                        String question,
+                                                       List<Map<String, Object>> fileInfo,
                                                        String configJson,
                                                        String rerankConfigJson,
                                                        boolean qa) {
@@ -4036,10 +4041,37 @@ public class AppServiceImpl implements AppService {
         request.put("question", question);
         request.put("knowledgeList", knowledgeList);
         request.put("knowledgeMatchParams", knowledgeMatchParams(config, rerankConfigJson));
+        request.put("attachmentList", ragAttachmentList(fileInfo));
         Map<String, Object> hit = qa
                 ? knowledgeService.hitQaPairs(userId, orgId, request)
                 : knowledgeService.hitKnowledge(userId, orgId, request);
         return hit == null ? Collections.<String, Object>emptyMap() : hit;
+    }
+
+    private List<Map<String, Object>> ragAttachmentList(List<Map<String, Object>> fileInfo) {
+        if (fileInfo == null || fileInfo.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        for (Map<String, Object> file : fileInfo) {
+            if (file == null) {
+                continue;
+            }
+            String fileUrl = stringValue(firstPresent(file, "fileUrl", "file_url", "url"));
+            if (!isRagImageAttachment(fileUrl)) {
+                continue;
+            }
+            Map<String, Object> attachment = new LinkedHashMap<>();
+            attachment.put("fileType", "image");
+            attachment.put("fileUrl", fileUrl);
+            attachments.add(attachment);
+        }
+        return attachments;
+    }
+
+    private boolean isRagImageAttachment(String fileUrl) {
+        String value = defaultIfBlank(fileUrl, "").toLowerCase(Locale.ROOT);
+        return value.endsWith(".png") || value.endsWith(".jpg") || value.endsWith(".jpeg");
     }
 
     private List<Map<String, Object>> knowledgeHitList(Map<String, Object> config) {
