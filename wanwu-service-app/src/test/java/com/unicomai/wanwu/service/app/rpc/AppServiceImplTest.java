@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionInfoQuery;
@@ -133,6 +134,8 @@ import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -864,6 +867,76 @@ public class AppServiceImplTest {
         assertEquals("Alice", parsed.get("name"));
         assertEquals(98, parsed.get("score"));
         assertEquals(parsed, output.get("output"));
+    }
+
+    @Test
+    public void workflowRunExecutesHttpRequestNode() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        List<String> captured = new ArrayList<>();
+        server.createContext("/lookup/beijing", exchange -> {
+            captured.add(exchange.getRequestURI().getRawQuery());
+            captured.add(exchange.getRequestHeaders().getFirst("X-City"));
+            byte[] body = "{\"ok\":true,\"city\":\"beijing\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.getResponseHeaders().add("X-Upstream", "ok");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+            AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+            WorkflowCreateCommand create = new WorkflowCreateCommand();
+            create.setName("HttpNodeFlow");
+            create.setSchema("{"
+                    + "\"nodes\":["
+                    + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"city\"}]}},"
+                    + "{\"id\":\"110001\",\"type\":\"45\",\"data\":{\"nodeMeta\":{\"title\":\"Fetch\",\"subTitle\":\"HTTP 请求\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"body\"},{\"type\":\"integer\",\"name\":\"statusCode\"},{\"type\":\"string\",\"name\":\"headers\"}],"
+                    + "\"inputs\":{\"apiInfo\":{\"method\":\"GET\",\"url\":\"http://127.0.0.1:"
+                    + server.getAddress().getPort() + "/lookup/{{city}}\"},"
+                    + "\"params\":[{\"name\":\"key\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"literal\",\"content\":\"dev-key\"}}},"
+                    + "{\"name\":\"q\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"city\"}}}}],"
+                    + "\"headers\":[{\"name\":\"X-City\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"city\"}}}}],"
+                    + "\"setting\":{\"timeout\":5}}}},"
+                    + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110001\",\"name\":\"body\"}}}}]}}}"
+                    + "],"
+                    + "\"edges\":["
+                    + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110001\"},"
+                    + "{\"sourceNodeID\":\"110001\",\"targetNodeID\":\"900001\"}"
+                    + "],"
+                    + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                    + "}");
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            WorkflowCreateResult created = service.createWorkflow(create);
+
+            WorkflowRunCommand run = new WorkflowRunCommand();
+            run.setWorkflowId(created.getWorkflowId());
+            run.setUserId("dev-admin");
+            run.setOrgId("default-org");
+            run.setInput(Collections.<String, Object>singletonMap("city", "beijing"));
+
+            Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+            assertEquals("{\"ok\":true,\"city\":\"beijing\"}", output.get("output"));
+            assertEquals(2, captured.size());
+            assertTrue(captured.get(0).contains("key=dev-key"), captured.get(0));
+            assertTrue(captured.get(0).contains("q=beijing"), captured.get(0));
+            assertEquals("beijing", captured.get(1));
+            Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+            Map<String, Object> httpOutput = castMap(nodeOutputs.get("110001"));
+            assertEquals(200, httpOutput.get("statusCode"));
+            assertTrue(String.valueOf(httpOutput.get("body")).contains("\"city\":\"beijing\""));
+            assertTrue(String.valueOf(httpOutput.get("headers")).toLowerCase().contains("x-upstream"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

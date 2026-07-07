@@ -163,7 +163,14 @@ import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -6173,6 +6180,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(merged);
             output.put("text", String.valueOf(merged));
             output.put("result", merged);
+        } else if (workflowIsHttpNode(node, type, lowerType)) {
+            output.putAll(workflowHttpOutput(node, input));
         } else if (workflowIsJsonSerializeNode(node, type, lowerType)) {
             output.putAll(workflowJsonSerializeOutput(input));
         } else if (workflowIsJsonDeserializeNode(node, type, lowerType)) {
@@ -6214,6 +6223,223 @@ public class AppServiceImpl implements AppService {
     private boolean workflowIsMergeNode(String type, String lowerType) {
         return "32".equals(type) || lowerType.contains("merge") || lowerType.contains("variable")
                 || lowerType.contains("assign");
+    }
+
+    private boolean workflowIsHttpNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "45".equals(type) || lowerType.contains("http") || semantic.contains("http")
+                || semantic.contains("api request") || semantic.contains("request node");
+    }
+
+    private Map<String, Object> workflowHttpOutput(Map<String, Object> node, Map<String, Object> input) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        Map<String, Object> apiInfo = mapValue(firstPresent(inputs, "apiInfo", "api", "request"));
+        if (apiInfo.isEmpty()) {
+            apiInfo = mapValue(firstPresent(data, "apiInfo", "api", "request"));
+        }
+        String method = defaultIfBlank(textValue(apiInfo, "method"), "GET").trim().toUpperCase(java.util.Locale.ENGLISH);
+        Object rawUrl = workflowResolveNodeValue(textValue(apiInfo, "url", "uri", "endpoint"), input, input);
+        String url = String.valueOf(rawUrl == null ? "" : rawUrl);
+        if (isBlank(url)) {
+            throw new IllegalArgumentException("workflow http url is required");
+        }
+        Map<String, Object> params = workflowHttpNameValueMap(firstList(inputs, data, "params", "query"), input);
+        Map<String, Object> headers = workflowHttpNameValueMap(firstList(inputs, data, "headers", "header"), input);
+        String body = workflowHttpBody(firstMap(inputs, data, "body", "requestBody"), input);
+        int timeoutMillis = workflowHttpTimeoutMillis(firstMap(inputs, data, "setting", "settings"));
+        return workflowHttpCall(method, workflowAppendQuery(url, params), headers, body, timeoutMillis);
+    }
+
+    private Map<String, Object> workflowHttpCall(String method,
+                                                 String url,
+                                                 Map<String, Object> headers,
+                                                 String body,
+                                                 int timeoutMillis) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod(method);
+            connection.setConnectTimeout(timeoutMillis);
+            connection.setReadTimeout(timeoutMillis);
+            for (Map.Entry<String, Object> entry : headers.entrySet()) {
+                if (!isBlank(entry.getKey()) && entry.getValue() != null) {
+                    connection.setRequestProperty(entry.getKey(), String.valueOf(entry.getValue()));
+                }
+            }
+            if (!isBlank(body) && workflowHttpMethodAllowsBody(method)) {
+                if (isBlank(connection.getRequestProperty("Content-Type"))) {
+                    connection.setRequestProperty("Content-Type", "application/json");
+                }
+                connection.setDoOutput(true);
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(body.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String responseBody = stream == null ? "" : workflowReadFully(stream);
+            String responseHeaders = workflowJsonText(workflowResponseHeaders(connection));
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("body", responseBody);
+            output.put("statusCode", status);
+            output.put("headers", responseHeaders);
+            output.put("output", responseBody);
+            output.put("text", responseBody);
+            output.put("result", responseBody);
+            output.put("response", responseBody);
+            return output;
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("workflow http request failed: " + url, ex);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private Map<String, Object> workflowHttpNameValueMap(List<Object> items, Map<String, Object> input) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (Object item : items) {
+            Map<String, Object> row = mapValue(item);
+            String name = textValue(row, "name", "key", "field");
+            if (isBlank(name)) {
+                continue;
+            }
+            Object raw = firstPresent(row, "input", "value", "default");
+            Object value = workflowResolveConfiguredInput(raw, input);
+            if (value != null && !isBlank(String.valueOf(value))) {
+                values.put(name, value);
+            }
+        }
+        return values;
+    }
+
+    private String workflowHttpBody(Map<String, Object> body, Map<String, Object> input) {
+        if (body.isEmpty()) {
+            return "";
+        }
+        String bodyType = textValue(body, "bodyType", "type");
+        if ("EMPTY".equalsIgnoreCase(bodyType)) {
+            return "";
+        }
+        Object raw = firstPresent(body, "input", "value", "content", "raw", "text", "data");
+        Map<String, Object> bodyData = mapValue(body.get("bodyData"));
+        if (raw == null) {
+            raw = firstPresent(bodyData, "json", "raw", "text", "body", "data");
+        }
+        if (raw == null && !bodyData.isEmpty()) {
+            raw = bodyData;
+        }
+        Object value = workflowResolveConfiguredInput(raw, input);
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String) {
+            return String.valueOf(value);
+        }
+        return workflowJsonText(value);
+    }
+
+    private int workflowHttpTimeoutMillis(Map<String, Object> setting) {
+        Object timeoutMs = firstPresent(setting, "timeoutMs", "timeoutMillis");
+        if (timeoutMs != null) {
+            return Math.max(1, intValue(timeoutMs, 10000));
+        }
+        int timeout = intValue(firstPresent(setting, "timeout"), 10);
+        if (timeout <= 0) {
+            return 10000;
+        }
+        return timeout < 1000 ? timeout * 1000 : timeout;
+    }
+
+    private String workflowAppendQuery(String url, Map<String, Object> params) {
+        if (params.isEmpty()) {
+            return url;
+        }
+        StringBuilder builder = new StringBuilder(url);
+        builder.append(url.contains("?") ? "&" : "?");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            if (!first) {
+                builder.append('&');
+            }
+            first = false;
+            builder.append(workflowUrlEncode(entry.getKey())).append('=')
+                    .append(workflowUrlEncode(String.valueOf(entry.getValue())));
+        }
+        return builder.toString();
+    }
+
+    private Map<String, Object> workflowResponseHeaders(HttpURLConnection connection) {
+        Map<String, Object> headers = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : connection.getHeaderFields().entrySet()) {
+            if (entry.getKey() == null) {
+                continue;
+            }
+            List<String> values = entry.getValue() == null ? Collections.<String>emptyList() : entry.getValue();
+            headers.put(entry.getKey(), values.size() == 1 ? values.get(0) : values);
+        }
+        return headers;
+    }
+
+    private boolean workflowHttpMethodAllowsBody(String method) {
+        return "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method) || "DELETE".equals(method);
+    }
+
+    private List<Object> firstList(Map<String, Object> first, Map<String, Object> second, String... keys) {
+        for (String key : keys) {
+            List<Object> values = listValue(first.get(key));
+            if (!values.isEmpty()) {
+                return values;
+            }
+        }
+        for (String key : keys) {
+            List<Object> values = listValue(second.get(key));
+            if (!values.isEmpty()) {
+                return values;
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    private Map<String, Object> firstMap(Map<String, Object> first, Map<String, Object> second, String... keys) {
+        for (String key : keys) {
+            Map<String, Object> value = mapValue(first.get(key));
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        for (String key : keys) {
+            Map<String, Object> value = mapValue(second.get(key));
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        return Collections.emptyMap();
+    }
+
+    private String workflowReadFully(InputStream stream) throws IOException {
+        return new String(workflowReadBytes(stream), StandardCharsets.UTF_8);
+    }
+
+    private byte[] workflowReadBytes(InputStream stream) throws IOException {
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private String workflowUrlEncode(String value) {
+        try {
+            return URLEncoder.encode(value == null ? "" : value, "UTF-8").replace("+", "%20");
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("workflow url encode failed", ex);
+        }
     }
 
     private boolean workflowIsJsonSerializeNode(Map<String, Object> node, String type, String lowerType) {
