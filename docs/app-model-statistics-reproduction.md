@@ -47,7 +47,7 @@ Runtime recording currently covers:
 - frontend RAG chat with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 - OpenAPI agent chat: `source=openapi`, `appType=agent`
 - OpenAPI agent chat with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
-- OpenAPI RAG chat: `source=openapi`, `appType=rag`
+- OpenAPI RAG chat: `source=openapi`, `appType=rag`, including service-layer validation failures as failed calls
 - OpenAPI RAG chat with configured model: model statistic with provider `usage` when the OpenAI-compatible stream reports it, otherwise deterministic local token estimate
 - OpenAPI workflow run: `source=openapi`, `appType=workflow`
 - OpenAPI Chatflow chat: `source=openapi`, `appType=chatflow`, including service-layer validation failures as failed stream calls

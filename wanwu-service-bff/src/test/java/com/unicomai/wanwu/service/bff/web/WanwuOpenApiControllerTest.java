@@ -499,6 +499,32 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void ragOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest() throws Exception {
+        when(appService.streamRagChat(any(RagChatCommand.class)))
+                .thenThrow(new IllegalArgumentException("rag snapshot not found"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"rag-openapi-001\",\"prompt\":\"search me\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.message").value("rag snapshot not found"));
+
+        ArgumentCaptor<RecordAppStatisticCommand> statisticCaptor = forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(statisticCaptor.capture());
+        assertEquals("dev-admin", statisticCaptor.getValue().getUserId());
+        assertEquals("default-org", statisticCaptor.getValue().getOrgId());
+        assertEquals("rag-openapi-001", statisticCaptor.getValue().getAppId());
+        assertEquals("rag", statisticCaptor.getValue().getAppType());
+        assertEquals(false, statisticCaptor.getValue().isSuccess());
+        assertEquals(false, statisticCaptor.getValue().isStream());
+        assertEquals(0L, statisticCaptor.getValue().getStreamCosts());
+        assertTrue(statisticCaptor.getValue().getNonStreamCosts() >= 0L);
+        assertEquals("openapi", statisticCaptor.getValue().getSource());
+    }
+
+    @Test
     public void agentConfigAndPublishRoutesUseAppService() throws Exception {
         when(modelService.listModelIdsByUuids(Collections.singletonList("model-001")))
                 .thenReturn(Collections.singletonList("model-001"));

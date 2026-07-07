@@ -449,11 +449,16 @@ public class WanwuOpenApiController {
             @RequestHeader HttpHeaders headers,
             @RequestBody(required = false) Map<String, Object> request) {
         long startedAt = System.currentTimeMillis();
+        OpenApiContext ctx = null;
+        String ragId = "";
+        boolean stream = false;
         try {
-            OpenApiContext ctx = context(headers);
+            ctx = context(headers);
             Map<String, Object> body = body(request);
+            ragId = text(body, "uuid");
+            stream = booleanValue(body.get("stream"), false);
             RagChatCommand command = new RagChatCommand();
-            command.setRagId(text(body, "uuid"));
+            command.setRagId(ragId);
             command.setQuestion(defaultIfBlank(text(body, "query"), text(body, "prompt")));
             command.setDraft(false);
             command.setHistory(mapList(body.get("history")));
@@ -463,7 +468,6 @@ public class WanwuOpenApiController {
             attachConfiguredOpenApiRagModelResponse(ctx, command, startedAt);
             RagChatResult result = appService.streamRagChat(command);
             Map<String, Object> response = openApiRagChat(result);
-            boolean stream = booleanValue(body.get("stream"), false);
             recordAppStatistic(ctx, command.getRagId(), RAG_APP_TYPE, true, stream, startedAt);
             if (stream) {
                 return ResponseEntity.ok()
@@ -472,6 +476,7 @@ public class WanwuOpenApiController {
             }
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
+            recordAppStatistic(ctx, ragId, RAG_APP_TYPE, false, stream, startedAt);
             return ResponseEntity.badRequest().body(errorBody(ex.getMessage()));
         }
     }
