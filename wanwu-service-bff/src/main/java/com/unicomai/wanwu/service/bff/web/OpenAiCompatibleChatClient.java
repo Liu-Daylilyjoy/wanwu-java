@@ -25,11 +25,15 @@ final class OpenAiCompatibleChatClient {
     private static final int READ_TIMEOUT_MILLIS = 30000;
 
     ChatCompletionResult complete(ModelInfo model, String modelId, String prompt) {
-        ChatCompletionResult streamResult = stream(model, modelId, prompt);
+        return complete(model, modelId, userMessages(prompt));
+    }
+
+    ChatCompletionResult complete(ModelInfo model, String modelId, List<Map<String, Object>> messages) {
+        ChatCompletionResult streamResult = stream(model, modelId, messages);
         if (!isBlank(streamResult.getContent())) {
             return streamResult;
         }
-        return answer(model, modelId, prompt);
+        return answer(model, modelId, messages);
     }
 
     long estimateTokens(String value) {
@@ -40,7 +44,7 @@ final class OpenAiCompatibleChatClient {
         return Math.max(1L, (text.length() + 3L) / 4L);
     }
 
-    private ChatCompletionResult stream(ModelInfo model, String modelId, String prompt) {
+    private ChatCompletionResult stream(ModelInfo model, String modelId, List<Map<String, Object>> messages) {
         if (model == null || model.getConfig() == null) {
             return ChatCompletionResult.empty();
         }
@@ -50,7 +54,7 @@ final class OpenAiCompatibleChatClient {
             if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
                 return ChatCompletionResult.empty();
             }
-            Map<String, Object> payload = payload(model, modelId, prompt, true);
+            Map<String, Object> payload = payload(model, modelId, messages, true);
             return postStream(modelEndpointUrl(endpoint, "/chat/completions"),
                     apiKey, JSON.writeValueAsString(payload));
         } catch (RuntimeException | IOException ignored) {
@@ -58,7 +62,7 @@ final class OpenAiCompatibleChatClient {
         }
     }
 
-    private ChatCompletionResult answer(ModelInfo model, String modelId, String prompt) {
+    private ChatCompletionResult answer(ModelInfo model, String modelId, List<Map<String, Object>> messages) {
         if (model == null || model.getConfig() == null) {
             return ChatCompletionResult.empty();
         }
@@ -68,7 +72,7 @@ final class OpenAiCompatibleChatClient {
             if (isBlank(endpoint) || isBlank(apiKey) || isDevelopmentApiKey(apiKey)) {
                 return ChatCompletionResult.empty();
             }
-            Map<String, Object> payload = payload(model, modelId, prompt, false);
+            Map<String, Object> payload = payload(model, modelId, messages, false);
             String response = postJson(modelEndpointUrl(endpoint, "/chat/completions"),
                     apiKey, JSON.writeValueAsString(payload));
             return extractAnswer(response);
@@ -77,18 +81,50 @@ final class OpenAiCompatibleChatClient {
         }
     }
 
-    private Map<String, Object> payload(ModelInfo model, String modelId, String prompt, boolean stream) {
+    private Map<String, Object> payload(ModelInfo model,
+                                        String modelId,
+                                        List<Map<String, Object>> messages,
+                                        boolean stream) {
+        List<Map<String, Object>> safeMessages = sanitizeMessages(messages);
+        if (safeMessages.isEmpty()) {
+            safeMessages = userMessages("");
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", defaultIfBlank(model == null ? "" : model.getModel(), modelId));
+        payload.put("messages", safeMessages);
+        payload.put("stream", stream);
+        return payload;
+    }
+
+    private List<Map<String, Object>> userMessages(String prompt) {
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("role", "user");
         message.put("content", defaultIfBlank(prompt, ""));
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(message);
+        return messages;
+    }
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", defaultIfBlank(model == null ? "" : model.getModel(), modelId));
-        payload.put("messages", messages);
-        payload.put("stream", stream);
-        return payload;
+    private List<Map<String, Object>> sanitizeMessages(List<Map<String, Object>> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> source : messages) {
+            if (source == null) {
+                continue;
+            }
+            String role = firstText(source, "role");
+            String content = firstText(source, "content");
+            if (isBlank(role) || isBlank(content)) {
+                continue;
+            }
+            Map<String, Object> message = new LinkedHashMap<>();
+            message.put("role", role);
+            message.put("content", content);
+            result.add(message);
+        }
+        return result;
     }
 
     private ChatCompletionResult postStream(String endpoint, String apiKey, String json) throws IOException {

@@ -16,12 +16,14 @@ Date: 2026-07-01
 - `openApiRagChat` now normalizes Java knowledge-hit cards into Go-style `data.searchList[{kb_name,title,snippet}]`, while preserving `data.output`, `msg_id`, `history`, and `finish`. `qaSearchList` remains available as a Java compatibility extension for local QA recall.
 - When the request contains `stream=true`, Java returns a legacy `text/event-stream` response with a single `data: {...}` JSON frame followed by `data: [DONE]`.
 - Published OpenAPI RAG calls reuse `AppService.streamRagChat`, so the same question/answer/history/fileInfo/search-list snapshot is stored in `rag_chat_records` when AppService/MySQL is available.
+- When the published RAG has a configured OpenAI-compatible `modelConfig.modelId`, Java forwards `needHistory=true` history items as ordered `user/assistant` messages before the current question.
 - Service-layer validation failures on `POST /service/api/openapi/v1/rag/chat` keep the existing `400` JSON response and now record `source=openapi`, `appType=rag`, `success=false` app statistics.
 
 ## Tests
 
 - `WanwuOpenApiControllerTest#chatRagAndWorkflowRoutesMapToExistingAppService` verifies published-mode RAG command mapping and asserts that `data.searchList[0]` exposes Go-style `kb_name`, `title`, and `snippet`.
 - `WanwuOpenApiControllerTest#ragOpenApiStreamReturnsLegacySseWithSearchList` verifies `stream=true` legacy SSE compatibility with the same normalized search-list shape.
+- `WanwuOpenApiControllerTest#ragOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting` verifies configured-model RAG calls include ordered history messages before persistence.
 - `WanwuOpenApiControllerTest#ragOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies failed OpenAPI RAG calls are counted in AppService statistics.
 
 ## Remaining Gap

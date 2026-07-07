@@ -4123,7 +4123,7 @@ public class WanwuFrontendApiController {
                 return;
             }
             OpenAiCompatibleChatClient.ChatCompletionResult chatResult =
-                    chatClient.complete(model, modelId, command.getQuestion());
+                    chatClient.complete(model, modelId, ragChatMessages(command.getHistory(), command.getQuestion()));
             String answer = defaultIfBlank(chatResult.getContent(), "");
             if (isBlank(answer)) {
                 return;
@@ -4132,6 +4132,31 @@ public class WanwuFrontendApiController {
             recordModelStatistic(userContext, model, modelId, command.getQuestion(), answer, startedAt, chatResult.getUsage());
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private List<Map<String, Object>> ragChatMessages(List<Map<String, Object>> history, String question) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        if (history != null) {
+            for (Map<String, Object> item : history) {
+                if (item == null || !booleanValue(item.get("needHistory"), true)) {
+                    continue;
+                }
+                addChatMessage(messages, "user", firstText(item, "query", "question", "prompt"));
+                addChatMessage(messages, "assistant", firstText(item, "response", "answer", "content"));
+            }
+        }
+        addChatMessage(messages, "user", question);
+        return messages;
+    }
+
+    private void addChatMessage(List<Map<String, Object>> messages, String role, String content) {
+        if (messages == null || isBlank(content)) {
+            return;
+        }
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", role);
+        message.put("content", content);
+        messages.add(message);
     }
 
     private void recordExplorationAppHistory(UserContext userContext, String appType, String appId) {

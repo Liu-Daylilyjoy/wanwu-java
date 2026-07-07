@@ -4492,13 +4492,22 @@ public class WanwuFrontendApiControllerTest {
             mockMvc.perform(post("/user/api/v1/rag/chat/draft")
                             .header("Authorization", "Bearer dev-token")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\"}"))
+                            .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\","
+                                    + "\"history\":[{\"query\":\"previous question\",\"response\":\"previous answer\",\"needHistory\":true},"
+                                    + "{\"query\":\"ignored question\",\"response\":\"ignored answer\",\"needHistory\":false}]}"))
                     .andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                     .andExpect(content().string(containsString("rag answer")));
 
             assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"role\":\"user\",\"content\":\"previous question\""));
+            assertTrue(upstreamBody.get().contains("\"role\":\"assistant\",\"content\":\"previous answer\""));
             assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
+            assertTrue(upstreamBody.get().indexOf("\"content\":\"previous question\"")
+                    < upstreamBody.get().indexOf("\"content\":\"previous answer\""));
+            assertTrue(upstreamBody.get().indexOf("\"content\":\"previous answer\"")
+                    < upstreamBody.get().indexOf("\"content\":\"what is policy\""));
+            assertTrue(!upstreamBody.get().contains("ignored question"));
             ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
             verify(appService).streamRagChat(captor.capture());
             assertEquals("rag answer", captor.getValue().getOverrideResponse());

@@ -483,12 +483,21 @@ public class WanwuOpenApiControllerTest {
             mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
                             .header("Authorization", "Bearer dev-token")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"uuid\":\"rag-openapi-model-001\",\"query\":\"what is policy\"}"))
+                            .content("{\"uuid\":\"rag-openapi-model-001\",\"query\":\"what is policy\","
+                                    + "\"history\":[{\"query\":\"openapi previous question\",\"response\":\"openapi previous answer\",\"needHistory\":true},"
+                                    + "{\"query\":\"openapi ignored question\",\"response\":\"openapi ignored answer\",\"needHistory\":false}]}"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.output").value("openapi rag answer"));
 
             assertTrue(upstreamBody.get().contains("\"stream\":true"));
+            assertTrue(upstreamBody.get().contains("\"role\":\"user\",\"content\":\"openapi previous question\""));
+            assertTrue(upstreamBody.get().contains("\"role\":\"assistant\",\"content\":\"openapi previous answer\""));
             assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
+            assertTrue(upstreamBody.get().indexOf("\"content\":\"openapi previous question\"")
+                    < upstreamBody.get().indexOf("\"content\":\"openapi previous answer\""));
+            assertTrue(upstreamBody.get().indexOf("\"content\":\"openapi previous answer\"")
+                    < upstreamBody.get().indexOf("\"content\":\"what is policy\""));
+            assertTrue(!upstreamBody.get().contains("openapi ignored question"));
             ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
             verify(appService).streamRagChat(captor.capture());
             assertEquals("openapi rag answer", captor.getValue().getOverrideResponse());
