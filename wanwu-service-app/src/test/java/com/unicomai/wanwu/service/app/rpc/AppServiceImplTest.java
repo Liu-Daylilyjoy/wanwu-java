@@ -1266,6 +1266,56 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void workflowRunEmitsStructuredSearchToolContent() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("SearchToolFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"126843\",\"type\":\"1009\",\"data\":{\"nodeMeta\":{\"title\":\"Research Search\",\"subTitle\":\"MCP Tool\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"result\",\"schema\":[{\"type\":\"list\",\"name\":\"content\"}]}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}},"
+                + "{\"name\":\"numResults\",\"input\":{\"type\":\"integer\",\"value\":{\"type\":\"literal\",\"content\":2}}}],"
+                + "\"mcpInfoList\":[]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"126843\",\"name\":\"result.content\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"126843\"},"
+                + "{\"sourceNodeID\":\"126843\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"list\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "wanwu java"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> content = (List<Map<String, Object>>) output.get("output");
+        assertEquals(2, content.size());
+        Map<String, Object> first = content.get(0);
+        assertEquals(1, first.get("rank"));
+        assertEquals("local-search", first.get("source"));
+        assertTrue(String.valueOf(first.get("title")).contains("wanwu java"));
+        assertTrue(String.valueOf(first.get("snippet")).contains("wanwu java"));
+        assertTrue(String.valueOf(first.get("url")).contains("wanwu-java"));
+    }
+
+    @Test
     public void workflowRunRoutesSelectorToInputNodeWhenValueMissing() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

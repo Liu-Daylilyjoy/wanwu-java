@@ -7116,9 +7116,26 @@ public class AppServiceImpl implements AppService {
                                             Map<String, Object> input,
                                             int index) {
         String lowerTitle = defaultIfBlank(title, "").toLowerCase(java.util.Locale.ENGLISH);
+        if (workflowIsSearchToolTitle(lowerTitle)) {
+            String query = workflowToolQuery(input);
+            String slug = workflowToolSlug(query);
+            item.put("rank", index);
+            item.put("source", workflowIsRepoToolTitle(lowerTitle) ? "github-local" : "local-search");
+            item.put("title", workflowSearchTitle(query, index, lowerTitle));
+            item.put("url", "https://example.local/search/" + index + "/" + slug);
+            item.put("snippet", "Local search result " + index + " for " + query);
+            if (workflowIsRepoToolTitle(lowerTitle)) {
+                item.put("repository", query);
+                item.put("fullName", query.contains("/") ? query : "local/" + slug);
+                item.put("stars", 1200 - ((index - 1) * 100));
+                item.put("language", "Java");
+            }
+        }
         if (title.contains("热搜") || lowerTitle.contains("hot")) {
             item.put("rank", index);
             item.put("source", defaultIfBlank(title, "hot-news"));
+            item.put("url", "https://example.local/hot/" + workflowToolSlug(title) + "/" + index);
+            item.put("snippet", item.get("text"));
             item.put("name", item.get("text"));
         }
         if (title.contains("天气") || lowerTitle.contains("weather")) {
@@ -7152,6 +7169,33 @@ public class AppServiceImpl implements AppService {
             item.put("artifactType", "image");
             item.put("url", "");
         }
+    }
+
+    private boolean workflowIsSearchToolTitle(String lowerTitle) {
+        return lowerTitle.contains("search") || lowerTitle.contains("research")
+                || lowerTitle.contains("github") || lowerTitle.contains("repo");
+    }
+
+    private boolean workflowIsRepoToolTitle(String lowerTitle) {
+        return lowerTitle.contains("github") || lowerTitle.contains("repo");
+    }
+
+    private String workflowToolQuery(Map<String, Object> input) {
+        return defaultIfBlank(stringValue(firstPresent(input, "query", "keywords", "input", "prompt")), "query");
+    }
+
+    private String workflowSearchTitle(String query, int index, String lowerTitle) {
+        if (workflowIsRepoToolTitle(lowerTitle)) {
+            return "Repository result " + index + " for " + query;
+        }
+        return "Search result " + index + " for " + query;
+    }
+
+    private String workflowToolSlug(String value) {
+        String slug = defaultIfBlank(value, "result").toLowerCase(java.util.Locale.ENGLISH)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-|-$", "");
+        return defaultIfBlank(slug, "result");
     }
 
     private boolean workflowIsCodeNode(Map<String, Object> node, String type, String lowerType) {
