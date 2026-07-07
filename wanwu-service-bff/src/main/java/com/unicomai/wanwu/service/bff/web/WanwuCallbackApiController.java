@@ -207,9 +207,10 @@ public class WanwuCallbackApiController {
                 return proxied;
             }
         }
+        long startedAt = System.currentTimeMillis();
         Map<String, Object> proxied = proxyModelJson(modelId, request, "/chat/completions");
         if (proxied != null) {
-            recordCallbackModelStatistic(modelId, proxied, false);
+            recordCallbackModelStatistic(modelId, proxied, false, elapsedCostMillis(startedAt));
             return proxied;
         }
         Map<String, Object> message = new LinkedHashMap<>();
@@ -238,9 +239,10 @@ public class WanwuCallbackApiController {
         if (modelValidation != null) {
             return modelValidation;
         }
+        long startedAt = System.currentTimeMillis();
         Map<String, Object> proxied = proxyModelJson(modelId, request, endpointSuffix);
         if (proxied != null) {
-            recordCallbackModelStatistic(modelId, proxied, false);
+            recordCallbackModelStatistic(modelId, proxied, false, elapsedCostMillis(startedAt));
             return proxied;
         }
         Map<String, Object> item = new LinkedHashMap<>();
@@ -265,9 +267,10 @@ public class WanwuCallbackApiController {
         if (modelValidation != null) {
             return modelValidation;
         }
+        long startedAt = System.currentTimeMillis();
         Map<String, Object> proxied = proxyModelJson(modelId, request, endpointSuffix);
         if (proxied != null) {
-            recordCallbackModelStatistic(modelId, proxied, false);
+            recordCallbackModelStatistic(modelId, proxied, false, elapsedCostMillis(startedAt));
             return proxied;
         }
         Map<String, Object> item = new LinkedHashMap<>();
@@ -1186,12 +1189,13 @@ public class WanwuCallbackApiController {
             if (isBlank(firstText(payload, "model"))) {
                 payload.put("model", defaultIfBlank(model.getModel(), modelId));
             }
+            long startedAt = System.currentTimeMillis();
             String upstream = postJsonStream(modelEndpointUrl(endpoint, endpointSuffix),
                     apiKey, JSON.writeValueAsString(payload));
             if (isBlank(upstream)) {
                 return null;
             }
-            recordCallbackStreamStatistic(modelId, upstream);
+            recordCallbackStreamStatistic(modelId, upstream, elapsedCostMillis(startedAt));
             return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(upstream);
         } catch (RuntimeException | IOException ignored) {
             return null;
@@ -1477,7 +1481,8 @@ public class WanwuCallbackApiController {
     }
 
     @SuppressWarnings("unchecked")
-    private void recordCallbackModelStatistic(String modelId, Map<String, Object> response, boolean stream) {
+    private void recordCallbackModelStatistic(String modelId, Map<String, Object> response,
+                                              boolean stream, long costs) {
         if (appService == null || isBlank(modelId)) {
             return;
         }
@@ -1504,18 +1509,22 @@ public class WanwuCallbackApiController {
             command.setTotalTokens(totalTokens);
             command.setSuccess(true);
             command.setStream(stream);
-            command.setCosts(0L);
+            command.setCosts(Math.max(0L, costs));
             command.setFirstTokenLatency(0L);
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }
     }
 
-    private void recordCallbackStreamStatistic(String modelId, String upstream) {
+    private void recordCallbackStreamStatistic(String modelId, String upstream, long costs) {
         Map<String, Object> response = callbackStreamUsage(upstream);
         if (!response.isEmpty()) {
-            recordCallbackModelStatistic(modelId, response, true);
+            recordCallbackModelStatistic(modelId, response, true, costs);
         }
+    }
+
+    private long elapsedCostMillis(long startedAt) {
+        return Math.max(1L, System.currentTimeMillis() - startedAt);
     }
 
     private Map<String, Object> callbackStreamUsage(String upstream) {

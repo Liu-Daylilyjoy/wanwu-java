@@ -334,7 +334,7 @@ public class WanwuOpenUrlApiController {
             command.setSuccess(true);
             command.setStream(true);
             command.setFirstTokenLatency(Math.max(0L, System.currentTimeMillis() - startedAt));
-            command.setCosts(0L);
+            command.setCosts(Math.max(1L, System.currentTimeMillis() - startedAt));
             command.setCallTime(startedAt);
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {

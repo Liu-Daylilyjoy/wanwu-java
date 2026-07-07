@@ -208,6 +208,7 @@ public class WanwuOpenUrlApiControllerTest {
             verify(appService).recordModelStatistic(modelStatisticCaptor.capture());
             assertEquals("model-openurl-001", modelStatisticCaptor.getValue().getModelId());
             assertEquals(5L, modelStatisticCaptor.getValue().getTotalTokens());
+            assertTrue(modelStatisticCaptor.getValue().getCosts() > 0L);
         } finally {
             server.stop(0);
         }

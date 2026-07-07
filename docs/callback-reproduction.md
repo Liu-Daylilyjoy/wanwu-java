@@ -56,7 +56,7 @@ This slice is a compatibility shell:
 - Response envelopes follow the frontend/BFF success shape where Go handlers are frontend-facing.
 - File callbacks now read and upload real bytes through a local Docker-development store: `file/url/base64` supports `fileUrl/addPrefix/customPrefix`, and `file/upload/base64` returns Go-style `url/uri` while retaining Java compatibility ids.
 - Tourism POI search now mirrors the Go local ranking service with `query/results`, category and keyword filtering, radius filtering, rating/distance sorting, and limit normalization.
-- Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
+- Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters, and configured upstream proxy calls record Go-style usage plus elapsed `costs` milliseconds into model statistics.
 - Workflow/chatflow callback lists read the same Java `AppService` appspace data used by the frontend, preserving the Go callback query fields `userId` and `orgId` while mapping the route to `appType=workflow` or `appType=chatflow`.
 - Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Image outline returns the Go `ImageOutlineExtractResp` shape (`message`, `prompt`, `markdown`, `result`, `mimeType`, `url`, `uri`, `usage`) and stores a local downloadable PNG under `/callback/v1/file/{fileId}` for Docker development.
@@ -90,4 +90,4 @@ This slice is a compatibility shell:
 - Full Python/vector/rerank RAG runtime and provider token-by-token stream generation are not implemented.
 - Real WGA OpenCode/container sandbox execution, mounted workspace files, tool/MCP/skill execution,
   and remote cleanup are not implemented.
-- Callback authentication, callback signature verification, and usage metrics are not reproduced yet.
+- Callback authentication and callback signature verification are not reproduced yet; provider-specific metrics beyond OpenAI-compatible usage and elapsed request time remain incomplete.

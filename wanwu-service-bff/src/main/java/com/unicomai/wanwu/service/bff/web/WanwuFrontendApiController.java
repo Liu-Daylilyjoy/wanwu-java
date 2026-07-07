@@ -4204,7 +4204,7 @@ public class WanwuFrontendApiController {
             command.setSuccess(true);
             command.setStream(true);
             command.setFirstTokenLatency(elapsedMillis(startedAt));
-            command.setCosts(0L);
+            command.setCosts(Math.max(1L, elapsedMillis(startedAt)));
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }
@@ -4238,7 +4238,7 @@ public class WanwuFrontendApiController {
             command.setSuccess(true);
             command.setStream(true);
             command.setFirstTokenLatency(elapsedMillis(startedAt));
-            command.setCosts(0L);
+            command.setCosts(Math.max(1L, elapsedMillis(startedAt)));
             appService.recordModelStatistic(command);
         } catch (RuntimeException ignored) {
         }

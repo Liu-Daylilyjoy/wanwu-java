@@ -170,6 +170,7 @@ public class WanwuCallbackApiControllerTest {
             assertEquals(8L, captor.getValue().getCompletionTokens());
             assertEquals(20L, captor.getValue().getTotalTokens());
             assertTrue(!captor.getValue().isStream());
+            assertTrue(captor.getValue().getCosts() > 0L);
         } finally {
             server.stop(0);
         }
@@ -216,6 +217,7 @@ public class WanwuCallbackApiControllerTest {
             verify(appService).recordModelStatistic(captor.capture());
             assertEquals(6L, captor.getValue().getTotalTokens());
             assertTrue(captor.getValue().isStream());
+            assertTrue(captor.getValue().getCosts() > 0L);
         } finally {
             server.stop(0);
         }
@@ -393,8 +395,10 @@ public class WanwuCallbackApiControllerTest {
             verify(appService, times(2)).recordModelStatistic(captor.capture());
             assertEquals("model-emb", captor.getAllValues().get(0).getModelId());
             assertEquals(1L, captor.getAllValues().get(0).getTotalTokens());
+            assertTrue(captor.getAllValues().get(0).getCosts() > 0L);
             assertEquals("model-rerank", captor.getAllValues().get(1).getModelId());
             assertEquals(4L, captor.getAllValues().get(1).getTotalTokens());
+            assertTrue(captor.getAllValues().get(1).getCosts() > 0L);
         } finally {
             server.stop(0);
         }

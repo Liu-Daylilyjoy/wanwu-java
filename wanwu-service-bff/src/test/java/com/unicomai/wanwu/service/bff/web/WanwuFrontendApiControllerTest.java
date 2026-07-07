@@ -2274,6 +2274,7 @@ public class WanwuFrontendApiControllerTest {
             assertEquals(2L, statisticCaptor.getValue().getCompletionTokens());
             assertEquals(7L, statisticCaptor.getValue().getTotalTokens());
             assertTrue(statisticCaptor.getValue().isStream());
+            assertTrue(statisticCaptor.getValue().getCosts() > 0L);
         } finally {
             server.stop(0);
         }
@@ -2401,6 +2402,7 @@ public class WanwuFrontendApiControllerTest {
             assertEquals(7L, captor.getValue().getCompletionTokens());
             assertEquals(18L, captor.getValue().getTotalTokens());
             assertTrue(captor.getValue().isStream());
+            assertTrue(captor.getValue().getCosts() > 0L);
         } finally {
             server.stop(0);
         }
