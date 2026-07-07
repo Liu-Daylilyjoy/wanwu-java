@@ -1218,6 +1218,60 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesDocumentGenerateNode() throws Exception {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("DocumentGenerateFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"content\"}]}},"
+                + "{\"id\":\"164693\",\"type\":\"1007\",\"data\":{\"nodeMeta\":{\"title\":\"生成文档\",\"subTitle\":\"文档生成\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"fileUrl\"}],"
+                + "\"inputs\":{\"inputParameters\":["
+                + "{\"name\":\"Title\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"literal\",\"content\":\"Report\"}}},"
+                + "{\"name\":\"Content\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"content\"}}}},"
+                + "{\"name\":\"fileType\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"literal\",\"content\":\"txt\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"164693\",\"name\":\"fileUrl\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"164693\"},"
+                + "{\"sourceNodeID\":\"164693\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("content", "Generated report body"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        String fileUrl = String.valueOf(output.get("output"));
+        assertTrue(fileUrl.startsWith("/service/api/v1/file/download/workflow-doc-"), fileUrl);
+        String fileId = fileUrl.substring(fileUrl.lastIndexOf('/') + 1);
+        Path generated = java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"),
+                "wanwu-java-uploads", "files", fileId);
+        try {
+            assertTrue(Files.isRegularFile(generated), fileUrl);
+            assertTrue(new String(Files.readAllBytes(generated), StandardCharsets.UTF_8)
+                    .contains("Generated report body"));
+        } finally {
+            Files.deleteIfExists(generated);
+        }
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

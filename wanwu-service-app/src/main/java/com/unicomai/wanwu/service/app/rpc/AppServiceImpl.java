@@ -6187,6 +6187,8 @@ public class AppServiceImpl implements AppService {
             output.put("result", merged);
         } else if (workflowIsKnowledgeQueryNode(node, type, lowerType)) {
             output.putAll(workflowKnowledgeQueryOutput(userId, orgId, node, input));
+        } else if (workflowIsDocumentGenerateNode(node, type, lowerType)) {
+            output.putAll(workflowDocumentGenerateOutput(input));
         } else if (workflowIsDocumentParseNode(node, type, lowerType)) {
             output.putAll(workflowDocumentParseOutput(node, input));
         } else if (workflowIsToolNode(node, type, lowerType)) {
@@ -6589,6 +6591,44 @@ public class AppServiceImpl implements AppService {
             }
         }
         return scores;
+    }
+
+    private boolean workflowIsDocumentGenerateNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "1007".equals(type) || semantic.contains("document generate")
+                || semantic.contains("document_generate");
+    }
+
+    private Map<String, Object> workflowDocumentGenerateOutput(Map<String, Object> input) {
+        String title = defaultIfBlank(stringValue(firstPresent(input, "Title", "title", "name")), "workflow-document");
+        String content = stringValue(firstPresent(input, "Content", "content", "text", "input"));
+        String fileType = workflowDocumentFileType(stringValue(firstPresent(input, "fileType", "type", "format")));
+        String fileId = "workflow-doc-" + UUID.randomUUID().toString().replace("-", "") + "." + fileType;
+        Path path = Paths.get(System.getProperty("java.io.tmpdir"), "wanwu-java-uploads", "files", fileId);
+        try {
+            Files.createDirectories(path.getParent());
+            Files.write(path, workflowGeneratedDocumentText(title, content).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("workflow document generate failed", ex);
+        }
+        String fileUrl = "/service/api/v1/file/download/" + fileId;
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("fileUrl", fileUrl);
+        output.put("output", fileUrl);
+        output.put("result", fileUrl);
+        output.put("response", fileUrl);
+        output.put("text", fileUrl);
+        return output;
+    }
+
+    private String workflowDocumentFileType(String value) {
+        String normalized = defaultIfBlank(value, "txt").toLowerCase(java.util.Locale.ENGLISH)
+                .replaceAll("[^a-z0-9]", "");
+        return isBlank(normalized) ? "txt" : normalized;
+    }
+
+    private String workflowGeneratedDocumentText(String title, String content) {
+        return defaultIfBlank(title, "workflow-document") + "\n\n" + defaultIfBlank(content, "");
     }
 
     private boolean workflowIsDocumentParseNode(Map<String, Object> node, String type, String lowerType) {
