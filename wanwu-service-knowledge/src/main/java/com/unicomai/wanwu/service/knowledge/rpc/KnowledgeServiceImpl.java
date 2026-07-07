@@ -3755,6 +3755,32 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 return 0.95D;
             }
         }
+        double segmentScore = tokenOverlapScore(question, segment.content, 0.82D);
+        if (segmentScore >= 0.45D) {
+            return segmentScore;
+        }
+        double childTokenScore = 0D;
+        for (ChildSegmentState child : childSegments(segment)) {
+            double childScore = tokenOverlapScore(question, child.content, 0.75D);
+            childTokenScore = Math.max(childTokenScore, childScore);
+        }
+        if (childTokenScore >= 0.45D) {
+            return childTokenScore;
+        }
+        double docNameScore = tokenOverlapScore(question, doc.docName, 0.55D);
+        if (docNameScore >= 0.45D) {
+            return docNameScore;
+        }
+        double knowledgeNameScore = tokenOverlapScore(question, knowledge.name, 0.45D);
+        if (knowledgeNameScore >= 0.45D) {
+            return knowledgeNameScore;
+        }
+        for (String label : segment.labels) {
+            double labelScore = tokenOverlapScore(question, label, 0.40D);
+            if (labelScore >= 0.35D) {
+                return labelScore;
+            }
+        }
         return 0D;
     }
 
@@ -3871,8 +3897,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (containsIgnoreCase(pair.question, question)) {
             return 1.0D;
         }
+        double questionScore = tokenOverlapScore(question, pair.question, 0.72D);
+        if (questionScore >= 0.35D) {
+            return questionScore;
+        }
         if (containsIgnoreCase(pair.answer, question)) {
             return 0.85D;
+        }
+        double answerScore = tokenOverlapScore(question, pair.answer, 0.55D);
+        if (answerScore >= 0.35D) {
+            return answerScore;
         }
         if (qaMetaContains(pair, question)) {
             return 0.65D;
@@ -4453,6 +4487,57 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private boolean containsIgnoreCase(String source, String expected) {
         return !isBlank(source) && !isBlank(expected)
                 && source.toLowerCase(Locale.ENGLISH).contains(expected.toLowerCase(Locale.ENGLISH));
+    }
+
+    private double tokenOverlapScore(String question, String candidate, double maxScore) {
+        List<String> queryTokens = searchTokens(question);
+        if (queryTokens.isEmpty()) {
+            return 0D;
+        }
+        List<String> candidateTokens = searchTokens(candidate);
+        if (candidateTokens.isEmpty()) {
+            return 0D;
+        }
+        int matches = 0;
+        for (String token : queryTokens) {
+            if (candidateTokens.contains(token)) {
+                matches++;
+            }
+        }
+        return matches == 0 ? 0D : maxScore * matches / queryTokens.size();
+    }
+
+    private List<String> searchTokens(String text) {
+        List<String> tokens = new ArrayList<String>();
+        String normalized = defaultIfBlank(text, "").toLowerCase(Locale.ENGLISH);
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < normalized.length(); i++) {
+            char ch = normalized.charAt(i);
+            if (Character.isLetterOrDigit(ch)) {
+                token.append(ch);
+            } else {
+                addSearchToken(tokens, token);
+            }
+        }
+        addSearchToken(tokens, token);
+        return tokens;
+    }
+
+    private void addSearchToken(List<String> tokens, StringBuilder token) {
+        if (token.length() == 0) {
+            return;
+        }
+        String value = token.toString();
+        token.setLength(0);
+        if (value.length() <= 1 || isSearchStopWord(value) || tokens.contains(value)) {
+            return;
+        }
+        tokens.add(value);
+    }
+
+    private boolean isSearchStopWord(String token) {
+        String stopWords = "|the|and|or|for|from|with|what|where|when|how|does|this|that|are|was|were|";
+        return stopWords.contains("|" + token + "|");
     }
 
     private String defaultIfBlank(String value, String fallback) {

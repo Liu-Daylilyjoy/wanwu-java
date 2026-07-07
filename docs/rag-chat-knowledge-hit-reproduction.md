@@ -24,6 +24,7 @@ Date: 2026-07-01
 - QA knowledge requests now also expose Go-style top-level metadata filtering fields: `returnMeta=true`, `metadataFiltering`, and `metadataFilteringConditions[{filtering_qa_base_name,logical_operator,conditions[]}]`; regular knowledge requests expose the equivalent snake_case `metadata_filtering` and `metadata_filtering_conditions` context fields.
 - When a knowledge base is configured, Java calls `KnowledgeService.hitKnowledge`; when a QA knowledge base is configured, Java calls `KnowledgeService.hitQaPairs`.
 - `KnowledgeService.hitKnowledge` applies Go-style `metadata_filtering_conditions` before scoring local document segments, and `KnowledgeService.hitQaPairs` stores QA `metaDataList`, applies Go-style `metadataFilteringConditions` before scoring local QA hits, and returns `meta_data` / `metaData` on QA hit cards so RAG chat can surface the filtered evidence.
+- Local document and QA retrieval now keep exact substring matches as the strongest signal and add token-overlap fallback scoring for natural-language questions that share keywords without matching a full sentence.
 - The returned `searchList` and `qaSearchList` are normalized with Go BFF-compatible `score`, `kb_name`, and `user_kb_name` fields, then placed on `RagChatResult`; the BFF emits `rag_qa_start -> rag_qa_search_list` and `rag_knowledge_start -> rag_search_list` AG-UI custom SSE events before the text response when local hits exist.
 - The deterministic development response is enriched with the returned `prompt` or first hit text so manual smoke tests can see that the configured knowledge path was used.
 
@@ -38,6 +39,7 @@ Date: 2026-07-01
 - `KnowledgeServiceImplTest#knowledgeHitReturnsLocalRerankInfoWhenRerankModeIsRequested` and `#qaHitReturnsLocalRerankInfoWhenRerankModeIsRequested` verify local rerank evidence appears on document and QA hit cards when rerank mode is requested.
 - `KnowledgeServiceImplTest#knowledgeHitAddsGraphCardWhenUseGraphIsEnabled` verifies local graph evidence is appended to knowledge hit results when `useGraph` and the knowledge graph switch are enabled.
 - `KnowledgeServiceImplTest#knowledgeHitUsesRequestGraphSwitchForGraphCard` verifies RAG per-knowledge `graphSwitch` can also trigger local graph evidence.
+- `KnowledgeServiceImplTest#knowledgeHitUsesTokenOverlapForNaturalQuestions` and `#qaHitUsesTokenOverlapForNaturalQuestions` verify natural questions can recall document and QA hits without full-string substring matches.
 - `WanwuFrontendApiControllerTest#ragChatDraftReturnsAgUiSseAndMapsFrontendRequest` verifies that frontend RAG draft chat emits the Go-style QA and knowledge start/search-list AG-UI event order over text/event-stream.
 
 ## Remaining Gap

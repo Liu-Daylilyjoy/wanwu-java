@@ -286,6 +286,22 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaHitUsesTokenOverlapForNaturalQuestions() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Natural QA", 1)).get("knowledgeId");
+        Map<String, Object> pair = service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does regional policy work?", "Regional policy uses local recall."));
+
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org",
+                qaHit(knowledgeId, "regional rules"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals(pair.get("qaPairId"), searchList.get(0).get("qaPairId"));
+        assertTrue(((List<Double>) hit.get("score")).get(0) > 0D);
+    }
+
+    @Test
     public void qaHitReturnsLocalRerankInfoWhenRerankModeIsRequested() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Rerank QA", 1)).get("knowledgeId");
@@ -898,6 +914,23 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> disabledHit = service.hitKnowledge("dev-admin", "default-org",
                 knowledgeHit(knowledgeId, "Wanwu Java retrieval"));
         assertEquals(0, listOfMaps(disabledHit.get("searchList")).size());
+    }
+
+    @Test
+    public void knowledgeHitUsesTokenOverlapForNaturalQuestions() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Natural KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-natural", "NaturalGuide.txt",
+                        "Policy answer comes from the configured knowledge base."));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "Where does the policy answer come from?"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals("Policy answer comes from the configured knowledge base.", searchList.get(0).get("snippet"));
+        assertTrue(((List<Double>) hit.get("score")).get(0) > 0D);
     }
 
     @Test
