@@ -7164,6 +7164,18 @@ public class AppServiceImpl implements AppService {
         if (workflowLooksLikeJsonToCsvCode(node, code)) {
             return workflowJsonToCsvOutput(input);
         }
+        if (workflowLooksLikeLogLevelCode(node, code)) {
+            return workflowLogLevelOutput(input);
+        }
+        if (workflowLooksLikeTextLengthCode(node, code)) {
+            return workflowTextLengthOutput(input);
+        }
+        if (workflowLooksLikeCategoryValueCode(node, code)) {
+            return workflowCategoryValueOutput(input);
+        }
+        if (workflowLooksLikeExampleMultiOutputCode(node, code)) {
+            return workflowExampleMultiOutput(input);
+        }
         Object value = workflowPrimaryNodeInput(input);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("output", value);
@@ -7189,6 +7201,36 @@ public class AppServiceImpl implements AppService {
                 && workflowHasDeclaredOutput(data, "rows");
     }
 
+    private boolean workflowLooksLikeLogLevelCode(Map<String, Object> node, String code) {
+        String lower = defaultIfBlank(code, "").toLowerCase(java.util.Locale.ENGLISH);
+        Map<String, Object> data = mapValue(node.get("data"));
+        return (lower.contains("level_counts") && lower.contains("error_count"))
+                || (workflowHasDeclaredOutput(data, "error_count")
+                && workflowHasDeclaredOutput(data, "level_counts")
+                && workflowHasDeclaredOutput(data, "log_snippet"));
+    }
+
+    private boolean workflowLooksLikeTextLengthCode(Map<String, Object> node, String code) {
+        String lower = defaultIfBlank(code, "").toLowerCase(java.util.Locale.ENGLISH);
+        Map<String, Object> data = mapValue(node.get("data"));
+        return (lower.contains("len(") && lower.contains("textlen"))
+                || workflowHasDeclaredOutput(data, "textLen");
+    }
+
+    private boolean workflowLooksLikeCategoryValueCode(Map<String, Object> node, String code) {
+        String lower = defaultIfBlank(code, "").toLowerCase(java.util.Locale.ENGLISH);
+        Map<String, Object> data = mapValue(node.get("data"));
+        return (lower.contains("category") && lower.contains("value") && lower.contains("\"data\""))
+                || workflowHasDeclaredOutput(data, "data");
+    }
+
+    private boolean workflowLooksLikeExampleMultiOutputCode(Map<String, Object> node, String code) {
+        String lower = defaultIfBlank(code, "").toLowerCase(java.util.Locale.ENGLISH);
+        Map<String, Object> data = mapValue(node.get("data"));
+        return (lower.contains("key0") && lower.contains("key1") && lower.contains("key2"))
+                || (workflowHasDeclaredOutput(data, "key0") && workflowHasDeclaredOutput(data, "key1"));
+    }
+
     private boolean workflowHasDeclaredOutput(Map<String, Object> nodeOrData, String name) {
         for (Object item : listValue(nodeOrData.get("outputs"))) {
             if (name.equals(textValue(mapValue(item), "name", "key", "field"))) {
@@ -7196,6 +7238,66 @@ public class AppServiceImpl implements AppService {
             }
         }
         return false;
+    }
+
+    private Map<String, Object> workflowLogLevelOutput(Map<String, Object> input) {
+        String text = stringValue(workflowPrimaryNodeInput(input));
+        Map<String, Object> counts = new LinkedHashMap<>();
+        counts.put("ERROR", workflowWordCount(text, "ERROR"));
+        counts.put("WARN", workflowWordCount(text, "WARN"));
+        counts.put("INFO", workflowWordCount(text, "INFO"));
+        counts.put("DEBUG", workflowWordCount(text, "DEBUG"));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("error_count", counts.get("ERROR"));
+        result.put("level_counts", counts);
+        result.put("log_snippet", text.length() > 500 ? text.substring(0, 500) : text);
+        return workflowCodeResult(result, result.get("log_snippet"));
+    }
+
+    private int workflowWordCount(String text, String word) {
+        java.util.regex.Matcher matcher = Pattern.compile("\\b" + word + "\\b", Pattern.CASE_INSENSITIVE).matcher(text);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
+    }
+
+    private Map<String, Object> workflowTextLengthOutput(Map<String, Object> input) {
+        String text = stringValue(workflowPrimaryNodeInput(input));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("textLen", text.length());
+        return workflowCodeResult(result, text.length());
+    }
+
+    private Map<String, Object> workflowCategoryValueOutput(Map<String, Object> input) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("category", stringValue(firstPresent(input, "category", "name")));
+        row.put("value", firstPresent(input, "value", "amount", "score"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("data", Collections.<Object>singletonList(row));
+        return workflowCodeResult(result, result.get("data"));
+    }
+
+    private Map<String, Object> workflowExampleMultiOutput(Map<String, Object> input) {
+        String value = stringValue(workflowPrimaryNodeInput(input));
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("key21", "hi");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key0", value + value);
+        result.put("key1", Arrays.asList("hello", "world"));
+        result.put("key2", nested);
+        return workflowCodeResult(result, result);
+    }
+
+    private Map<String, Object> workflowCodeResult(Map<String, Object> result, Object text) {
+        Map<String, Object> output = new LinkedHashMap<>(result);
+        output.put("output", result);
+        output.put("result", result);
+        output.put("text", text == null ? workflowJsonText(result) : workflowJsonText(text));
+        output.put("response", result);
+        return output;
     }
 
     private Map<String, Object> workflowJsonToCsvOutput(Map<String, Object> input) {

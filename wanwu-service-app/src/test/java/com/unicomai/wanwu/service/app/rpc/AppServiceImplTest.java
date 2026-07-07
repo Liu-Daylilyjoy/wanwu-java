@@ -999,6 +999,56 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesLogLevelCodeNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("LogCodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"138483\",\"type\":\"5\",\"data\":{\"nodeMeta\":{\"title\":\"Count Levels\",\"subTitle\":\"Code\"},"
+                + "\"outputs\":[{\"type\":\"integer\",\"name\":\"error_count\"},{\"type\":\"object\",\"name\":\"level_counts\"},"
+                + "{\"type\":\"string\",\"name\":\"log_snippet\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"code\":\"import re\\nimport collections\\nlevel_counts = collections.Counter(ERROR WARN INFO DEBUG)\"}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"integer\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"138483\",\"name\":\"error_count\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"138483\"},"
+                + "{\"sourceNodeID\":\"138483\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"integer\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input",
+                "INFO boot\nERROR disk\nwarn retry\nerror disk"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals(2, output.get("output"));
+        Map<String, Object> codeOutput = castMap(castMap(output.get("nodeOutputs")).get("138483"));
+        assertEquals(2, codeOutput.get("error_count"));
+        Map<String, Object> levelCounts = castMap(codeOutput.get("level_counts"));
+        assertEquals(2, levelCounts.get("ERROR"));
+        assertEquals(1, levelCounts.get("WARN"));
+        assertEquals(1, levelCounts.get("INFO"));
+        assertTrue(String.valueOf(codeOutput.get("log_snippet")).contains("INFO boot"));
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void workflowRunExecutesKnowledgeQueryNode() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
