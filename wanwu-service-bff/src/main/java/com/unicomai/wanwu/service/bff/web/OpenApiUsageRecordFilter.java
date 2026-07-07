@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingRequestWrapper;
+import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
@@ -63,12 +64,13 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         ContentCachingRequestWrapper wrapped = new ContentCachingRequestWrapper(request, 4096);
+        ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
         long startedAt = System.currentTimeMillis();
         RuntimeException runtimeFailure = null;
         ServletException servletFailure = null;
         IOException ioFailure = null;
         try {
-            filterChain.doFilter(wrapped, response);
+            filterChain.doFilter(wrapped, wrappedResponse);
         } catch (RuntimeException ex) {
             runtimeFailure = ex;
             throw ex;
@@ -86,11 +88,15 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
             if (status == 0) {
                 status = 200;
             }
-            record(wrapped, startedAt, status);
+            record(wrapped, wrappedResponse, startedAt, status);
+            wrappedResponse.copyBodyToResponse();
         }
     }
 
-    private void record(ContentCachingRequestWrapper request, long startedAt, int status) {
+    private void record(ContentCachingRequestWrapper request,
+                        ContentCachingResponseWrapper response,
+                        long startedAt,
+                        int status) {
         UsageContext context = usageContext(request);
         if (context == null || isBlank(context.apiKeyId)) {
             return;
@@ -98,6 +104,7 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
         long costs = Math.max(0L, System.currentTimeMillis() - startedAt);
         String requestBody = jsonRequestBody(request);
         boolean stream = streamRequest(request, requestBody);
+        String responseBody = stream ? "" : responseBody(response);
         String methodPath = request.getMethod() + "-" + request.getRequestURI();
         long streamCosts = stream ? costs : 0L;
         long nonStreamCosts = stream ? 0L : costs;
@@ -112,8 +119,9 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
                 streamCosts,
                 nonStreamCosts,
                 requestBody,
-                "");
-        recordAppService(context, methodPath, startedAt, status, stream, streamCosts, nonStreamCosts, requestBody);
+                responseBody);
+        recordAppService(context, methodPath, startedAt, status, stream, streamCosts, nonStreamCosts,
+                requestBody, responseBody);
     }
 
     private void recordAppService(UsageContext context,
@@ -123,7 +131,8 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
                                   boolean stream,
                                   long streamCosts,
                                   long nonStreamCosts,
-                                  String requestBody) {
+                                  String requestBody,
+                                  String responseBody) {
         if (appService == null) {
             return;
         }
@@ -139,7 +148,7 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
             command.setStreamCosts(streamCosts);
             command.setNonStreamCosts(nonStreamCosts);
             command.setRequestBody(requestBody);
-            command.setResponseBody("");
+            command.setResponseBody(responseBody);
             appService.recordApiKeyStatistic(command);
         } catch (RuntimeException ex) {
             LOGGER.warn("OpenAPI API key statistic persistence failed, falling back to local meter: apiKeyId={}, methodPath={}",
@@ -171,6 +180,24 @@ public class OpenApiUsageRecordFilter extends OncePerRequestFilter {
         Charset charset = request.getCharacterEncoding() == null
                 ? StandardCharsets.UTF_8
                 : Charset.forName(request.getCharacterEncoding());
+        return new String(bytes, charset);
+    }
+
+    private String responseBody(ContentCachingResponseWrapper response) {
+        String contentType = response.getContentType();
+        if (contentType != null) {
+            String lower = contentType.toLowerCase();
+            if (!lower.contains("json") && !lower.startsWith("text/")) {
+                return "";
+            }
+        }
+        byte[] bytes = response.getContentAsByteArray();
+        if (bytes.length == 0) {
+            return "";
+        }
+        Charset charset = response.getCharacterEncoding() == null
+                ? StandardCharsets.UTF_8
+                : Charset.forName(response.getCharacterEncoding());
         return new String(bytes, charset);
     }
 

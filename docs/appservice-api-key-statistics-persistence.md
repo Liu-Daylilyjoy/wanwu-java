@@ -15,7 +15,7 @@ The original Go backend records OpenAPI API Key usage in two layers:
 
 Java keeps the same BFF-to-AppService responsibility split, but uses direct MySQL writes for this slice:
 
-- BFF `OpenApiUsageRecordFilter` records OpenAPI calls and invokes `AppService.recordApiKeyStatistic`.
+- BFF `OpenApiUsageRecordFilter` records OpenAPI calls, captures JSON request bodies and non-stream JSON/text response bodies, and invokes `AppService.recordApiKeyStatistic`.
 - AppService writes a detailed row to `api_key_records`.
 - AppService upserts a daily aggregate row in `api_key_statistics`.
 - The statistics dashboard reads AppService first for overview, trend, aggregate list, and detailed record endpoints.
@@ -57,6 +57,6 @@ The direct MySQL aggregate write is intentional for Docker reproducibility. It p
 ## Remaining Parity Work
 
 - Replace direct aggregate writes with Redis daily aggregation and synchronization when Redis parity is introduced.
-- Use real provider execution costs instead of BFF request elapsed time for all runtime families.
+- Use real provider execution costs and true first-token stream costs instead of BFF request elapsed time for all runtime families.
 - Export persisted API Key aggregate and record data as the original Excel format.
 - Tighten API-key scoped authorization to match Go middleware exactly.

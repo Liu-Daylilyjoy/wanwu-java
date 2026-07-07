@@ -30,7 +30,7 @@ Covered routes in this Java slice:
 - App select/list data is sourced from `AppService.listApplications`.
 - Model list data is sourced from `ModelService.listModels`.
 - API Key select/list data is sourced from `AppService.listApiKeys`.
-- API Key overview, trend, aggregate list, detailed records, and exports now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`.
+- API Key overview, trend, aggregate list, detailed records, and exports now prefer AppService/MySQL runtime statistics written by `OpenApiUsageRecordFilter`; non-stream OpenAPI JSON/text responses are captured into detailed `responseBody`.
 - App/model overview, trend, aggregate lists, and exports now prefer AppService/MySQL runtime statistics written by frontend, OpenAPI, and OpenURL runtime paths.
 - `OpenApiUsageMeter` remains as a BFF-local fallback if the AppService statistic path is temporarily unavailable.
 - Export routes return single-sheet xlsx workbooks compatible with the Go excelize export contract.
@@ -61,5 +61,5 @@ The controller is also included in the Docker Compose BFF smoke path for:
 ## Remaining Work
 
 - Reproduce the Go Redis daily hash plus cron/statistics synchronization path.
-- Replace deterministic local token/cost estimates with exact provider-reported runtime metrics.
+- Replace deterministic local token/cost estimates with exact provider-reported runtime metrics and true first-token streaming cost attribution.
 - Replace the direct MySQL API Key aggregate write with the Go-equivalent Redis daily aggregation plus synchronization job when Redis parity is introduced.

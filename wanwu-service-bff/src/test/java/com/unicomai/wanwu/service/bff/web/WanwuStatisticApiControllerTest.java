@@ -26,6 +26,7 @@ import com.unicomai.wanwu.api.app.dto.ModelStatisticOverview;
 import com.unicomai.wanwu.api.app.dto.ModelStatisticResult;
 import com.unicomai.wanwu.api.app.dto.RagChatCommand;
 import com.unicomai.wanwu.api.app.dto.RagChatResult;
+import com.unicomai.wanwu.api.app.dto.RecordApiKeyStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.StatisticChart;
 import com.unicomai.wanwu.api.app.dto.StatisticLine;
 import com.unicomai.wanwu.api.app.dto.StatisticOverviewItem;
@@ -35,6 +36,7 @@ import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.ModelService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
@@ -56,6 +58,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -127,6 +130,50 @@ public class WanwuStatisticApiControllerTest {
                 .andExpect(jsonPath("$.data.list[0].methodPath").value(methodPath))
                 .andExpect(jsonPath("$.data.list[0].responseStatus").value("200"))
                 .andExpect(jsonPath("$.data.list[0].requestBody").value(containsString("\"stream\":true")));
+    }
+
+    @Test
+    public void nonStreamOpenApiUsageRecordsResponseBody() throws Exception {
+        RagChatResult ragResult = new RagChatResult();
+        ragResult.setRagId("rag-stat-response");
+        ragResult.setResponse("nonstream answer");
+        when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(ragResult);
+        when(appService.listApiKeys(any(ApiKeyListQuery.class)))
+                .thenReturn(new ApiKeyPageResult(Collections.singletonList(devAdminApiKey()), 1, 1, 1000));
+
+        OpenApiUsageMeter localMeter = new OpenApiUsageMeter();
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(
+                        new WanwuOpenApiController(appService, modelService, null, new OpenApiChatflowSessionStore()),
+                        new WanwuStatisticApiController(appService, modelService, localMeter))
+                .addFilters(new OpenApiUsageRecordFilter(localMeter, appService))
+                .build();
+
+        mockMvc.perform(post("/service/api/openapi/v1/rag/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"rag-stat-response\",\"query\":\"show response\",\"stream\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.output").value("nonstream answer"));
+
+        String today = LocalDate.now().toString();
+        String methodPath = "POST-/service/api/openapi/v1/rag/chat";
+        String query = "{\"startDate\":\"" + today + "\",\"endDate\":\"" + today
+                + "\",\"apiKeyIds\":[\"ALL\"],\"methodPaths\":[\"" + methodPath + "\"]}";
+
+        mockMvc.perform(post("/user/api/v1/statistic/api/record")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].requestBody").value(containsString("\"stream\":false")))
+                .andExpect(jsonPath("$.data.list[0].responseBody").value(containsString("\"output\":\"nonstream answer\"")));
+
+        ArgumentCaptor<RecordApiKeyStatisticCommand> captor =
+                ArgumentCaptor.forClass(RecordApiKeyStatisticCommand.class);
+        verify(appService).recordApiKeyStatistic(captor.capture());
+        assertTrue(captor.getValue().getResponseBody().contains("\"output\":\"nonstream answer\""));
     }
 
     @Test
