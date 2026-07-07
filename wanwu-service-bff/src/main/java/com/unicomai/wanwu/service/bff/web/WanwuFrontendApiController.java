@@ -79,6 +79,7 @@ import com.unicomai.wanwu.api.iam.IamService;
 import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
+import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
 import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.iam.dto.PermissionResult;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
@@ -131,6 +132,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -145,6 +147,40 @@ public class WanwuFrontendApiController {
 
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
+    private static final String DEV_APP_TOKEN = "dev-token-app";
+    private static final List<String> APP_PERMISSIONS = Collections.unmodifiableList(
+            Arrays.asList("app", "app.rag", "app.workflow", "app.agent"));
+    private static final List<String> ADMIN_PERMISSIONS = Collections.unmodifiableList(Arrays.asList(
+            "permission",
+            "permission.user",
+            "permission.org",
+            "permission.role",
+            "setting",
+            "model",
+            "model.model_management",
+            "app",
+            "app.rag",
+            "app.workflow",
+            "app.agent",
+            "api_key",
+            "api_key.api_key_management",
+            "resource",
+            "resource.knowledge",
+            "resource.tool",
+            "resource.mcp",
+            "resource.prompt",
+            "resource.skill",
+            "resource.safety",
+            "operation",
+            "operation.oauth",
+            "operation.statistic_client",
+            "exploration",
+            "exploration.app",
+            "exploration.mcp",
+            "exploration.template",
+            "exploration.skill",
+            "app_observability",
+            "app_observability.statistic"));
     private static final String AGENT_APP_TYPE = "agent";
     private static final String RAG_APP_TYPE = "rag";
     private static final String WORKFLOW_APP_TYPE = "workflow";
@@ -245,12 +281,27 @@ public class WanwuFrontendApiController {
     @GetMapping("/user/permission")
     public FrontendResponse<PermissionResult> permission(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
-        return FrontendResponse.ok(iamService.permission(extractToken(authorization)));
+        String token = extractToken(authorization);
+        if (iamService != null) {
+            try {
+                return FrontendResponse.ok(iamService.permission(token));
+            } catch (RuntimeException ignored) {
+                // Docker development fallback keeps the frontend permission bootstrap available.
+            }
+        }
+        return FrontendResponse.ok(developmentPermission(token));
     }
 
     @GetMapping("/org/select")
     public FrontendResponse<OrganizationSelectResult> selectOrganizations() {
-        return FrontendResponse.ok(iamService.selectOrganizations());
+        if (iamService != null) {
+            try {
+                return FrontendResponse.ok(iamService.selectOrganizations());
+            } catch (RuntimeException ignored) {
+                // Docker development fallback keeps organization switching usable.
+            }
+        }
+        return FrontendResponse.ok(developmentOrganizationSelect());
     }
 
     @GetMapping("/user/list")
@@ -3787,6 +3838,65 @@ public class WanwuFrontendApiController {
 
     private interface AssistantVoidCall {
         void execute(AssistantResourceCommand command);
+    }
+
+    private PermissionResult developmentPermission(String token) {
+        boolean appAccount = DEV_APP_TOKEN.equals(token);
+        PermissionResult result = new PermissionResult();
+        result.setOrgPermission(developmentOrgPermission(appAccount));
+        result.setIsUpdatePassword(true);
+        result.setAvatar(developmentAvatar());
+        result.setLanguage(developmentLanguage());
+        return result;
+    }
+
+    private Map<String, Object> developmentOrgPermission(boolean appAccount) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("org", developmentIdName(DEV_ORG_ID, "Default Organization"));
+        body.put("permissions", developmentPermissionItems(appAccount ? APP_PERMISSIONS : ADMIN_PERMISSIONS));
+        body.put("roles", Collections.singletonList(appAccount
+                ? developmentIdName("app", "App User")
+                : developmentIdName("admin", "System Admin")));
+        body.put("isAdmin", !appAccount);
+        body.put("isSystem", !appAccount);
+        return body;
+    }
+
+    private List<Map<String, Object>> developmentPermissionItems(List<String> permissions) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (String permission : permissions) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("perm", permission);
+            item.put("name", permission);
+            result.add(item);
+        }
+        return result;
+    }
+
+    private OrganizationSelectResult developmentOrganizationSelect() {
+        return new OrganizationSelectResult(Collections.singletonList(
+                new OrganizationOption(DEV_ORG_ID, "Default Organization")));
+    }
+
+    private Map<String, Object> developmentIdName(String id, String name) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", id);
+        body.put("name", name);
+        return body;
+    }
+
+    private Map<String, Object> developmentAvatar() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("key", "");
+        body.put("path", "");
+        return body;
+    }
+
+    private Map<String, Object> developmentLanguage() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", "zh");
+        body.put("name", "\u4e2d\u6587");
+        return body;
     }
 
     private String extractToken(String authorization) {

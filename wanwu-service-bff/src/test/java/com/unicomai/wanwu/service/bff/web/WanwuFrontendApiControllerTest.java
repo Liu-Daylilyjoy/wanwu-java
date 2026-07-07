@@ -233,6 +233,42 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void permissionAndOrgSelectFallbackWhenIamUnavailable() throws Exception {
+        when(iamService.permission("dev-token")).thenThrow(new IllegalStateException("iam offline"));
+        when(iamService.permission("dev-token-app")).thenThrow(new IllegalStateException("iam offline"));
+        when(iamService.selectOrganizations()).thenThrow(new IllegalStateException("iam offline"));
+
+        mockMvc.perform(get("/user/api/v1/user/permission")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.orgPermission.org.id").value("default-org"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("permission"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[29].perm").value("app_observability.statistic"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[30]").doesNotExist())
+                .andExpect(jsonPath("$.data.orgPermission.isAdmin").value(true))
+                .andExpect(jsonPath("$.data.isUpdatePassword").value(true))
+                .andExpect(jsonPath("$.data.language.code").value("zh"))
+                .andExpect(jsonPath("$.data.avatar.path").value(""));
+
+        mockMvc.perform(get("/user/api/v1/user/permission")
+                        .header("Authorization", "Bearer dev-token-app"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orgPermission.org.id").value("default-org"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[0].perm").value("app"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[1].perm").value("app.rag"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[2].perm").value("app.workflow"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[3].perm").value("app.agent"))
+                .andExpect(jsonPath("$.data.orgPermission.permissions[4]").doesNotExist())
+                .andExpect(jsonPath("$.data.orgPermission.isAdmin").value(false));
+
+        mockMvc.perform(get("/user/api/v1/org/select"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.select[0].id").value("default-org"))
+                .andExpect(jsonPath("$.data.select[0].name").value("Default Organization"));
+    }
+
+    @Test
     public void assistantListReturnsEmptyFrontendList() throws Exception {
         when(appService.listAssistants(any(ApplicationListQuery.class)))
                 .thenReturn(new ApplicationListResult(Collections.emptyList()));
