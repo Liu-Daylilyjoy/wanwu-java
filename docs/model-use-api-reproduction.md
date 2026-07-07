@@ -19,6 +19,8 @@ These routes are frontend-visible even though most of the current Java reproduct
 
 - `web/nginx.conf` now forwards `/use/model/api/` to the BFF container, matching the original Go deployment proxy shape.
 - Assistant create/update/delete/publish/list/info routes delegate to the existing Java `AppService` development assistant lifecycle where possible.
+- Legacy assistant app publish (`/assistant/app/publish`) now also delegates to `AppService.publishApp` and returns the published `assistantId/appId/version/status` fields expected by the old page.
+- Legacy assistant common/recommend list routes now read `AppService.listAssistants` instead of returning an empty shell, while recommend update returns an explicit compatibility acknowledgement for the marked assistant.
 - Assistant conversation create/list/detail/delete delegates to the existing Java assistant conversation shell.
 - Model experience dialog create/list/delete/detail aliases delegate to `ModelService`, so `/use/model/api/v1/model/experience/*` and `/user/api/v1/model/experience/*` share the same development repository.
 - ChatLLM/CUBM conversation create/list/detail/delete now delegates to `AppService`, using the existing `assistant_conversations` and `assistant_conversation_messages` MySQL-backed repository with an internal `model_use_chatllm` conversation type.
@@ -29,7 +31,7 @@ These routes are frontend-visible even though most of the current Java reproduct
 ## Current Boundary
 
 - This is a route and data-shape compatibility slice, not a reproduced model-use inference service.
-- ChatLLM/CUBM replies, assistant action execution, auto-create generation, and file extraction are deterministic shells.
+- ChatLLM/CUBM replies, assistant action execution, auto-create generation, recommend ranking persistence, and file extraction are deterministic shells.
 - Assistant, model experience, ChatLLM/CUBM conversations, assistant knowledge-file metadata, and assistant action metadata persistence reuse Java development repositories; actual uploaded file content/object-storage lifecycle for legacy model-use knowledge files remains a later MinIO/runtime parity slice.
 
 ## Verification
@@ -37,4 +39,4 @@ These routes are frontend-visible even though most of the current Java reproduct
 - `AppServiceImplTest#legacyChatLlmConversationUsesPersistentConversationRepository` covers the persisted ChatLLM/CUBM service loop.
 - `AppServiceImplTest#legacyAssistantKnowledgeFilesUsePersistentRepository` covers the persisted assistant knowledge-file metadata loop.
 - `AppServiceImplTest#legacyAssistantActionsUsePersistentRepository` covers the persisted assistant action metadata loop.
-- `WanwuModelUseApiControllerTest` covers legacy assistant lifecycle, assistant conversations, assistant knowledge-file route delegation, assistant action route delegation, ChatLLM/CUBM route mapping, model experience aliases, file extraction, file confirmation, and batch upload aliases.
+- `WanwuModelUseApiControllerTest` covers legacy assistant lifecycle, assistant app publish, common/recommend list/update aliases, assistant conversations, assistant knowledge-file route delegation, assistant action route delegation, ChatLLM/CUBM route mapping, model experience aliases, file extraction, file confirmation, and batch upload aliases.

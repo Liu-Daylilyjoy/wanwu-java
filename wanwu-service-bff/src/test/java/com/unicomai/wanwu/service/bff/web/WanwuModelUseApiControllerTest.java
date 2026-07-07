@@ -90,6 +90,28 @@ public class WanwuModelUseApiControllerTest {
                         .content("{\"assistantId\":\"assistant-001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/use/model/api/v1/assistant/app/publish")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"version\":\"v2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.status").value("published"));
+        mockMvc.perform(get("/use/model/api/v1/assistant/common/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].assistantId").value("assistant-001"));
+        mockMvc.perform(get("/use/model/api/v1/assistant/recommend/list")
+                        .header("Authorization", "Bearer dev-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].assistantId").value("assistant-001"));
+        mockMvc.perform(put("/use/model/api/v1/assistant/recommend/update")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assistantId\":\"assistant-001\",\"recommended\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.assistantId").value("assistant-001"))
+                .andExpect(jsonPath("$.data.recommended").value(true));
         mockMvc.perform(delete("/use/model/api/v1/assistant/delete")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -117,7 +139,7 @@ public class WanwuModelUseApiControllerTest {
 
         verify(appService).createAssistant(any());
         verify(appService).updateAssistant(any());
-        verify(appService).publishApp(any());
+        verify(appService, times(2)).publishApp(any());
         verify(appService).deleteAssistant(any());
     }
 

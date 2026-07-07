@@ -108,15 +108,7 @@ public class WanwuModelUseApiController {
     public FrontendResponse<Map<String, Object>> publishAssistant(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody(required = false) Map<String, Object> request) {
-        UserContext ctx = userContext(authorization);
-        AppPublishCommand command = new AppPublishCommand();
-        command.setUserId(ctx.userId);
-        command.setOrgId(ctx.orgId);
-        command.setAppType(AGENT_APP_TYPE);
-        command.setAppId(firstText(request, "assistantId", "appId"));
-        command.setVersion(defaultIfBlank(firstText(request, "version"), "v1"));
-        command.setDesc(defaultIfBlank(firstText(request, "desc", "description"), "Published from legacy MODEL_API"));
-        command.setPublishType(defaultIfBlank(firstText(request, "publishType"), "private"));
+        AppPublishCommand command = toPublishCommand(userContext(authorization), request);
         appService.publishApp(command);
         return FrontendResponse.ok(Collections.<String, Object>emptyMap());
     }
@@ -248,21 +240,38 @@ public class WanwuModelUseApiController {
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/app/publish")
-    public FrontendResponse<Map<String, Object>> linkAssistantApp() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
-    }
-
-    @GetMapping(MODEL_PREFIX + "/assistant/recommend/list")
-    public FrontendResponse<Map<String, Object>> listRecommendedAssistants() {
+    public FrontendResponse<Map<String, Object>> linkAssistantApp(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) Map<String, Object> request) {
+        AppPublishCommand command = toPublishCommand(userContext(authorization), request);
+        appService.publishApp(command);
         Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("list", Collections.emptyList());
-        body.put("total", 0);
+        body.put("assistantId", command.getAppId());
+        body.put("appId", command.getAppId());
+        body.put("version", command.getVersion());
+        body.put("status", "published");
         return FrontendResponse.ok(body);
     }
 
+    @GetMapping(MODEL_PREFIX + "/assistant/recommend/list")
+    public FrontendResponse<Object> listRecommendedAssistants(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "name", required = false) String name) {
+        UserContext ctx = userContext(authorization);
+        return FrontendResponse.ok(appService.listAssistants(
+                new ApplicationListQuery(AGENT_APP_TYPE, defaultIfBlank(name, ""), ctx.userId, ctx.orgId)));
+    }
+
     @PutMapping(MODEL_PREFIX + "/assistant/recommend/update")
-    public FrontendResponse<Map<String, Object>> updateRecommendedAssistant() {
-        return FrontendResponse.ok(Collections.<String, Object>emptyMap());
+    public FrontendResponse<Map<String, Object>> updateRecommendedAssistant(
+            @RequestBody(required = false) Map<String, Object> request) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        String assistantId = firstText(request, "assistantId", "appId");
+        body.put("assistantId", assistantId);
+        body.put("appId", assistantId);
+        body.put("recommended", booleanValue(request == null ? null : request.get("recommended"), true));
+        body.put("status", "updated");
+        return FrontendResponse.ok(body);
     }
 
     @PostMapping(MODEL_PREFIX + "/assistant/action/create")
@@ -478,6 +487,18 @@ public class WanwuModelUseApiController {
         return command;
     }
 
+    private AppPublishCommand toPublishCommand(UserContext ctx, Map<String, Object> request) {
+        AppPublishCommand command = new AppPublishCommand();
+        command.setUserId(ctx.userId);
+        command.setOrgId(ctx.orgId);
+        command.setAppType(AGENT_APP_TYPE);
+        command.setAppId(firstText(request, "assistantId", "appId"));
+        command.setVersion(defaultIfBlank(firstText(request, "version"), "v1"));
+        command.setDesc(defaultIfBlank(firstText(request, "desc", "description"), "Published from legacy MODEL_API"));
+        command.setPublishType(defaultIfBlank(firstText(request, "publishType"), "private"));
+        return command;
+    }
+
     private AssistantActionUpsertCommand toActionUpsertCommand(UserContext ctx, Map<String, Object> request) {
         AssistantActionUpsertCommand command = new AssistantActionUpsertCommand();
         command.setUserId(ctx.userId);
@@ -595,6 +616,13 @@ public class WanwuModelUseApiController {
         } catch (NumberFormatException ex) {
             return fallback;
         }
+    }
+
+    private boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value));
     }
 
     private String defaultIfBlank(String value, String fallback) {
