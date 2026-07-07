@@ -7622,22 +7622,31 @@ public class AppServiceImpl implements AppService {
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String responseBody = stream == null ? "" : workflowReadFully(stream);
             String responseHeaders = workflowJsonText(workflowResponseHeaders(connection));
-            Map<String, Object> output = new LinkedHashMap<>();
-            output.put("body", responseBody);
-            output.put("statusCode", status);
-            output.put("headers", responseHeaders);
-            output.put("output", responseBody);
-            output.put("text", responseBody);
-            output.put("result", responseBody);
-            output.put("response", responseBody);
-            return output;
+            return workflowHttpResponse(responseBody, status, responseHeaders);
         } catch (IOException ex) {
-            throw new IllegalArgumentException("workflow http request failed: " + url, ex);
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("error", "workflow http request failed");
+            error.put("method", method);
+            error.put("url", url);
+            error.put("message", defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()));
+            return workflowHttpResponse(workflowJsonText(error), 599, "{}");
         } finally {
             if (connection != null) {
                 connection.disconnect();
             }
         }
+    }
+
+    private Map<String, Object> workflowHttpResponse(String responseBody, int status, String responseHeaders) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("body", responseBody);
+        output.put("statusCode", status);
+        output.put("headers", responseHeaders);
+        output.put("output", responseBody);
+        output.put("text", responseBody);
+        output.put("result", responseBody);
+        output.put("response", responseBody);
+        return output;
     }
 
     private Map<String, Object> workflowHttpNameValueMap(List<Object> items, Map<String, Object> input) {

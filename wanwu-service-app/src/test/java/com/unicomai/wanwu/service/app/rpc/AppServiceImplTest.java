@@ -1046,6 +1046,49 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunKeepsGoingWhenHttpRequestFails() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("HttpFallbackFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"city\"}]}},"
+                + "{\"id\":\"110001\",\"type\":\"45\",\"data\":{\"nodeMeta\":{\"title\":\"Fetch\",\"subTitle\":\"HTTP Request\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"body\"},{\"type\":\"integer\",\"name\":\"statusCode\"}],"
+                + "\"inputs\":{\"apiInfo\":{\"method\":\"GET\",\"url\":\"http://127.0.0.1:1/weather/{{city}}\"},"
+                + "\"setting\":{\"timeout\":1}}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110001\",\"name\":\"body\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110001\"},"
+                + "{\"sourceNodeID\":\"110001\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("city", "beijing"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertTrue(String.valueOf(output.get("output")).contains("workflow http request failed"));
+        Map<String, Object> httpOutput = castMap(castMap(output.get("nodeOutputs")).get("110001"));
+        assertEquals(599, httpOutput.get("statusCode"));
+        assertTrue(String.valueOf(httpOutput.get("body")).contains("http://127.0.0.1:1/weather/beijing"));
+    }
+
+    @Test
     public void workflowRunExecutesJsonToCsvCodeNode() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
