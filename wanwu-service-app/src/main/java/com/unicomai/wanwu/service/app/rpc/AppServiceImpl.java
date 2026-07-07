@@ -6174,6 +6174,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(workflowSelectorOutput(node, input));
         } else if (workflowIsInputNode(node, type, lowerType)) {
             output.putAll(workflowInputNodeOutput(node, input));
+        } else if (workflowIsSetVariableNode(node, type, lowerType)) {
+            output.putAll(workflowSetVariableOutput(node, input));
         } else if (workflowIsLoopNode(node, type, lowerType)) {
             output.putAll(workflowLoopOutput(node, input));
         } else if (workflowIsConcatNode(type, lowerType)) {
@@ -6481,6 +6483,55 @@ public class AppServiceImpl implements AppService {
     private boolean workflowIsLoopNode(Map<String, Object> node, String type, String lowerType) {
         String semantic = workflowNodeSemanticText(node, type, lowerType);
         return "21".equals(type) || semantic.contains("loop");
+    }
+
+    private boolean workflowIsSetVariableNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "20".equals(type) || semantic.contains("set variable") || semantic.contains("variable set");
+    }
+
+    private Map<String, Object> workflowSetVariableOutput(Map<String, Object> node, Map<String, Object> input) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        for (Object item : listValue(inputs.get("inputParameters"))) {
+            Map<String, Object> parameter = mapValue(item);
+            String name = workflowSetVariableName(parameter.get("left"));
+            if (isBlank(name)) {
+                name = textValue(parameter, "name", "key", "field", "variable");
+            }
+            if (isBlank(name)) {
+                continue;
+            }
+            Object rawValue = firstPresent(parameter, "right", "input", "value", "default");
+            Object value = workflowResolveConfiguredInput(rawValue, input);
+            output.put(name, value == null ? "" : value);
+        }
+        Object primary = output.isEmpty() ? "" : output.values().iterator().next();
+        output.put("output", primary);
+        output.put("result", primary);
+        output.put("response", primary);
+        output.put("text", workflowJsonText(primary));
+        return output;
+    }
+
+    private String workflowSetVariableName(Object raw) {
+        Map<String, Object> left = mapValue(raw);
+        if (left.isEmpty()) {
+            return "";
+        }
+        Object contentRaw = left.get("content");
+        Map<String, Object> value = mapValue(left.get("value"));
+        if (!value.isEmpty() && value.containsKey("content")) {
+            contentRaw = value.get("content");
+        }
+        Map<String, Object> content = mapValue(contentRaw);
+        String name = textValue(content, "name", "key", "field", "path");
+        if (!isBlank(name)) {
+            int dot = name.lastIndexOf('.');
+            return dot >= 0 ? name.substring(dot + 1) : name;
+        }
+        return textValue(left, "name", "key", "field", "variable");
     }
 
     private Map<String, Object> workflowLoopOutput(Map<String, Object> node, Map<String, Object> input) {

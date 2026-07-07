@@ -1320,6 +1320,49 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesSetVariableNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("SetVariableFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"draft\"}]}},"
+                + "{\"id\":\"120390\",\"type\":\"20\",\"data\":{\"nodeMeta\":{\"title\":\"设置变量\",\"subTitle\":\"设置变量\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"left\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"120390\",\"name\":\"finalText\"}}},"
+                + "\"right\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"draft\"}}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"120390\",\"name\":\"finalText\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"120390\"},"
+                + "{\"sourceNodeID\":\"120390\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("draft", "expanded paragraph"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("expanded paragraph", output.get("output"), String.valueOf(output));
+        Map<String, Object> nodeOutput = castMap(castMap(output.get("nodeOutputs")).get("120390"));
+        assertEquals("expanded paragraph", nodeOutput.get("finalText"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
