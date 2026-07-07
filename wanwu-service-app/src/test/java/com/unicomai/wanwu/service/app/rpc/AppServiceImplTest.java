@@ -131,6 +131,10 @@ import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -149,6 +153,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1158,6 +1164,132 @@ public class AppServiceImplTest {
             assertEquals("Wanwu document parser keeps workflow text.", output.get("output"));
             Map<String, Object> parseOutput = castMap(castMap(output.get("nodeOutputs")).get("152281"));
             assertEquals("Wanwu document parser keeps workflow text.", parseOutput.get("text"));
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    public void workflowRunExecutesDocumentParseNodeForPdfFiles() throws Exception {
+        Path file = Files.createTempFile("wanwu-workflow-doc-", ".pdf");
+        PDDocument document = new PDDocument();
+        try {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            PDPageContentStream content = new PDPageContentStream(document, page);
+            try {
+                content.beginText();
+                content.setFont(PDType1Font.HELVETICA, 12);
+                content.newLineAtOffset(72, 720);
+                content.showText("Wanwu PDF workflow parser keeps binary text.");
+                content.endText();
+            } finally {
+                content.close();
+            }
+            document.save(file.toFile());
+        } finally {
+            document.close();
+        }
+        try {
+            InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+            AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+            WorkflowCreateCommand create = new WorkflowCreateCommand();
+            create.setName("DocumentParsePdfFlow");
+            create.setSchema("{"
+                    + "\"nodes\":["
+                    + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"file\"}]}},"
+                    + "{\"id\":\"152281\",\"type\":\"1008\",\"data\":{\"nodeMeta\":{\"title\":\"Document Parse\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"text\"}],"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"FileUrl\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"file\"}}}}]}}},"
+                    + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"152281\",\"name\":\"text\"}}}}]}}}"
+                    + "],"
+                    + "\"edges\":["
+                    + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"152281\"},"
+                    + "{\"sourceNodeID\":\"152281\",\"targetNodeID\":\"900001\"}"
+                    + "],"
+                    + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                    + "}");
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            WorkflowCreateResult created = service.createWorkflow(create);
+
+            WorkflowRunCommand run = new WorkflowRunCommand();
+            run.setWorkflowId(created.getWorkflowId());
+            run.setUserId("dev-admin");
+            run.setOrgId("default-org");
+            run.setInput(Collections.<String, Object>singletonMap("file", file.toUri().toString()));
+
+            Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+            assertTrue(String.valueOf(output.get("output")).contains("Wanwu PDF workflow parser"));
+            Map<String, Object> parseOutput = castMap(castMap(output.get("nodeOutputs")).get("152281"));
+            assertTrue(String.valueOf(parseOutput.get("text")).contains("binary text"));
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    public void workflowRunExecutesDocumentParseNodeForDocxFiles() throws Exception {
+        Path file = Files.createTempFile("wanwu-workflow-doc-", ".docx");
+        ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(file));
+        try {
+            zip.putNextEntry(new ZipEntry("word/document.xml"));
+            String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                    + "<w:body>"
+                    + "<w:p><w:r><w:t>Wanwu DOCX workflow parser.</w:t></w:r></w:p>"
+                    + "<w:p><w:r><w:t>Second paragraph survives extraction.</w:t></w:r></w:p>"
+                    + "</w:body></w:document>";
+            zip.write(xml.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        } finally {
+            zip.close();
+        }
+        try {
+            InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+            AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+            WorkflowCreateCommand create = new WorkflowCreateCommand();
+            create.setName("DocumentParseDocxFlow");
+            create.setSchema("{"
+                    + "\"nodes\":["
+                    + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"file\"}]}},"
+                    + "{\"id\":\"152281\",\"type\":\"1008\",\"data\":{\"nodeMeta\":{\"title\":\"Document Parse\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"text\"}],"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"FileUrl\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"file\"}}}}]}}},"
+                    + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"152281\",\"name\":\"text\"}}}}]}}}"
+                    + "],"
+                    + "\"edges\":["
+                    + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"152281\"},"
+                    + "{\"sourceNodeID\":\"152281\",\"targetNodeID\":\"900001\"}"
+                    + "],"
+                    + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                    + "}");
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            WorkflowCreateResult created = service.createWorkflow(create);
+
+            WorkflowRunCommand run = new WorkflowRunCommand();
+            run.setWorkflowId(created.getWorkflowId());
+            run.setUserId("dev-admin");
+            run.setOrgId("default-org");
+            run.setInput(Collections.<String, Object>singletonMap("file", file.toUri().toString()));
+
+            Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+            assertTrue(String.valueOf(output.get("output")).contains("Wanwu DOCX workflow parser."));
+            Map<String, Object> parseOutput = castMap(castMap(output.get("nodeOutputs")).get("152281"));
+            assertTrue(String.valueOf(parseOutput.get("text")).contains("Second paragraph survives extraction."));
         } finally {
             Files.deleteIfExists(file);
         }

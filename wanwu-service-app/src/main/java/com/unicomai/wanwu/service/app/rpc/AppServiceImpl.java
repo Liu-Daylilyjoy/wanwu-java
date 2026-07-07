@@ -159,14 +159,23 @@ import com.unicomai.wanwu.service.app.domain.RagSnapshotRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowDraftRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowRunRecord;
 import com.unicomai.wanwu.service.app.domain.WorkflowSnapshotRecord;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -191,6 +200,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @DubboService(version = RpcConstants.VERSION, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
 public class AppServiceImpl implements AppService {
@@ -6942,7 +6953,145 @@ public class AppServiceImpl implements AppService {
         if (bytes.length == 0) {
             return source;
         }
+        String parsed = workflowBinaryDocumentText(source, bytes);
+        if (!isBlank(parsed)) {
+            return parsed.trim();
+        }
         return stripUtf8Bom(new String(bytes, StandardCharsets.UTF_8)).trim();
+    }
+
+    private String workflowBinaryDocumentText(String source, byte[] bytes) {
+        String extension = workflowDocumentExtension(source);
+        if ("pdf".equals(extension) || workflowStartsWith(bytes, "%PDF")) {
+            return workflowPdfText(bytes);
+        }
+        if ("docx".equals(extension) || workflowStartsWith(bytes, "PK")) {
+            return workflowDocxText(bytes);
+        }
+        return "";
+    }
+
+    private String workflowDocumentExtension(String source) {
+        String path = source;
+        try {
+            URI uri = URI.create(source);
+            if (!isBlank(uri.getPath())) {
+                path = uri.getPath();
+            }
+        } catch (IllegalArgumentException ignored) {
+            path = source;
+        }
+        int query = path.indexOf('?');
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
+        int dot = path.lastIndexOf('.');
+        if (dot < 0 || dot == path.length() - 1) {
+            return "";
+        }
+        return path.substring(dot + 1).toLowerCase(java.util.Locale.ENGLISH);
+    }
+
+    private boolean workflowStartsWith(byte[] bytes, String marker) {
+        byte[] markerBytes = marker.getBytes(StandardCharsets.US_ASCII);
+        if (bytes.length < markerBytes.length) {
+            return false;
+        }
+        for (int i = 0; i < markerBytes.length; i++) {
+            if (bytes[i] != markerBytes[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String workflowPdfText(byte[] bytes) {
+        try {
+            PDDocument document = PDDocument.load(bytes);
+            try {
+                return new PDFTextStripper().getText(document).trim();
+            } finally {
+                document.close();
+            }
+        } catch (IOException ex) {
+            return "";
+        }
+    }
+
+    private String workflowDocxText(byte[] bytes) {
+        try {
+            String xml = workflowZipEntryText(bytes, "word/document.xml");
+            if (isBlank(xml)) {
+                return "";
+            }
+            Document document = workflowParseXml(xml);
+            NodeList paragraphs = workflowXmlElements(document, "p");
+            StringBuilder result = new StringBuilder();
+            for (int i = 0; i < paragraphs.getLength(); i++) {
+                String text = workflowJoinXmlText((Element) paragraphs.item(i), "t").trim();
+                if (!isBlank(text)) {
+                    if (result.length() > 0) {
+                        result.append('\n');
+                    }
+                    result.append(text);
+                }
+            }
+            if (result.length() > 0) {
+                return result.toString();
+            }
+            return workflowJoinXmlText(document.getDocumentElement(), "t").trim();
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String workflowZipEntryText(byte[] bytes, String entryName) throws IOException {
+        ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes));
+        try {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (entryName.equals(entry.getName())) {
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = zip.read(buffer)) > 0) {
+                        output.write(buffer, 0, read);
+                    }
+                    return new String(output.toByteArray(), StandardCharsets.UTF_8);
+                }
+            }
+            return "";
+        } finally {
+            zip.close();
+        }
+    }
+
+    private Document workflowParseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        try {
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        } catch (Exception ignored) {
+            // Parser implementations differ; namespace-free DOCX text extraction still works without this feature.
+        }
+        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+    }
+
+    private NodeList workflowXmlElements(Document document, String localName) {
+        NodeList nodes = document.getElementsByTagName("w:" + localName);
+        return nodes.getLength() > 0 ? nodes : document.getElementsByTagName(localName);
+    }
+
+    private String workflowJoinXmlText(Element element, String localName) {
+        NodeList nodes = element.getElementsByTagName("w:" + localName);
+        if (nodes.getLength() == 0) {
+            nodes = element.getElementsByTagName(localName);
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < nodes.getLength(); i++) {
+            text.append(nodes.item(i).getTextContent());
+        }
+        return text.toString();
     }
 
     private byte[] workflowDocumentBytes(String source) {
