@@ -194,6 +194,32 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaHitAppliesGoStyleMetadataFilters() {
+        Map<String, Object> createdKnowledge = service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Regional QA", 1));
+        String knowledgeId = (String) createdKnowledge.get("knowledgeId");
+
+        Map<String, Object> beijingPair = service.createQaPair("dev-admin", "default-org",
+                qaPairCreateWithMeta(knowledgeId, "How does regional policy work?", "Beijing policy.",
+                        "city", "Beijing"));
+        service.createQaPair("dev-admin", "default-org",
+                qaPairCreateWithMeta(knowledgeId, "How does regional policy work?", "Shanghai policy.",
+                        "city", "Shanghai"));
+
+        Map<String, Object> request = qaHit(knowledgeId, "regional policy");
+        request.put("metadataFiltering", true);
+        request.put("metadataFilteringConditions", Collections.singletonList(qaMetaFilter(
+                "Regional QA", "and", "city", "string", "eq", "Beijing")));
+
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals(beijingPair.get("qaPairId"), searchList.get(0).get("qaPairId"));
+        assertEquals("Beijing", listOfMaps(searchList.get(0).get("meta_data")).get(0).get("metaValue"));
+    }
+
+    @Test
     public void qaImportParsesInlineCsvAndFallsBackToDocUrlName() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Imported QA", 1)).get("knowledgeId");
@@ -1320,6 +1346,32 @@ public class KnowledgeServiceImplTest {
         request.put("question", question);
         request.put("answer", answer);
         return request;
+    }
+
+    private Map<String, Object> qaPairCreateWithMeta(String knowledgeId, String question, String answer,
+                                                     String metaKey, String metaValue) {
+        Map<String, Object> request = qaPairCreate(knowledgeId, question, answer);
+        Map<String, Object> meta = new LinkedHashMap<String, Object>();
+        meta.put("metaKey", metaKey);
+        meta.put("metaValue", metaValue);
+        meta.put("metaValueType", "string");
+        request.put("metaDataList", Collections.singletonList(meta));
+        return request;
+    }
+
+    private Map<String, Object> qaMetaFilter(String qaBaseName, String logicalOperator, String metaName,
+                                             String metaType, String comparisonOperator, Object value) {
+        Map<String, Object> condition = new LinkedHashMap<String, Object>();
+        condition.put("meta_name", metaName);
+        condition.put("meta_type", metaType);
+        condition.put("comparison_operator", comparisonOperator);
+        condition.put("value", value);
+
+        Map<String, Object> filter = new LinkedHashMap<String, Object>();
+        filter.put("filtering_qa_base_name", qaBaseName);
+        filter.put("logical_operator", logicalOperator);
+        filter.put("conditions", Collections.singletonList(condition));
+        return filter;
     }
 
     private Map<String, Object> qaPairUpdate(String qaPairId, String question, String answer) {

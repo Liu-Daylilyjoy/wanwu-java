@@ -1655,6 +1655,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         pair.status = QA_STATUS_FINISHED;
         pair.enabled = true;
         pair.errorMsg = "";
+        pair.metaDataList.addAll(normalizeQaMetaList(safe.get("metaDataList")));
         qaPairs(knowledgeId).add(pair);
         qaPairsById.put(qaPairId, pair);
         saveSnapshot();
@@ -1667,6 +1668,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         QaPairState pair = existingQaPair(string(safe.get("qaPairId")));
         pair.question = string(safe.get("question")).trim();
         pair.answer = string(safe.get("answer")).trim();
+        if (safe.containsKey("metaDataList")) {
+            pair.metaDataList.clear();
+            pair.metaDataList.addAll(normalizeQaMetaList(safe.get("metaDataList")));
+        }
         saveSnapshot();
     }
 
@@ -1807,6 +1812,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (knowledgeIds.isEmpty()) {
             knowledgeIds.addAll(qaPairsByKnowledgeId.keySet());
         }
+        List<Map<String, Object>> metadataFilters = mapList(firstPresent(safe,
+                "metadataFilteringConditions", "metadata_filtering_conditions"));
+        Object metadataFilteringFlag = safe.containsKey("metadataFiltering")
+                ? safe.get("metadataFiltering")
+                : safe.get("metadata_filtering");
+        boolean metadataFiltering = !metadataFilters.isEmpty() && booleanValue(metadataFilteringFlag, true);
 
         List<Map<String, Object>> searchList = new ArrayList<Map<String, Object>>();
         List<Double> scores = new ArrayList<Double>();
@@ -1817,6 +1828,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
             for (QaPairState pair : qaPairs(knowledgeId)) {
                 if (!pair.enabled || pair.status != QA_STATUS_FINISHED) {
+                    continue;
+                }
+                if (metadataFiltering && !qaMetadataFiltersMatch(pair, knowledge, metadataFilters)) {
                     continue;
                 }
                 double score = qaHitScore(question, pair);
@@ -2203,6 +2217,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("qaBase", knowledge.name);
         result.put("qaId", knowledge.knowledgeId);
         result.put("contentType", "qa");
+        result.put("meta_data", copyMetaList(pair.metaDataList));
+        result.put("metaData", copyMetaList(pair.metaDataList));
         return result;
     }
 
@@ -2791,6 +2807,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         String value = string(rawValue);
         return isBlank(value) ? Collections.<String>emptyList() : Collections.singletonList(value);
+    }
+
+    private List<Map<String, Object>> normalizeQaMetaList(Object rawValue) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> source : mapList(rawValue)) {
+            Map<String, Object> meta = copyMeta(source);
+            String key = firstText(meta, "metaKey", "key", "name", "metaName", "meta_name");
+            if (!isBlank(key) && !meta.containsKey("metaKey")) {
+                meta.put("metaKey", key);
+            }
+            Object value = qaMetaValue(meta);
+            if (value != null && !meta.containsKey("metaValue")) {
+                meta.put("metaValue", value);
+            }
+            String valueType = firstText(meta, "metaValueType", "valueType", "type", "metaType", "meta_type");
+            if (!isBlank(valueType) && !meta.containsKey("metaValueType")) {
+                meta.put("metaValueType", valueType);
+            }
+            if (!isBlank(firstText(meta, "metaKey", "meta_name", "key", "name", "metaName")) || value != null) {
+                result.add(meta);
+            }
+        }
+        return result;
     }
 
     private List<Map<String, Object>> copyMetaList(List<Map<String, Object>> metas) {
@@ -3739,6 +3778,170 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return false;
     }
 
+    private boolean qaMetadataFiltersMatch(QaPairState pair, KnowledgeState knowledge,
+                                           List<Map<String, Object>> filters) {
+        boolean applied = false;
+        for (Map<String, Object> filter : safeList(filters)) {
+            String qaBaseName = firstText(filter, "filtering_qa_base_name", "filteringQaBaseName",
+                    "qaBase", "qa_base", "knowledgeName", "knowledgeId");
+            if (!isBlank(qaBaseName) && !qaBaseName.equals(knowledge.name) && !qaBaseName.equals(knowledge.knowledgeId)) {
+                continue;
+            }
+            List<Map<String, Object>> conditions = mapList(filter.get("conditions"));
+            if (conditions.isEmpty()) {
+                continue;
+            }
+            applied = true;
+            String logicalOperator = defaultIfBlank(firstText(filter, "logical_operator", "logicalOperator"), "and");
+            boolean useOr = "or".equalsIgnoreCase(logicalOperator);
+            boolean groupMatches = !useOr;
+            for (Map<String, Object> condition : conditions) {
+                boolean conditionMatches = qaMetadataConditionMatches(pair, condition);
+                if (useOr && conditionMatches) {
+                    groupMatches = true;
+                    break;
+                }
+                if (!useOr && !conditionMatches) {
+                    groupMatches = false;
+                    break;
+                }
+            }
+            if (groupMatches) {
+                return true;
+            }
+        }
+        return !applied;
+    }
+
+    private boolean qaMetadataConditionMatches(QaPairState pair, Map<String, Object> condition) {
+        String metaName = firstText(condition, "meta_name", "metaName", "metaKey", "key", "name");
+        String operator = defaultIfBlank(firstText(condition,
+                "comparison_operator", "comparisonOperator", "condition", "operator"), "eq");
+        List<String> values = new ArrayList<String>();
+        for (Map<String, Object> meta : pair.metaDataList) {
+            String key = firstText(meta, "metaKey", "key", "name", "metaName", "meta_name");
+            if (!isBlank(metaName) && !metaName.equals(key)) {
+                continue;
+            }
+            values.addAll(storedMetaStrings(qaMetaValue(meta)));
+        }
+        return qaMetadataValuesMatch(values, condition.get("value"), operator);
+    }
+
+    private Object qaMetaValue(Map<String, Object> meta) {
+        if (meta.containsKey("metaValue")) {
+            return meta.get("metaValue");
+        }
+        if (meta.containsKey("meta_value")) {
+            return meta.get("meta_value");
+        }
+        if (meta.containsKey("value")) {
+            return meta.get("value");
+        }
+        if (meta.containsKey("values")) {
+            return meta.get("values");
+        }
+        return null;
+    }
+
+    private boolean qaMetadataValuesMatch(List<String> actualValues, Object expected, String operator) {
+        String normalizedOperator = defaultIfBlank(operator, "eq")
+                .replace('_', ' ')
+                .toLowerCase(Locale.ENGLISH);
+        if ("empty".equals(normalizedOperator)) {
+            return actualValues.isEmpty();
+        }
+        if ("not empty".equals(normalizedOperator)) {
+            return !actualValues.isEmpty();
+        }
+        if (actualValues.isEmpty()) {
+            return false;
+        }
+        List<String> expectedValues = storedMetaStrings(expected);
+        if ("ne".equals(normalizedOperator) || "neq".equals(normalizedOperator)
+                || "!=".equals(normalizedOperator) || "not eq".equals(normalizedOperator)) {
+            return !anyMetaValueEquals(actualValues, expectedValues);
+        }
+        if ("contains".equals(normalizedOperator) || "like".equals(normalizedOperator)) {
+            return anyMetaValueContains(actualValues, expectedValues);
+        }
+        if ("not contains".equals(normalizedOperator) || "not like".equals(normalizedOperator)) {
+            return !anyMetaValueContains(actualValues, expectedValues);
+        }
+        if (">".equals(normalizedOperator) || "gt".equals(normalizedOperator)) {
+            return anyMetaNumberComparison(actualValues, expectedValues, normalizedOperator);
+        }
+        if (">=".equals(normalizedOperator) || "gte".equals(normalizedOperator)) {
+            return anyMetaNumberComparison(actualValues, expectedValues, normalizedOperator);
+        }
+        if ("<".equals(normalizedOperator) || "lt".equals(normalizedOperator)) {
+            return anyMetaNumberComparison(actualValues, expectedValues, normalizedOperator);
+        }
+        if ("<=".equals(normalizedOperator) || "lte".equals(normalizedOperator)) {
+            return anyMetaNumberComparison(actualValues, expectedValues, normalizedOperator);
+        }
+        return anyMetaValueEquals(actualValues, expectedValues);
+    }
+
+    private boolean anyMetaValueEquals(List<String> actualValues, List<String> expectedValues) {
+        for (String actual : actualValues) {
+            for (String expected : expectedValues) {
+                if (actual.equals(expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean anyMetaValueContains(List<String> actualValues, List<String> expectedValues) {
+        for (String actual : actualValues) {
+            for (String expected : expectedValues) {
+                if (containsIgnoreCase(actual, expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean anyMetaNumberComparison(List<String> actualValues, List<String> expectedValues, String operator) {
+        if (expectedValues.isEmpty()) {
+            return false;
+        }
+        Double expected = parseDouble(expectedValues.get(0));
+        if (expected == null) {
+            return false;
+        }
+        for (String actualValue : actualValues) {
+            Double actual = parseDouble(actualValue);
+            if (actual == null) {
+                continue;
+            }
+            if ((">".equals(operator) || "gt".equals(operator)) && actual > expected) {
+                return true;
+            }
+            if ((">=".equals(operator) || "gte".equals(operator)) && actual >= expected) {
+                return true;
+            }
+            if (("<".equals(operator) || "lt".equals(operator)) && actual < expected) {
+                return true;
+            }
+            if (("<=".equals(operator) || "lte".equals(operator)) && actual <= expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Double parseDouble(String value) {
+        try {
+            return Double.valueOf(value);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     private ReportState newReport(String knowledgeId, String title, String content, boolean imported, boolean generated) {
         ReportState report = new ReportState();
         report.contentId = "report-" + nextReportId.incrementAndGet();
@@ -3970,6 +4173,24 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             return (List<Object>) raw;
         }
         return Collections.emptyList();
+    }
+
+    private List<Map<String, Object>> mapList(Object raw) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        if (raw instanceof Map) {
+            Map<String, Object> item = map(raw);
+            if (!item.isEmpty()) {
+                result.add(item);
+            }
+            return result;
+        }
+        for (Object item : list(raw)) {
+            Map<String, Object> mapped = map(item);
+            if (!mapped.isEmpty()) {
+                result.add(mapped);
+            }
+        }
+        return result;
     }
 
     private List<String> stringList(Object raw) {
