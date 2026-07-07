@@ -926,6 +926,30 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitAddsGraphCardWhenUseGraphIsEnabled() {
+        Map<String, Object> create = createKnowledge("Graph Hit KB", 0);
+        map(create.get("knowledgeGraph")).put("switch", true);
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org", create).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-graph-hit", "GraphHit.txt"));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-graph-hit", "Graph hit evidence connects local nodes.",
+                        Collections.singletonList("graph-hit")));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Graph hit evidence");
+        map(request.get("knowledgeMatchParams")).put("useGraph", true);
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        Map<String, Object> graphCard = findByContentType(searchList, "graph");
+
+        assertEquals(true, hit.get("useGraph"));
+        assertNotNull(graphCard);
+        assertEquals("Graph Hit KB", graphCard.get("knowledgeName"));
+        assertTrue(containsNode(listOfMaps(map(graphCard.get("graph")).get("nodes")),
+                "Document: GraphHit.txt", "document"));
+    }
+
+    @Test
     public void knowledgeHitRanksAllCandidatesBeforeApplyingTopK() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Ranking KB", 0)).get("knowledgeId");
@@ -1817,6 +1841,15 @@ public class KnowledgeServiceImplTest {
             }
         }
         return false;
+    }
+
+    private Map<String, Object> findByContentType(List<Map<String, Object>> rows, String contentType) {
+        for (Map<String, Object> row : rows) {
+            if (contentType.equals(row.get("contentType"))) {
+                return row;
+            }
+        }
+        return null;
     }
 
     private boolean containsEdge(List<Map<String, Object>> edges, String source, String target) {

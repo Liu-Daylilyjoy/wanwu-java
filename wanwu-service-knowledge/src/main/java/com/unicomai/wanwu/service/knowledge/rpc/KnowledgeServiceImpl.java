@@ -364,6 +364,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     scores.add(score);
                 }
             }
+            appendKnowledgeGraphHit(userId, orgId, knowledge, useGraph, matchParams, searchList, scores, threshold);
         }
         appendDocInfoHits(question, safe, matchParams, searchList, scores, threshold);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
@@ -2104,6 +2105,23 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
+    private Map<String, Object> toGraphHitInfo(KnowledgeState knowledge, Map<String, Object> graphResult,
+                                               double score, Map<String, Object> matchParams) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("title", knowledge.name + " Graph");
+        result.put("snippet", "Knowledge graph for " + knowledge.name);
+        result.put("knowledgeName", knowledge.name);
+        result.put("childContentList", Collections.emptyList());
+        result.put("childScore", Collections.emptyList());
+        result.put("contentType", "graph");
+        result.put("score", score);
+        result.put("graph", graphResult.get("graph"));
+        List<Map<String, Object>> rerankInfo = rerankInfo(matchParams, score, "graph", knowledge.knowledgeId);
+        result.put("rerankInfo", rerankInfo);
+        result.put("rerank_info", rerankInfo);
+        return result;
+    }
+
     private Map<String, Object> toQaPairInfo(QaPairState pair) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("qaPairId", pair.qaPairId);
@@ -3765,6 +3783,21 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             searchList.add(toUploadedDocHitInfo(docName, snippet, score, matchParams));
             scores.add(score);
         }
+    }
+
+    private void appendKnowledgeGraphHit(String userId, String orgId, KnowledgeState knowledge, boolean useGraph,
+                                         Map<String, Object> matchParams, List<Map<String, Object>> searchList,
+                                         List<Double> scores, double threshold) {
+        if (!useGraph || knowledge.graphSwitch != 1) {
+            return;
+        }
+        double score = 0.70D;
+        if (score < threshold) {
+            return;
+        }
+        Map<String, Object> graph = getKnowledgeGraph(userId, orgId, singleton("knowledgeId", knowledge.knowledgeId));
+        searchList.add(toGraphHitInfo(knowledge, graph, score, matchParams));
+        scores.add(score);
     }
 
     private void sortAndLimitKnowledgeHits(List<Map<String, Object>> searchList, List<Double> scores, int topK) {
