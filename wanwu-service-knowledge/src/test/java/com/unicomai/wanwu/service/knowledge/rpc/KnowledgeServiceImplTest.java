@@ -694,6 +694,30 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void documentImportExtractsLegacyDocBase64IntoSearchableSegments() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Legacy Doc Docs", 0)).get("knowledgeId");
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-legacy-doc", "Guide.doc",
+                        legacyDocBase64("Wanwu Java imports legacy Word documents.",
+                                "RAG search can find binary DOC text.")));
+
+        Map<String, Object> segments = service.listDocSegments("dev-admin", "default-org",
+                segmentList("doc-legacy-doc", "legacy Word"));
+        assertEquals(1, segments.get("segmentTotalNum"));
+        assertTrue(String.valueOf(listOfMaps(segments.get("contentList")).get(0).get("content"))
+                .contains("Wanwu Java imports legacy Word documents."));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, "binary DOC text"));
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+        assertEquals(1, searchList.size());
+        assertEquals("Guide.doc", searchList.get(0).get("title"));
+        assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find binary DOC text."));
+    }
+
+    @Test
     public void documentImportExtractsPdfBase64IntoSearchableSegments() throws Exception {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Pdf Docs", 0)).get("knowledgeId");
@@ -1502,6 +1526,18 @@ public class KnowledgeServiceImplTest {
                 + "</Types>");
         addZipEntry(zip, "word/document.xml", documentXml(paragraphs));
         zip.close();
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private String legacyDocBase64(String... paragraphs) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(new byte[]{(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0,
+                (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1});
+        output.write(new byte[64]);
+        for (String paragraph : paragraphs) {
+            output.write(paragraph.getBytes(StandardCharsets.UTF_16LE));
+            output.write("\n".getBytes(StandardCharsets.UTF_16LE));
+        }
         return Base64.getEncoder().encodeToString(output.toByteArray());
     }
 

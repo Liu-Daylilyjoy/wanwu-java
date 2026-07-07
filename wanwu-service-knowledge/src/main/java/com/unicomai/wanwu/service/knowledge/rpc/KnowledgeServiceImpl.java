@@ -10,6 +10,7 @@ import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -3239,6 +3240,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 return docxText;
             }
         }
+        if ("doc".equals(extension)) {
+            String docText = legacyDocText(bytes);
+            if (!isBlank(docText)) {
+                return docText;
+            }
+        }
         if ("pdf".equals(extension)) {
             String pdfText = pdfText(bytes);
             if (!isBlank(pdfText)) {
@@ -3297,6 +3304,82 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    private String legacyDocText(byte[] bytes) {
+        String parsed = legacyDocParserText(bytes);
+        if (!isBlank(parsed)) {
+            return parsed;
+        }
+        return legacyDocHeuristicText(bytes);
+    }
+
+    private String legacyDocParserText(byte[] bytes) {
+        try {
+            WordExtractor extractor = new WordExtractor(new ByteArrayInputStream(bytes));
+            try {
+                return normalizeWhitespace(extractor.getText());
+            } finally {
+                extractor.close();
+            }
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String legacyDocHeuristicText(byte[] bytes) {
+        String utf16 = printableRuns(new String(bytes, StandardCharsets.UTF_16LE));
+        String latin = printableRuns(new String(bytes, StandardCharsets.ISO_8859_1));
+        return utf16.length() >= latin.length() ? utf16 : latin;
+    }
+
+    private String printableRuns(String value) {
+        StringBuilder result = new StringBuilder();
+        StringBuilder run = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (isPrintableDocumentChar(ch)) {
+                run.append(ch);
+            } else {
+                appendPrintableRun(result, run);
+            }
+        }
+        appendPrintableRun(result, run);
+        return normalizeWhitespace(result.toString());
+    }
+
+    private void appendPrintableRun(StringBuilder result, StringBuilder run) {
+        String text = normalizeWhitespace(run.toString());
+        run.setLength(0);
+        if (text.length() < 6) {
+            return;
+        }
+        if (result.length() > 0) {
+            result.append('\n');
+        }
+        result.append(text);
+    }
+
+    private boolean isPrintableDocumentChar(char ch) {
+        return ch == '\n' || ch == '\r' || ch == '\t'
+                || (ch >= 32 && ch < 127)
+                || Character.isLetterOrDigit(ch)
+                || Character.isIdeographic(ch)
+                || Character.getType(ch) == Character.OTHER_PUNCTUATION
+                || Character.getType(ch) == Character.DASH_PUNCTUATION
+                || Character.getType(ch) == Character.START_PUNCTUATION
+                || Character.getType(ch) == Character.END_PUNCTUATION;
+    }
+
+    private String normalizeWhitespace(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replaceAll("[\\t ]+", " ")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
     }
 
     private String pdfText(byte[] bytes) {

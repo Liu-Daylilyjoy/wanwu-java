@@ -14,7 +14,7 @@ The Go backend stores document metadata, file path, parser/indexer status, and a
 
 ## Java Development Parity
 
-The Java knowledge service now keeps the existing synchronous development import loop, but document import can extract text from base64 `.xlsx`, `.docx`, and `.pdf` uploads before segmenting:
+The Java knowledge service now keeps the existing synchronous development import loop, but document import can extract text from base64 `.xlsx`, `.doc`, `.docx`, and `.pdf` uploads before segmenting:
 
 - Inline `content` / `text` / `docContent` still goes straight into the existing splitter.
 - Base64 text files still decode as UTF-8.
