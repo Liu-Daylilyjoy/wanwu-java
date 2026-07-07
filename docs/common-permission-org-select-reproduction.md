@@ -22,7 +22,8 @@ frontend bootstrap does not fail when the IAM Dubbo provider is temporarily unav
 development mode:
 
 - `/user/permission` still prefers `IamService.permission(token)`.
-- `/org/select` still prefers `IamService.selectOrganizations()`.
+- `/org/select` resolves the current user from `Authorization` and now prefers
+  `IamService.selectOrganizations(userId)`, matching Go `GetOrgSelect(ctx, userId)`.
 - If the IAM call throws or the reference is absent, the BFF returns deterministic development data.
 
 The fallback keeps the same development account contract used by login and the frontend permission
@@ -33,14 +34,20 @@ filter:
 - Both responses keep WGA/general-agent permissions hidden.
 - Organization select returns the default Docker organization `default-org`.
 
+The IAM service keeps the old no-argument `selectOrganizations()` method for Java compatibility,
+but the frontend BFF path uses the user-aware overload. The user-aware implementation reads the
+current user's persisted `orgs` membership list and maps each `{org:{id,name}}` item to the frontend
+`select` array. Missing or empty membership falls back to `default-org`.
+
 ## Verification
 
 ```powershell
 docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-bff -am -Dtest=WanwuFrontendApiControllerTest#permissionAndOrgSelectFallbackWhenIamUnavailable -DfailIfNoTests=false test
+docker run --rm -v "${env:USERPROFILE}\.m2:/root/.m2" -v "${PWD}:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-8 mvn -q -pl wanwu-service-iam,wanwu-service-bff -am "-Dtest=IamServiceImplTest#selectOrganizationsReturnsOnlyUserOrganizations,WanwuFrontendApiControllerTest#orgSelectUsesCurrentUserFromAuthorizationToken" -DfailIfNoTests=false test
 ```
 
 ## Remaining Gaps
 
-This is a BFF compatibility fallback. Full Go parity for IAM still depends on the normalized
-organization, role, route-tag, and user-permission tables rather than the current development JSON
-compatibility repository.
+This is still backed by the Java development JSON compatibility repository. Full Go parity for IAM
+still depends on normalized organization, user-organization-role, role, route-tag, and
+user-permission tables plus service-layer RBAC semantics.

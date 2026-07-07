@@ -73,6 +73,7 @@ import com.unicomai.wanwu.api.iam.dto.CaptchaResult;
 import com.unicomai.wanwu.api.iam.dto.LoginCommand;
 import com.unicomai.wanwu.api.iam.dto.LoginResult;
 import com.unicomai.wanwu.api.iam.dto.OrganizationOption;
+import com.unicomai.wanwu.api.iam.dto.OrganizationSelectResult;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
@@ -236,7 +237,7 @@ public class WanwuFrontendApiControllerTest {
     public void permissionAndOrgSelectFallbackWhenIamUnavailable() throws Exception {
         when(iamService.permission("dev-token")).thenThrow(new IllegalStateException("iam offline"));
         when(iamService.permission("dev-token-app")).thenThrow(new IllegalStateException("iam offline"));
-        when(iamService.selectOrganizations()).thenThrow(new IllegalStateException("iam offline"));
+        when(iamService.selectOrganizations("dev-admin")).thenThrow(new IllegalStateException("iam offline"));
 
         mockMvc.perform(get("/user/api/v1/user/permission")
                         .header("Authorization", "Bearer dev-token"))
@@ -266,6 +267,20 @@ public class WanwuFrontendApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.select[0].id").value("default-org"))
                 .andExpect(jsonPath("$.data.select[0].name").value("Default Organization"));
+    }
+
+    @Test
+    public void orgSelectUsesCurrentUserFromAuthorizationToken() throws Exception {
+        when(iamService.selectOrganizations("dev-app")).thenReturn(new OrganizationSelectResult(
+                Collections.singletonList(new OrganizationOption("app-org", "App Org"))));
+
+        mockMvc.perform(get("/user/api/v1/org/select")
+                        .header("Authorization", "Bearer dev-token-app"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.select[0].id").value("app-org"))
+                .andExpect(jsonPath("$.data.select[0].name").value("App Org"));
+
+        verify(iamService).selectOrganizations("dev-app");
     }
 
     @Test

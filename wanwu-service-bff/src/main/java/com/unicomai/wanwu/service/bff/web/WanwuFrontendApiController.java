@@ -293,10 +293,12 @@ public class WanwuFrontendApiController {
     }
 
     @GetMapping("/org/select")
-    public FrontendResponse<OrganizationSelectResult> selectOrganizations() {
+    public FrontendResponse<OrganizationSelectResult> selectOrganizations(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        UserContext userContext = userContext(authorization);
         if (iamService != null) {
             try {
-                return FrontendResponse.ok(iamService.selectOrganizations());
+                return FrontendResponse.ok(iamService.selectOrganizations(userContext.getUserId()));
             } catch (RuntimeException ignored) {
                 // Docker development fallback keeps organization switching usable.
             }

@@ -22,6 +22,8 @@ public interface IamService {
 
     OrganizationSelectResult selectOrganizations();
 
+    OrganizationSelectResult selectOrganizations(String userId);
+
     Map<String, Object> getUserInfo(String userId, String orgId);
 
     void updateUserLanguage(String userId, String language);

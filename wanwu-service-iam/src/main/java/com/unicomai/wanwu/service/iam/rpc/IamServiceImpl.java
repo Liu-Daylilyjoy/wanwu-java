@@ -194,6 +194,15 @@ public class IamServiceImpl implements IamService {
     }
 
     @Override
+    public synchronized OrganizationSelectResult selectOrganizations(String userId) {
+        Map<String, Object> user = users.get(Strings.hasText(userId) ? userId : ADMIN_ACCOUNT.uid);
+        if (user == null) {
+            return defaultOrganizationSelect();
+        }
+        return userOrganizationSelect(user);
+    }
+
+    @Override
     public synchronized Map<String, Object> getUserInfo(String userId, String orgId) {
         Map<String, Object> user = existingUser(userId);
         Map<String, Object> result = copy(user);
@@ -1147,6 +1156,43 @@ public class IamServiceImpl implements IamService {
         orgRole.put("org", org(organizationInfo(safeOrgId)));
         orgRole.put("roles", roleIdNames(roleIds.isEmpty() ? Collections.singletonList("app") : roleIds));
         return Collections.singletonList(orgRole);
+    }
+
+    @SuppressWarnings("unchecked")
+    private OrganizationSelectResult userOrganizationSelect(Map<String, Object> user) {
+        java.util.ArrayList<OrganizationOption> options = new java.util.ArrayList<>();
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        Object orgs = user.get("orgs");
+        if (orgs instanceof List) {
+            for (Object item : (List<Object>) orgs) {
+                if (!(item instanceof Map)) {
+                    continue;
+                }
+                Object org = ((Map<String, Object>) item).get("org");
+                if (!(org instanceof Map)) {
+                    continue;
+                }
+                Object orgIdValue = ((Map<String, Object>) org).get("id");
+                if (orgIdValue == null) {
+                    continue;
+                }
+                String orgId = String.valueOf(orgIdValue);
+                if (!Strings.hasText(orgId) || !seen.add(orgId)) {
+                    continue;
+                }
+                Object orgNameValue = ((Map<String, Object>) org).get("name");
+                String orgName = orgNameValue == null ? "" : String.valueOf(orgNameValue);
+                options.add(new OrganizationOption(orgId, Strings.hasText(orgName) ? orgName : organizationName(orgId)));
+            }
+        }
+        if (options.isEmpty()) {
+            return defaultOrganizationSelect();
+        }
+        return new OrganizationSelectResult(options);
+    }
+
+    private OrganizationSelectResult defaultOrganizationSelect() {
+        return new OrganizationSelectResult(Collections.singletonList(DEFAULT_ORG));
     }
 
     @SuppressWarnings("unchecked")

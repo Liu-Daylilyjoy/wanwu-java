@@ -154,6 +154,25 @@ public class IamServiceImplTest {
     }
 
     @Test
+    public void selectOrganizationsReturnsOnlyUserOrganizations() {
+        Map<String, Object> createdOrg = service.createOrganization("dev-admin", "default-org",
+                map("name", "App Org", "remark", "child"));
+        String orgId = (String) createdOrg.get("orgId");
+        Map<String, Object> createdUser = service.createUser("dev-admin", "default-org",
+                map("username", "appAlice", "nickname", "App Alice", "orgId", orgId));
+
+        OrganizationSelectResult result = service.selectOrganizations((String) createdUser.get("userId"));
+
+        assertEquals(1, result.getSelect().size());
+        assertEquals(orgId, result.getSelect().get(0).getId());
+        assertEquals("App Org", result.getSelect().get(0).getName());
+
+        OrganizationSelectResult missingUser = service.selectOrganizations("missing-user");
+        assertEquals(1, missingUser.getSelect().size());
+        assertEquals("default-org", missingUser.getSelect().get(0).getId());
+    }
+
+    @Test
     public void permissionManagementReadModelsFollowFrontendContract() {
         Map<String, Object> users = service.listUsers("default-org", "", 1, 10);
         assertEquals(2L, users.get("total"));
