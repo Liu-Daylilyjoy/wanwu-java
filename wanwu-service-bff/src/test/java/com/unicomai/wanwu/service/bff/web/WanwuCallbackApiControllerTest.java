@@ -6,6 +6,7 @@ import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
@@ -1034,6 +1035,36 @@ public class WanwuCallbackApiControllerTest {
         assertEquals("chatflow", captor.getAllValues().get(1).getAppType());
         assertEquals("user-002", captor.getAllValues().get(1).getUserId());
         assertEquals("org-002", captor.getAllValues().get(1).getOrgId());
+    }
+
+    @Test
+    public void callbackAppRecordWritesAppStatistic() throws Exception {
+        AppService appService = mock(AppService.class);
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, appService))
+                .build();
+
+        callbackMvc.perform(post("/callback/v1/app/record")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"user-001\",\"orgId\":\"org-001\","
+                                + "\"appId\":\"workflow-001\",\"appType\":\"workflow\","
+                                + "\"isSuccess\":true,\"isStream\":true,"
+                                + "\"streamCosts\":88,\"nonStreamCosts\":99,\"source\":\"openapi\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("recorded"))
+                .andExpect(jsonPath("$.data.request.appId").value("workflow-001"));
+
+        ArgumentCaptor<RecordAppStatisticCommand> captor = forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(captor.capture());
+        assertEquals("user-001", captor.getValue().getUserId());
+        assertEquals("org-001", captor.getValue().getOrgId());
+        assertEquals("workflow-001", captor.getValue().getAppId());
+        assertEquals("workflow", captor.getValue().getAppType());
+        assertTrue(captor.getValue().isSuccess());
+        assertTrue(captor.getValue().isStream());
+        assertEquals(88L, captor.getValue().getStreamCosts());
+        assertEquals(0L, captor.getValue().getNonStreamCosts());
+        assertEquals("openapi", captor.getValue().getSource());
     }
 
     @Test

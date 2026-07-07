@@ -43,7 +43,9 @@ Covered route families:
   local hits with Go-compatible response aliases; stream search returns a local-hit SSE event
 - WGA sandbox run emits a Go-style development SSE event plus `data: [DONE]`; cleanup returns a
   JSON `sandbox_cleaned` result
-- App record shell plus skill detail/list callbacks backed by Java `McpService`, including Go-style `skillList` response bodies
+- App record writes Go-style callback usage fields into Java `AppService` app statistics while keeping
+  a callback-safe `recorded` response
+- Skill detail/list callbacks backed by Java `McpService`, including Go-style `skillList` response bodies
 - v1 callback aliases for doc status, deploy info, category info, doc status init, and knowledge status
 
 ## Current Contract
@@ -72,6 +74,9 @@ This slice is a compatibility shell:
 - Agent callback chat accepts Go `input`, calls Java `AgentService.chatAgent` when available, and
   returns `FrontendResponse<String>` with the answer in `data`, matching the Go aggregated-stream
   callback contract.
+- App record accepts `userId`, `orgId`, `appId`, `appType`, `isSuccess`, `isStream`,
+  `streamCosts`, and `source`, then writes `RecordAppStatisticCommand`; `nonStreamCosts` is kept
+  at `0` for this callback route, matching the checked Go handler.
 - Mutating callback routes echo status and request data for development observability.
 
 ## Remaining Gaps

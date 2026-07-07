@@ -6,6 +6,7 @@ import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
 import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
 import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
+import com.unicomai.wanwu.api.app.dto.RecordAppStatisticCommand;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
@@ -477,6 +478,7 @@ public class WanwuCallbackApiController {
 
     @PostMapping("/callback/v1/app/record")
     public FrontendResponse<Map<String, Object>> appRecord(@RequestBody(required = false) Map<String, Object> request) {
+        recordCallbackAppStatistic(request);
         return FrontendResponse.ok(echo("recorded", request));
     }
 
@@ -1049,6 +1051,27 @@ public class WanwuCallbackApiController {
             return data;
         } catch (RuntimeException ignored) {
             return listResult(Collections.emptyList());
+        }
+    }
+
+    private void recordCallbackAppStatistic(Map<String, Object> request) {
+        if (appService == null || request == null) {
+            return;
+        }
+        try {
+            RecordAppStatisticCommand command = new RecordAppStatisticCommand();
+            command.setUserId(firstText(request, "userId", "userID", "uid"));
+            command.setOrgId(firstText(request, "orgId", "orgID"));
+            command.setAppId(firstText(request, "appId", "appID"));
+            command.setAppType(firstText(request, "appType"));
+            command.setSuccess(booleanValue(request.get("isSuccess"), false));
+            command.setStream(booleanValue(request.get("isStream"), false));
+            command.setStreamCosts(longValue(request, "streamCosts"));
+            command.setNonStreamCosts(0L);
+            command.setSource(firstText(request, "source"));
+            appService.recordAppStatistic(command);
+        } catch (RuntimeException ignored) {
+            // Statistics are best-effort for callback callers.
         }
     }
 
