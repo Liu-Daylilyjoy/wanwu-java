@@ -1272,6 +1272,54 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesLoopNodeWithArrayInput() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("LoopFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"list\",\"name\":\"items\"}]}},"
+                + "{\"id\":\"110184\",\"type\":\"21\",\"data\":{\"nodeMeta\":{\"title\":\"循环处理\",\"subTitle\":\"循环\"},"
+                + "\"outputs\":[{\"name\":\"output\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"110184\",\"name\":\"finalText\"}}}}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"items\"}}}}],"
+                + "\"variableParameters\":[{\"name\":\"finalText\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"seed\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110184\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110184\"},"
+                + "{\"sourceNodeID\":\"110184\",\"targetNodeID\":\"900001\",\"sourcePortID\":\"loop-output\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("items", Arrays.asList("intro", "body"));
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(input);
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("seed\nintro\nbody", output.get("output"), String.valueOf(output));
+        Map<String, Object> loopOutput = castMap(castMap(output.get("nodeOutputs")).get("110184"));
+        assertEquals("seed\nintro\nbody", loopOutput.get("finalText"));
+        assertEquals(2, loopOutput.get("iterations"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

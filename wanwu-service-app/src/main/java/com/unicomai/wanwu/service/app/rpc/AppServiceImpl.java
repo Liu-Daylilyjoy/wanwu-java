@@ -6174,6 +6174,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(workflowSelectorOutput(node, input));
         } else if (workflowIsInputNode(node, type, lowerType)) {
             output.putAll(workflowInputNodeOutput(node, input));
+        } else if (workflowIsLoopNode(node, type, lowerType)) {
+            output.putAll(workflowLoopOutput(node, input));
         } else if (workflowIsConcatNode(type, lowerType)) {
             String text = workflowConcatText(node, input);
             output.put("text", text);
@@ -6474,6 +6476,44 @@ public class AppServiceImpl implements AppService {
             return "unknown";
         }
         return value == null ? "" : value;
+    }
+
+    private boolean workflowIsLoopNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "21".equals(type) || semantic.contains("loop");
+    }
+
+    private Map<String, Object> workflowLoopOutput(Map<String, Object> node, Map<String, Object> input) {
+        Object rawItems = firstPresent(input, "input", "items", "data", "array", "list");
+        List<Object> items = listValue(rawItems);
+        if (items.isEmpty() && rawItems != null && !isBlank(String.valueOf(rawItems))) {
+            items = Collections.singletonList(rawItems);
+        }
+        String seed = stringValue(workflowConfiguredParam(node, "variableParameters", "finalText", input));
+        String finalText = workflowLoopFinalText(seed, items);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("finalText", finalText);
+        output.put("iterations", items.size());
+        output.put("branch", "loop-output");
+        output.put("output", finalText);
+        output.put("result", finalText);
+        output.put("response", finalText);
+        output.put("text", finalText);
+        return output;
+    }
+
+    private String workflowLoopFinalText(String seed, List<Object> items) {
+        List<String> lines = new ArrayList<>();
+        if (!isBlank(seed)) {
+            lines.add(seed.trim());
+        }
+        for (Object item : items) {
+            String text = item instanceof Map || item instanceof List ? workflowJsonText(item) : stringValue(item);
+            if (!isBlank(text)) {
+                lines.add(text.trim());
+            }
+        }
+        return join(lines, "\n");
     }
 
     private boolean workflowIsConcatNode(String type, String lowerType) {
