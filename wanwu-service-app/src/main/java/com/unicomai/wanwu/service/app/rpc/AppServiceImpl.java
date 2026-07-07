@@ -1573,12 +1573,14 @@ public class AppServiceImpl implements AppService {
                 orgId,
                 command.getQuestion(),
                 config == null ? null : config.getKnowledgeBaseConfigJson(),
+                config == null ? null : config.getRerankConfigJson(),
                 false);
         Map<String, Object> qaHit = hitConfiguredKnowledge(
                 userId,
                 orgId,
                 command.getQuestion(),
                 config == null ? null : config.getQaKnowledgeBaseConfigJson(),
+                config == null ? null : config.getQaRerankConfigJson(),
                 true);
         List<Map<String, Object>> searchList = hitSearchList(knowledgeHit);
         List<Map<String, Object>> qaSearchList = hitSearchList(qaHit);
@@ -2689,6 +2691,7 @@ public class AppServiceImpl implements AppService {
                     orgId,
                     command.getPrompt(),
                     config == null ? null : config.getKnowledgeBaseConfigJson(),
+                    null,
                     false);
             searchList = hitSearchList(knowledgeHit);
             response = enrichRagResponse(response, knowledgeHit, searchList,
@@ -4019,6 +4022,7 @@ public class AppServiceImpl implements AppService {
                                                        String orgId,
                                                        String question,
                                                        String configJson,
+                                                       String rerankConfigJson,
                                                        boolean qa) {
         if (knowledgeService == null || isBlank(configJson)) {
             return Collections.emptyMap();
@@ -4031,7 +4035,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("question", question);
         request.put("knowledgeList", knowledgeList);
-        request.put("knowledgeMatchParams", knowledgeMatchParams(config));
+        request.put("knowledgeMatchParams", knowledgeMatchParams(config, rerankConfigJson));
         Map<String, Object> hit = qa
                 ? knowledgeService.hitQaPairs(userId, orgId, request)
                 : knowledgeService.hitKnowledge(userId, orgId, request);
@@ -4121,6 +4125,30 @@ public class AppServiceImpl implements AppService {
         copyIfPresent(config, topLevel, "termWeightEnable", "termWeightEnable");
         copyIfPresent(config, topLevel, "useGraph", "useGraph");
         return topLevel;
+    }
+
+    private Map<String, Object> knowledgeMatchParams(Map<String, Object> config, String rerankConfigJson) {
+        Map<String, Object> params = new LinkedHashMap<>(knowledgeMatchParams(config));
+        applyRerankModel(params, rerankConfigJson);
+        return params;
+    }
+
+    private void applyRerankModel(Map<String, Object> params, String rerankConfigJson) {
+        if (params == null || intValue(params.get("priorityMatch"), 0) == 1) {
+            if (params != null && !params.containsKey("rerankMod")) {
+                params.put("rerankMod", "weighted_score");
+            }
+            return;
+        }
+        String rerankModelId = firstNonBlank(
+                stringValue(params.get("rerankModelId")),
+                stringValue(mapOrDefault(rerankConfigJson, new LinkedHashMap<String, Object>()).get("modelId")));
+        if (!isBlank(rerankModelId)) {
+            params.put("rerankModelId", rerankModelId);
+        }
+        if (!params.containsKey("rerankMod")) {
+            params.put("rerankMod", "rerank_model");
+        }
     }
 
     private void copyIfPresent(Map<String, Object> source,

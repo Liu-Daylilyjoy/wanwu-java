@@ -670,6 +670,56 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatPassesConfiguredRerankModelsToKnowledgeHits() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("RerankRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        Map<String, Object> knowledgeConfig = goProtoKnowledgeConfig("kb-rerank-001", 4);
+        ((Map<String, Object>) knowledgeConfig.get("globalConfig")).put("priorityMatch", 0);
+        Map<String, Object> qaKnowledgeConfig = goProtoQaKnowledgeConfig("qa-rerank-001", 2);
+        ((Map<String, Object>) qaKnowledgeConfig.get("globalConfig")).put("priorityMatch", 0);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setKnowledgeBaseConfig(knowledgeConfig);
+        config.setQaKnowledgeBaseConfig(qaKnowledgeConfig);
+        config.setRerankConfig(modelConfig("rerank-knowledge-001"));
+        config.setQaRerankConfig(modelConfig("rerank-qa-001"));
+        service.updateRagConfig(config);
+
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class)))
+                .thenReturn(Collections.<String, Object>emptyMap());
+        when(knowledgeService.hitQaPairs(eq("dev-admin"), eq("default-org"), any(Map.class)))
+                .thenReturn(Collections.<String, Object>emptyMap());
+
+        service.streamRagChat(ragChatCommand(created.getRagId(), "needs rerank", true));
+
+        ArgumentCaptor<Map> knowledgeCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), knowledgeCaptor.capture());
+        Map<String, Object> knowledgeMatchParams =
+                (Map<String, Object>) knowledgeCaptor.getValue().get("knowledgeMatchParams");
+        assertEquals("rerank-knowledge-001", knowledgeMatchParams.get("rerankModelId"));
+        assertEquals(0, knowledgeMatchParams.get("priorityMatch"));
+
+        ArgumentCaptor<Map> qaCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitQaPairs(eq("dev-admin"), eq("default-org"), qaCaptor.capture());
+        Map<String, Object> qaMatchParams =
+                (Map<String, Object>) qaCaptor.getValue().get("knowledgeMatchParams");
+        assertEquals("rerank-qa-001", qaMatchParams.get("rerankModelId"));
+        assertEquals(0, qaMatchParams.get("priorityMatch"));
+    }
+
+    @Test
     public void workflowLifecycleSupportsFrontendAppspaceLoop() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
