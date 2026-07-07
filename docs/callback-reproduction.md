@@ -35,7 +35,7 @@ Covered route families:
 - File callbacks: `/callback/v1/file/url/base64`, `/callback/v1/file/upload/base64`
 - Image and tourism helper callbacks: `/callback/v1/image/outline`, `/callback/v1/tourism/poi/search`
 - Model callback routes: info, chat completions, embeddings, multimodal embeddings, rerank, multimodal rerank, OCR, GUI, PDF parser, ASR
-- Workflow/chatflow callback lists and MCP-backed workflow tool detail callbacks
+- Workflow/chatflow callback lists backed by Java `AppService`, plus MCP-backed workflow tool detail callbacks
 - MCP callback details backed by Java `McpService`
 - Agent callback chat now follows the Go JSON contract, returning the aggregated answer string from
   Java `AgentService.chatAgent`
@@ -55,6 +55,7 @@ This slice is a compatibility shell:
 - File callbacks now read and upload real bytes through a local Docker-development store: `file/url/base64` supports `fileUrl/addPrefix/customPrefix`, and `file/upload/base64` returns Go-style `url/uri` while retaining Java compatibility ids.
 - Tourism POI search now mirrors the Go local ranking service with `query/results`, category and keyword filtering, radius filtering, rating/distance sorting, and limit normalization.
 - Model chat/embedding/rerank callbacks use OpenAI-compatible response shapes because those routes are typically consumed by external model adapters.
+- Workflow/chatflow callback lists read the same Java `AppService` appspace data used by the frontend, preserving the Go callback query fields `userId` and `orgId` while mapping the route to `appType=workflow` or `appType=chatflow`.
 - Workflow tool, MCP, and Skill metadata callbacks read the same Docker MySQL-backed Java `McpService` resource snapshot used by the frontend, with deterministic fallback data when that service is unavailable.
 - Image outline returns the Go `ImageOutlineExtractResp` shape (`message`, `prompt`, `markdown`, `result`, `mimeType`, `url`, `uri`, `usage`) and stores a local downloadable PNG under `/callback/v1/file/{fileId}` for Docker development.
 - RAG callback knowledge and QA search routes now call Java `KnowledgeService.hitKnowledge` and

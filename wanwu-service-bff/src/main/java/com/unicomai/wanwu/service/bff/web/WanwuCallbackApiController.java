@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
@@ -354,8 +356,12 @@ public class WanwuCallbackApiController {
     }
 
     @GetMapping({"/callback/v1/workflow/list", "/callback/v1/chatflow/list"})
-    public FrontendResponse<Map<String, Object>> workflowList() {
-        return FrontendResponse.ok(listResult(Collections.emptyList()));
+    public FrontendResponse<Map<String, Object>> workflowList(
+            @RequestParam Map<String, String> request,
+            HttpServletRequest httpRequest) {
+        String uri = httpRequest == null ? "" : httpRequest.getRequestURI();
+        String appType = uri.contains("/chatflow/") ? "chatflow" : "workflow";
+        return FrontendResponse.ok(callbackWorkflowList(request, appType));
     }
 
     @GetMapping("/callback/v1/workflow/tool/square")
@@ -1021,6 +1027,29 @@ public class WanwuCallbackApiController {
         data.put("name", "callback-detail");
         data.put("request", request == null ? Collections.emptyMap() : request);
         return data;
+    }
+
+    private Map<String, Object> callbackWorkflowList(Map<String, String> request, String appType) {
+        if (appService == null) {
+            return listResult(Collections.emptyList());
+        }
+        ApplicationListQuery query = new ApplicationListQuery();
+        query.setAppType(appType);
+        query.setUserId(firstText(request, "userId", "userID", "uid"));
+        query.setOrgId(firstText(request, "orgId", "orgID", "spaceId", "spaceID"));
+        query.setName(firstText(request, "name", "keyword"));
+        query.setSearchType(firstText(request, "searchType"));
+        try {
+            ApplicationListResult result = appService.listApplications(query);
+            if (result == null) {
+                return listResult(Collections.emptyList());
+            }
+            Map<String, Object> data = listResult(result.getList());
+            data.put("total", result.getTotal());
+            return data;
+        } catch (RuntimeException ignored) {
+            return listResult(Collections.emptyList());
+        }
     }
 
     private Map<String, Object> callbackSkillDetail(String skillId, String skillType) {

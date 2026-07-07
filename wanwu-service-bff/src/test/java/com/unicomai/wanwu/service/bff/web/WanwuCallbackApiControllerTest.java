@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.agent.AgentService;
 import com.unicomai.wanwu.api.app.AppService;
+import com.unicomai.wanwu.api.app.dto.ApplicationListQuery;
+import com.unicomai.wanwu.api.app.dto.ApplicationListResult;
 import com.unicomai.wanwu.api.app.dto.RecordModelStatisticCommand;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
 import com.unicomai.wanwu.api.mcp.McpService;
@@ -30,6 +32,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
@@ -994,6 +997,43 @@ public class WanwuCallbackApiControllerTest {
         verify(mcpService).getMcpServer("", "", "mcpserver-001");
         verify(mcpService, times(2)).getBuiltinSkill("", "", "builtin-summary");
         verify(mcpService).getCustomSkill("", "", "skill-custom-001");
+    }
+
+    @Test
+    public void callbackWorkflowAndChatflowListsReadAppService() throws Exception {
+        AppService appService = mock(AppService.class);
+        when(appService.listApplications(any(ApplicationListQuery.class)))
+                .thenReturn(new ApplicationListResult(Collections.singletonList(
+                        map("appId", "workflow-001", "name", "Workflow One")), 1));
+
+        MockMvc callbackMvc = MockMvcBuilders
+                .standaloneSetup(new WanwuCallbackApiController(null, appService))
+                .build();
+
+        callbackMvc.perform(get("/callback/v1/workflow/list")
+                        .param("userId", "user-001")
+                        .param("orgId", "org-001")
+                        .param("name", "flow"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].appId").value("workflow-001"))
+                .andExpect(jsonPath("$.data.list[0].name").value("Workflow One"));
+
+        callbackMvc.perform(get("/callback/v1/chatflow/list")
+                        .param("userId", "user-002")
+                        .param("orgId", "org-002"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].appId").value("workflow-001"));
+
+        ArgumentCaptor<ApplicationListQuery> captor = forClass(ApplicationListQuery.class);
+        verify(appService, times(2)).listApplications(captor.capture());
+        assertEquals("workflow", captor.getAllValues().get(0).getAppType());
+        assertEquals("user-001", captor.getAllValues().get(0).getUserId());
+        assertEquals("org-001", captor.getAllValues().get(0).getOrgId());
+        assertEquals("flow", captor.getAllValues().get(0).getName());
+        assertEquals("chatflow", captor.getAllValues().get(1).getAppType());
+        assertEquals("user-002", captor.getAllValues().get(1).getUserId());
+        assertEquals("org-002", captor.getAllValues().get(1).getOrgId());
     }
 
     @Test
