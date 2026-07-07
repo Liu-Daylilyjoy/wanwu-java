@@ -641,6 +641,39 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitAppliesGoStyleMetadataFilters() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Regional Docs", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-beijing", "BeijingGuide.txt",
+                        "Regional policy retrieval applies here."));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-shanghai", "ShanghaiGuide.txt",
+                        "Regional policy retrieval applies here."));
+
+        service.updateDocMeta("dev-admin", "default-org", metaDefinition(knowledgeId, "city", "string"));
+        Map<String, Object> meta = listOfMaps(service.selectMetaKeys("dev-admin", "default-org",
+                singleton("knowledgeId", knowledgeId)).get("knowledgeMetaList")).get(0);
+        String metaId = (String) meta.get("metaId");
+        service.updateMetaValues("dev-admin", "default-org",
+                metaValueUpdate(knowledgeId, Collections.singletonList("doc-beijing"), metaId, "city", "Beijing"));
+        service.updateMetaValues("dev-admin", "default-org",
+                metaValueUpdate(knowledgeId, Collections.singletonList("doc-shanghai"), metaId, "city", "Shanghai"));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Regional policy retrieval");
+        request.put("metadata_filtering", true);
+        request.put("metadata_filtering_conditions", Collections.singletonList(knowledgeMetaFilter(
+                "Regional Docs", "and", "city", "string", "eq", "Beijing")));
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+        List<Map<String, Object>> searchList = listOfMaps(hit.get("searchList"));
+
+        assertEquals(1, searchList.size());
+        assertEquals("doc-beijing", searchList.get(0).get("docId"));
+        assertEquals("Beijing", listOfMaps(searchList.get(0).get("metaDataList")).get(0).get("metaValue"));
+    }
+
+    @Test
     public void documentImportSplitsInlineContentIntoSearchableSegments() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Parsed Docs", 0)).get("knowledgeId");
@@ -1369,6 +1402,21 @@ public class KnowledgeServiceImplTest {
 
         Map<String, Object> filter = new LinkedHashMap<String, Object>();
         filter.put("filtering_qa_base_name", qaBaseName);
+        filter.put("logical_operator", logicalOperator);
+        filter.put("conditions", Collections.singletonList(condition));
+        return filter;
+    }
+
+    private Map<String, Object> knowledgeMetaFilter(String knowledgeName, String logicalOperator, String metaName,
+                                                    String metaType, String comparisonOperator, Object value) {
+        Map<String, Object> condition = new LinkedHashMap<String, Object>();
+        condition.put("meta_name", metaName);
+        condition.put("meta_type", metaType);
+        condition.put("comparison_operator", comparisonOperator);
+        condition.put("value", value);
+
+        Map<String, Object> filter = new LinkedHashMap<String, Object>();
+        filter.put("filtering_kb_name", knowledgeName);
         filter.put("logical_operator", logicalOperator);
         filter.put("conditions", Collections.singletonList(condition));
         return filter;

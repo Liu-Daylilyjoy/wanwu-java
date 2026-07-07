@@ -328,6 +328,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         double threshold = doubleValue(firstPresent(matchParams, "threshold", "score"), 0D);
         boolean useGraph = booleanValue(matchParams.get("useGraph"), false);
         Set<String> knowledgeIds = knowledgeIdsForHit(orgId, safe);
+        List<Map<String, Object>> metadataFilters = mapList(firstPresent(safe,
+                "metadataFilteringConditions", "metadata_filtering_conditions"));
+        Object metadataFilteringFlag = safe.containsKey("metadataFiltering")
+                ? safe.get("metadataFiltering")
+                : safe.get("metadata_filtering");
+        boolean metadataFiltering = !metadataFilters.isEmpty() && booleanValue(metadataFilteringFlag, true);
 
         List<Map<String, Object>> searchList = new ArrayList<Map<String, Object>>();
         List<Double> scores = new ArrayList<Double>();
@@ -338,6 +344,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
             for (DocState doc : docs(knowledgeId)) {
                 if (doc.status != DOC_STATUS_FINISHED) {
+                    continue;
+                }
+                if (metadataFiltering && !docMetadataFiltersMatch(doc, knowledge, metadataFilters)) {
                     continue;
                 }
                 for (SegmentState segment : segments(doc.docId)) {
@@ -3778,6 +3787,42 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return false;
     }
 
+    private boolean docMetadataFiltersMatch(DocState doc, KnowledgeState knowledge,
+                                            List<Map<String, Object>> filters) {
+        boolean applied = false;
+        for (Map<String, Object> filter : safeList(filters)) {
+            String knowledgeName = firstText(filter, "filtering_kb_name", "filteringKbName",
+                    "knowledgeName", "knowledgeId");
+            if (!isBlank(knowledgeName) && !knowledgeName.equals(knowledge.name)
+                    && !knowledgeName.equals(knowledge.knowledgeId)) {
+                continue;
+            }
+            List<Map<String, Object>> conditions = mapList(filter.get("conditions"));
+            if (conditions.isEmpty()) {
+                continue;
+            }
+            applied = true;
+            String logicalOperator = defaultIfBlank(firstText(filter, "logical_operator", "logicalOperator"), "and");
+            boolean useOr = "or".equalsIgnoreCase(logicalOperator);
+            boolean groupMatches = !useOr;
+            for (Map<String, Object> condition : conditions) {
+                boolean conditionMatches = metadataConditionMatches(doc.metaDataList, condition);
+                if (useOr && conditionMatches) {
+                    groupMatches = true;
+                    break;
+                }
+                if (!useOr && !conditionMatches) {
+                    groupMatches = false;
+                    break;
+                }
+            }
+            if (groupMatches) {
+                return true;
+            }
+        }
+        return !applied;
+    }
+
     private boolean qaMetadataFiltersMatch(QaPairState pair, KnowledgeState knowledge,
                                            List<Map<String, Object>> filters) {
         boolean applied = false;
@@ -3814,11 +3859,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private boolean qaMetadataConditionMatches(QaPairState pair, Map<String, Object> condition) {
+        return metadataConditionMatches(pair.metaDataList, condition);
+    }
+
+    private boolean metadataConditionMatches(List<Map<String, Object>> metaDataList, Map<String, Object> condition) {
         String metaName = firstText(condition, "meta_name", "metaName", "metaKey", "key", "name");
         String operator = defaultIfBlank(firstText(condition,
                 "comparison_operator", "comparisonOperator", "condition", "operator"), "eq");
         List<String> values = new ArrayList<String>();
-        for (Map<String, Object> meta : pair.metaDataList) {
+        for (Map<String, Object> meta : safeList(metaDataList)) {
             String key = firstText(meta, "metaKey", "key", "name", "metaName", "meta_name");
             if (!isBlank(metaName) && !metaName.equals(key)) {
                 continue;
