@@ -1161,6 +1161,61 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void workflowRunEmitsStructuredPoiToolContent() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("PoiToolFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"keywords\"},{\"type\":\"string\",\"name\":\"location\"}]}},"
+                + "{\"id\":\"138194\",\"type\":\"1009\",\"data\":{\"nodeMeta\":{\"title\":\"POI Search\",\"subTitle\":\"MCP Tool\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"result\",\"schema\":[{\"type\":\"list\",\"name\":\"content\"}]}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"keywords\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"keywords\"}}}},"
+                + "{\"name\":\"location\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"location\"}}}}],"
+                + "\"mcpInfoList\":[]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"138194\",\"name\":\"result.content\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"138194\"},"
+                + "{\"sourceNodeID\":\"138194\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"list\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("keywords", "bell tower");
+        input.put("location", "xian");
+        run.setInput(input);
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> content = (List<Map<String, Object>>) output.get("output");
+        Map<String, Object> first = content.get(0);
+        assertEquals("bell tower", first.get("name"));
+        assertEquals("xian bell tower", first.get("address"));
+        assertEquals("poi", first.get("category"));
+        assertEquals("POI", first.get("categoryLabel"));
+        assertEquals(480, first.get("distanceMeters"));
+        assertEquals(4.8D, first.get("rating"));
+        assertTrue(((List<?>) first.get("tags")).contains("poi"));
+    }
+
+    @Test
     public void workflowRunRoutesSelectorToInputNodeWhenValueMissing() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());

@@ -7127,8 +7127,21 @@ public class AppServiceImpl implements AppService {
             item.put("temperature", "24C");
         }
         if (lowerTitle.contains("poi") || title.contains("搜索")) {
-            item.put("name", defaultIfBlank(stringValue(firstPresent(input, "keywords", "query")), "POI"));
-            item.put("location", defaultIfBlank(stringValue(firstPresent(input, "location", "city")), ""));
+            String keyword = defaultIfBlank(stringValue(firstPresent(input, "keywords", "query")), "POI");
+            String location = defaultIfBlank(stringValue(firstPresent(input, "location", "city")), "");
+            item.put("name", keyword);
+            item.put("location", location);
+            item.put("category", "poi");
+            item.put("categoryLabel", "POI");
+            double rating = Math.max(4.0D, 4.9D - (index * 0.1D));
+            item.put("rating", Math.round(rating * 10D) / 10D);
+            item.put("distanceMeters", 480 + ((index - 1) * 320));
+            item.put("address", isBlank(location) ? keyword : location + " " + keyword);
+            item.put("description", "Local POI result for " + keyword);
+            item.put("recommendedFor", "workflow local search");
+            item.put("openHours", "all-day");
+            item.put("priceLevel", "local");
+            item.put("tags", Arrays.asList("workflow", "local", "poi"));
         }
         if (title.contains("路径") || lowerTitle.contains("route")) {
             item.put("origin", defaultIfBlank(stringValue(input.get("origin")), ""));
