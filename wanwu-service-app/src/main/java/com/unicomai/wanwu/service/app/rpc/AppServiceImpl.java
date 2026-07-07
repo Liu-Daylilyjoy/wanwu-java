@@ -6185,6 +6185,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(workflowKnowledgeQueryOutput(userId, orgId, node, input));
         } else if (workflowIsDocumentParseNode(node, type, lowerType)) {
             output.putAll(workflowDocumentParseOutput(node, input));
+        } else if (workflowIsToolNode(node, type, lowerType)) {
+            output.putAll(workflowToolOutput(node, input));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -6570,6 +6572,108 @@ public class AppServiceImpl implements AppService {
             return text.substring(1);
         }
         return text == null ? "" : text;
+    }
+
+    private boolean workflowIsToolNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "1009".equals(type) || semantic.contains("mcp") || semantic.contains("tool node");
+    }
+
+    private Map<String, Object> workflowToolOutput(Map<String, Object> node, Map<String, Object> input) {
+        List<Map<String, Object>> content = workflowToolContent(node, input);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("content", content);
+
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("result", result);
+        output.put("content", content);
+        output.put("output", result);
+        output.put("response", result);
+        output.put("text", workflowJsonText(content));
+        return output;
+    }
+
+    private List<Map<String, Object>> workflowToolContent(Map<String, Object> node, Map<String, Object> input) {
+        String title = workflowToolTitle(node);
+        String summary = workflowToolInputSummary(input);
+        int count = workflowToolResultCount(title, input);
+        List<Map<String, Object>> content = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", "text");
+            item.put("title", title);
+            item.put("text", workflowToolText(title, summary, i + 1));
+            workflowToolAddTypedFields(item, title, input, i + 1);
+            content.add(item);
+        }
+        return content;
+    }
+
+    private String workflowToolTitle(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> nodeMeta = mapValue(data.get("nodeMeta"));
+        return defaultIfBlank(textValue(nodeMeta, "title", "subTitle"),
+                defaultIfBlank(textValue(data, "title", "name"), textValue(node, "title", "name")));
+    }
+
+    private int workflowToolResultCount(String title, Map<String, Object> input) {
+        Object configured = firstPresent(input, "numResults", "perPage", "limit", "count");
+        int count = configured == null ? 1 : intValue(configured, 1);
+        if (count <= 0) {
+            count = 1;
+        }
+        if (configured == null && title.contains("热搜")) {
+            count = 3;
+        }
+        return Math.min(5, count);
+    }
+
+    private String workflowToolInputSummary(Map<String, Object> input) {
+        Object value = firstPresent(input, "query", "keywords", "prompt", "city", "origin",
+                "destination", "data", "input");
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof Map || value instanceof List) {
+            return workflowJsonText(value);
+        }
+        return String.valueOf(value);
+    }
+
+    private String workflowToolText(String title, String summary, int index) {
+        String base = defaultIfBlank(title, "Tool");
+        String suffix = isBlank(summary) ? "" : " for " + summary;
+        return base + " local result " + index + suffix;
+    }
+
+    private void workflowToolAddTypedFields(Map<String, Object> item,
+                                            String title,
+                                            Map<String, Object> input,
+                                            int index) {
+        String lowerTitle = defaultIfBlank(title, "").toLowerCase(java.util.Locale.ENGLISH);
+        if (title.contains("热搜") || lowerTitle.contains("hot")) {
+            item.put("rank", index);
+            item.put("source", defaultIfBlank(title, "hot-news"));
+            item.put("name", item.get("text"));
+        }
+        if (title.contains("天气") || lowerTitle.contains("weather")) {
+            item.put("city", defaultIfBlank(stringValue(firstPresent(input, "city", "location")), "unknown"));
+            item.put("weather", "clear");
+            item.put("temperature", "24C");
+        }
+        if (lowerTitle.contains("poi") || title.contains("搜索")) {
+            item.put("name", defaultIfBlank(stringValue(firstPresent(input, "keywords", "query")), "POI"));
+            item.put("location", defaultIfBlank(stringValue(firstPresent(input, "location", "city")), ""));
+        }
+        if (title.contains("路径") || lowerTitle.contains("route")) {
+            item.put("origin", defaultIfBlank(stringValue(input.get("origin")), ""));
+            item.put("destination", defaultIfBlank(stringValue(input.get("destination")), ""));
+            item.put("distance", "local-estimate");
+        }
+        if (title.contains("图") || lowerTitle.contains("image") || lowerTitle.contains("chart")) {
+            item.put("artifactType", "image");
+            item.put("url", "");
+        }
     }
 
     private boolean workflowIsCodeNode(Map<String, Object> node, String type, String lowerType) {

@@ -1114,6 +1114,53 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    public void workflowRunExecutesToolNodeWithResultContent() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("ToolNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"126843\",\"type\":\"1009\",\"data\":{\"nodeMeta\":{\"title\":\"获取资料摘要\",\"subTitle\":\"MCP工具\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"result\",\"schema\":[{\"type\":\"list\",\"name\":\"content\"}]}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}},"
+                + "{\"name\":\"numResults\",\"input\":{\"type\":\"float\",\"value\":{\"type\":\"literal\",\"content\":3}}}],"
+                + "\"mcpInfoList\":[]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"126843\",\"name\":\"result.content\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"126843\"},"
+                + "{\"sourceNodeID\":\"126843\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"list\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "wanwu java"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> content = (List<Map<String, Object>>) output.get("output");
+        assertEquals("text", content.get(0).get("type"));
+        assertTrue(String.valueOf(content.get(0).get("text")).contains("wanwu java"));
+        Map<String, Object> toolOutput = castMap(castMap(output.get("nodeOutputs")).get("126843"));
+        assertEquals(content, castMap(toolOutput.get("result")).get("content"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
