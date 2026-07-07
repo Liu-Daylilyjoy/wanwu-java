@@ -6177,7 +6177,7 @@ public class AppServiceImpl implements AppService {
         } else if (workflowIsSetVariableNode(node, type, lowerType)) {
             output.putAll(workflowSetVariableOutput(node, input));
         } else if (workflowIsLoopNode(node, type, lowerType)) {
-            output.putAll(workflowLoopOutput(node, input));
+            output.putAll(workflowLoopOutput(workflow, node, nodeId, input, userId, orgId));
         } else if (workflowIsConcatNode(type, lowerType)) {
             String text = workflowConcatText(node, input);
             output.put("text", text);
@@ -6534,23 +6534,208 @@ public class AppServiceImpl implements AppService {
         return textValue(left, "name", "key", "field", "variable");
     }
 
-    private Map<String, Object> workflowLoopOutput(Map<String, Object> node, Map<String, Object> input) {
+    private Map<String, Object> workflowLoopOutput(AppRecord workflow,
+                                                   Map<String, Object> node,
+                                                   String nodeId,
+                                                   Map<String, Object> input,
+                                                   String userId,
+                                                   String orgId) {
         Object rawItems = firstPresent(input, "input", "items", "data", "array", "list");
         List<Object> items = listValue(rawItems);
         if (items.isEmpty() && rawItems != null && !isBlank(String.valueOf(rawItems))) {
             items = Collections.singletonList(rawItems);
         }
         String seed = stringValue(workflowConfiguredParam(node, "variableParameters", "finalText", input));
-        String finalText = workflowLoopFinalText(seed, items);
+        List<Map<String, Object>> blocks = workflowInlineNodeList(firstPresent(node, "blocks", "blockNodes"));
+        String finalText = blocks.isEmpty()
+                ? workflowLoopFinalText(seed, items)
+                : workflowLoopFinalText(workflow, node, nodeId, input, items, seed, userId, orgId);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("finalText", finalText);
         output.put("iterations", items.size());
         output.put("branch", "loop-output");
+        if (input.containsKey("loopOutputs")) {
+            output.put("loopOutputs", input.get("loopOutputs"));
+        }
         output.put("output", finalText);
         output.put("result", finalText);
         output.put("response", finalText);
         output.put("text", finalText);
         return output;
+    }
+
+    private String workflowLoopFinalText(AppRecord workflow,
+                                         Map<String, Object> node,
+                                         String nodeId,
+                                         Map<String, Object> input,
+                                         List<Object> items,
+                                         String seed,
+                                         String userId,
+                                         String orgId) {
+        String finalText = seed;
+        List<Map<String, Object>> blocks = workflowInlineNodeList(firstPresent(node, "blocks", "blockNodes"));
+        List<Map<String, Object>> inlineEdges = workflowInlineNodeList(firstPresent(node, "edges", "blockEdges"));
+        List<Map<String, Object>> loopOutputs = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            Object item = items.get(i);
+            Map<String, Object> iterationContext = new LinkedHashMap<>(input);
+            Map<String, Object> loopState = workflowLoopState(nodeId, item, i, finalText);
+            iterationContext.put(nodeId, loopState);
+            iterationContext.putAll(loopState);
+            List<Map<String, Object>> iterationSteps = new ArrayList<>();
+            Map<String, Object> afterIteration = workflowRunInlineBlocks(
+                    workflow, nodeId, blocks, inlineEdges, iterationContext, iterationSteps, userId, orgId);
+            Object updatedFinalText = firstPresent(afterIteration, "finalText", "output", "result", "text");
+            finalText = updatedFinalText == null ? "" : String.valueOf(updatedFinalText);
+
+            Map<String, Object> iterationOutput = new LinkedHashMap<>();
+            iterationOutput.put("index", i);
+            iterationOutput.put("input", item);
+            iterationOutput.put("finalText", finalText);
+            iterationOutput.put("steps", iterationSteps);
+            iterationOutput.put("nodeOutputs", workflowNodeOutputs(iterationSteps));
+            loopOutputs.add(iterationOutput);
+        }
+        input.put("loopOutputs", loopOutputs);
+        return finalText;
+    }
+
+    private Map<String, Object> workflowRunInlineBlocks(AppRecord workflow,
+                                                        String loopNodeId,
+                                                        List<Map<String, Object>> blocks,
+                                                        List<Map<String, Object>> edges,
+                                                        Map<String, Object> initialContext,
+                                                        List<Map<String, Object>> steps,
+                                                        String userId,
+                                                        String orgId) {
+        Map<String, Object> context = new LinkedHashMap<>(initialContext);
+        if (blocks.isEmpty()) {
+            return context;
+        }
+        Map<String, Map<String, Object>> nodesById = workflowNodesById(blocks);
+        Map<String, List<Map<String, Object>>> edgesBySource = workflowEdgesBySource(edges);
+        List<String> queue = workflowInlineEntryNodeIds(loopNodeId, blocks, nodesById, edges);
+        List<String> runNodeIds = new ArrayList<>();
+        int cursor = 0;
+        int order = 1;
+        while (cursor < queue.size()) {
+            String childId = queue.get(cursor++);
+            if (runNodeIds.contains(childId)) {
+                continue;
+            }
+            Map<String, Object> child = nodesById.get(childId);
+            if (child == null) {
+                continue;
+            }
+            runNodeIds.add(childId);
+            String type = defaultIfBlank(textValue(child, "type", "nodeType"), "node");
+            String name = workflowNodeName(child, childId);
+            Map<String, Object> childInput = workflowNodeInput(child, context);
+            Map<String, Object> childOutput = workflowNodeOutput(
+                    workflow, child, childId, type, name, childInput, order, userId, orgId);
+            Map<String, Object> step = new LinkedHashMap<>();
+            step.put("order", order);
+            step.put("nodeId", childId);
+            step.put("name", name);
+            step.put("type", type);
+            step.put("status", "success");
+            step.put("input", childInput);
+            step.put("output", childOutput);
+            steps.add(step);
+            context.put(childId, childOutput);
+            context.putAll(childOutput);
+            order++;
+
+            List<Map<String, Object>> outgoing = edgesBySource.get(childId);
+            if (outgoing == null || outgoing.isEmpty()) {
+                continue;
+            }
+            boolean hasExplicitCondition = workflowHasExplicitCondition(outgoing);
+            for (Map<String, Object> edge : outgoing) {
+                String target = workflowEdgeEndpoint(edge, false);
+                if (!nodesById.containsKey(target)) {
+                    continue;
+                }
+                if (workflowEdgeMatches(edge, context, hasExplicitCondition)
+                        && !runNodeIds.contains(target)
+                        && !queue.contains(target)) {
+                    queue.add(target);
+                }
+            }
+        }
+        return context;
+    }
+
+    private Map<String, Object> workflowLoopState(String nodeId, Object item, int index, String finalText) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("nodeId", nodeId);
+        state.put("input", item);
+        state.put("item", item);
+        state.put("index", index);
+        state.put("finalText", finalText);
+        state.put("output", finalText);
+        state.put("result", finalText);
+        state.put("text", finalText);
+        return state;
+    }
+
+    private Map<String, List<Map<String, Object>>> workflowEdgesBySource(List<Map<String, Object>> edges) {
+        Map<String, List<Map<String, Object>>> edgesBySource = new LinkedHashMap<>();
+        for (Map<String, Object> edge : edges) {
+            String source = workflowEdgeEndpoint(edge, true);
+            if (isBlank(source)) {
+                continue;
+            }
+            List<Map<String, Object>> outgoing = edgesBySource.get(source);
+            if (outgoing == null) {
+                outgoing = new ArrayList<>();
+                edgesBySource.put(source, outgoing);
+            }
+            outgoing.add(edge);
+        }
+        return edgesBySource;
+    }
+
+    private List<String> workflowInlineEntryNodeIds(String loopNodeId,
+                                                    List<Map<String, Object>> blocks,
+                                                    Map<String, Map<String, Object>> nodesById,
+                                                    List<Map<String, Object>> edges) {
+        List<String> queue = new ArrayList<>();
+        List<String> targetIds = new ArrayList<>();
+        for (Map<String, Object> edge : edges) {
+            String source = workflowEdgeEndpoint(edge, true);
+            String target = workflowEdgeEndpoint(edge, false);
+            if (loopNodeId.equals(source) && nodesById.containsKey(target) && !queue.contains(target)) {
+                queue.add(target);
+            }
+            if (nodesById.containsKey(source) && nodesById.containsKey(target) && !targetIds.contains(target)) {
+                targetIds.add(target);
+            }
+        }
+        if (!queue.isEmpty()) {
+            return queue;
+        }
+        for (int i = 0; i < blocks.size(); i++) {
+            String childId = workflowNodeId(blocks.get(i), i + 1);
+            if (!targetIds.contains(childId)) {
+                queue.add(childId);
+            }
+        }
+        if (queue.isEmpty() && !blocks.isEmpty()) {
+            queue.add(workflowNodeId(blocks.get(0), 1));
+        }
+        return queue;
+    }
+
+    private List<Map<String, Object>> workflowInlineNodeList(Object raw) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : listValue(raw)) {
+            Map<String, Object> map = mapValue(item);
+            if (!map.isEmpty()) {
+                result.add(map);
+            }
+        }
+        return result;
     }
 
     private String workflowLoopFinalText(String seed, List<Object> items) {

@@ -1320,6 +1320,70 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesLoopNodeInlineBlocksForEachArrayItem() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("InlineLoopFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"list\",\"name\":\"items\",\"schema\":{\"type\":\"string\"}}]}},"
+                + "{\"id\":\"110184\",\"type\":\"21\",\"data\":{\"nodeMeta\":{\"title\":\"Loop\"},"
+                + "\"outputs\":[{\"name\":\"output\",\"input\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"110184\",\"name\":\"finalText\"}}}}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"items\"}}}}],"
+                + "\"loopType\":\"array\",\"variableParameters\":[{\"name\":\"finalText\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"\"}}}]}},"
+                + "\"blocks\":["
+                + "{\"id\":\"186910\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"Append\"},"
+                + "\"inputs\":{\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"{{finalText}}{{input}};\"}}}]}}},"
+                + "{\"id\":\"120390\",\"type\":\"20\",\"data\":{\"nodeMeta\":{\"title\":\"Set Variable\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"left\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"110184\",\"name\":\"finalText\"}}},"
+                + "\"right\":{\"type\":\"string\",\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"source\":\"block-output\",\"blockID\":\"186910\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"110184\",\"targetNodeID\":\"186910\",\"sourcePortID\":\"loop-function-inline-output\"},"
+                + "{\"sourceNodeID\":\"186910\",\"targetNodeID\":\"120390\"},"
+                + "{\"sourceNodeID\":\"120390\",\"targetNodeID\":\"110184\",\"targetPortID\":\"loop-function-inline-input\"}"
+                + "]},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"110184\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"110184\"},"
+                + "{\"sourceNodeID\":\"110184\",\"targetNodeID\":\"900001\",\"sourcePortID\":\"loop-output\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("items", Arrays.asList("A", "B"));
+        run.setInput(input);
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        assertEquals("A;B;", output.get("output"), String.valueOf(output));
+        Map<String, Object> loopOutput = castMap(castMap(output.get("nodeOutputs")).get("110184"));
+        assertEquals("A;B;", loopOutput.get("finalText"));
+        assertEquals(2, loopOutput.get("iterations"));
+        assertEquals(2, ((List<?>) loopOutput.get("loopOutputs")).size());
+    }
+
+    @Test
     public void workflowRunExecutesSetVariableNode() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
