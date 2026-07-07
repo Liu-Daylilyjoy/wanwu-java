@@ -1790,7 +1790,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> input = command.getInput() == null
                 ? Collections.<String, Object>emptyMap()
                 : command.getInput();
-        Map<String, Object> output = workflowRunOutput(workflow, draft, input);
+        Map<String, Object> output = workflowRunOutput(workflow, draft, input, userId, orgId);
         long finishedAt = Math.max(startedAt, clock.millis());
         String runId = newWorkflowRunId();
 
@@ -5388,10 +5388,12 @@ public class AppServiceImpl implements AppService {
 
     private Map<String, Object> workflowRunOutput(AppRecord workflow,
                                                   WorkflowDraftRecord draft,
-                                                  Map<String, Object> input) {
+                                                  Map<String, Object> input,
+                                                  String userId,
+                                                  String orgId) {
         String schemaJson = draft == null ? "" : draft.getSchemaJson();
         JsonNode schema = workflowSchema(schemaJson);
-        WorkflowExecution execution = workflowExecution(workflow, schema, input);
+        WorkflowExecution execution = workflowExecution(workflow, schema, input, userId, orgId);
         List<Map<String, Object>> steps = execution.steps;
         Map<String, Object> nodeOutputs = workflowNodeOutputs(steps);
         List<Map<String, Object>> edges = workflowEdges(schema);
@@ -5495,12 +5497,14 @@ public class AppServiceImpl implements AppService {
     private List<Map<String, Object>> workflowExecutionSteps(AppRecord workflow,
                                                              JsonNode schema,
                                                              Map<String, Object> input) {
-        return workflowExecution(workflow, schema, input).steps;
+        return workflowExecution(workflow, schema, input, DEV_USER_ID, DEV_ORG_ID).steps;
     }
 
     private WorkflowExecution workflowExecution(AppRecord workflow,
                                                 JsonNode schema,
-                                                Map<String, Object> input) {
+                                                Map<String, Object> input,
+                                                String userId,
+                                                String orgId) {
         List<Map<String, Object>> nodes = workflowNodes(schema);
         List<Map<String, Object>> edges = workflowEdges(schema);
         List<Map<String, Object>> steps = new ArrayList<>(nodes.size());
@@ -5529,7 +5533,8 @@ public class AppServiceImpl implements AppService {
             String name = workflowNodeName(node, nodeId);
             Map<String, Object> step = new LinkedHashMap<>();
             Map<String, Object> nodeInput = workflowNodeInput(node, context);
-            Map<String, Object> nodeOutput = workflowNodeOutput(workflow, node, nodeId, type, name, nodeInput, order);
+            Map<String, Object> nodeOutput = workflowNodeOutput(
+                    workflow, node, nodeId, type, name, nodeInput, order, userId, orgId);
             step.put("order", order);
             step.put("nodeId", nodeId);
             step.put("name", name);
@@ -6140,7 +6145,9 @@ public class AppServiceImpl implements AppService {
                                                    String type,
                                                    String name,
                                                    Map<String, Object> input,
-                                                   int order) {
+                                                   int order,
+                                                   String userId,
+                                                   String orgId) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("nodeId", nodeId);
         output.put("type", type);
@@ -6180,6 +6187,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(merged);
             output.put("text", String.valueOf(merged));
             output.put("result", merged);
+        } else if (workflowIsKnowledgeQueryNode(node, type, lowerType)) {
+            output.putAll(workflowKnowledgeQueryOutput(userId, orgId, node, input));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -6225,6 +6234,113 @@ public class AppServiceImpl implements AppService {
     private boolean workflowIsMergeNode(String type, String lowerType) {
         return "32".equals(type) || lowerType.contains("merge") || lowerType.contains("variable")
                 || lowerType.contains("assign");
+    }
+
+    private boolean workflowIsKnowledgeQueryNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "1006".equals(type) || semantic.contains("knowledge query")
+                || semantic.contains("knowledge-query") || semantic.contains("knowledgebase")
+                || semantic.contains("knowledge base");
+    }
+
+    private Map<String, Object> workflowKnowledgeQueryOutput(String userId,
+                                                             String orgId,
+                                                             Map<String, Object> node,
+                                                             Map<String, Object> input) {
+        Object questionValue = firstPresent(input, "Query", "query", "question", "input", "text");
+        String question = questionValue == null ? "" : String.valueOf(questionValue);
+        List<Map<String, Object>> knowledgeList = workflowKnowledgeQueryKnowledgeList(node, input);
+        Map<String, Object> matchParams = workflowKnowledgeMatchParams(node, input);
+
+        Map<String, Object> hit = Collections.emptyMap();
+        if (knowledgeService != null) {
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("question", question);
+            request.put("knowledgeList", knowledgeList);
+            request.put("knowledgeMatchParams", matchParams);
+            Map<String, Object> response = knowledgeService.hitKnowledge(userId, orgId, request);
+            hit = response == null ? Collections.<String, Object>emptyMap() : response;
+        }
+
+        List<Map<String, Object>> searchList = hitSearchList(hit);
+        List<Object> scores = workflowKnowledgeScores(hit, searchList);
+        Map<String, Object> object = new LinkedHashMap<>();
+        object.put("prompt", defaultIfBlank(stringValue(hit.get("prompt")), question));
+        object.put("score", scores);
+        object.put("searchList", searchList);
+
+        Map<String, Object> output = new LinkedHashMap<>(object);
+        output.put("output", object);
+        output.put("result", object);
+        output.put("response", object);
+        output.put("text", stringValue(object.get("prompt")));
+        return output;
+    }
+
+    private List<Map<String, Object>> workflowKnowledgeQueryKnowledgeList(Map<String, Object> node,
+                                                                          Map<String, Object> input) {
+        Object configured = workflowConfiguredParam(node, "datasetParam", "knowledgeList", input);
+        List<Map<String, Object>> knowledgeList = new ArrayList<>();
+        for (Object item : listValue(configured)) {
+            Map<String, Object> source = mapValue(item);
+            Map<String, Object> target = new LinkedHashMap<>();
+            if (source.isEmpty()) {
+                String knowledgeId = stringValue(item);
+                if (!isBlank(knowledgeId)) {
+                    target.put("knowledgeId", knowledgeId);
+                }
+            } else {
+                target.putAll(source);
+                String knowledgeId = defaultIfBlank(stringValue(source.get("knowledgeId")),
+                        defaultIfBlank(stringValue(source.get("id")), stringValue(source.get("value"))));
+                if (!isBlank(knowledgeId)) {
+                    target.put("knowledgeId", knowledgeId);
+                }
+            }
+            if (!target.isEmpty()) {
+                knowledgeList.add(target);
+            }
+        }
+        return knowledgeList;
+    }
+
+    private Map<String, Object> workflowKnowledgeMatchParams(Map<String, Object> node,
+                                                             Map<String, Object> input) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        Map<String, Object> params = new LinkedHashMap<>();
+        for (Object item : listValue(inputs.get("datasetParam"))) {
+            Map<String, Object> parameter = mapValue(item);
+            String name = textValue(parameter, "name", "key", "field", "variable");
+            if (isBlank(name) || "knowledgeList".equals(name)) {
+                continue;
+            }
+            Object value = workflowResolveConfiguredInput(firstPresent(parameter, "input", "value", "default"), input);
+            if (value != null) {
+                params.put(name, value);
+            }
+        }
+        Map<String, Object> datasetMap = mapValue(inputs.get("datasetParam"));
+        for (Map.Entry<String, Object> entry : datasetMap.entrySet()) {
+            if (!"knowledgeList".equals(entry.getKey()) && !params.containsKey(entry.getKey())) {
+                params.put(entry.getKey(), workflowResolveConfiguredInput(entry.getValue(), input));
+            }
+        }
+        return params;
+    }
+
+    private List<Object> workflowKnowledgeScores(Map<String, Object> hit,
+                                                 List<Map<String, Object>> searchList) {
+        List<Object> scores = new ArrayList<>(listValue(hit.get("score")));
+        if (!scores.isEmpty()) {
+            return scores;
+        }
+        for (Map<String, Object> row : searchList) {
+            if (row.containsKey("score")) {
+                scores.add(row.get("score"));
+            }
+        }
+        return scores;
     }
 
     private boolean workflowIsCodeNode(Map<String, Object> node, String type, String lowerType) {

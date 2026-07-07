@@ -997,6 +997,73 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void workflowRunExecutesKnowledgeQueryNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), knowledgeService);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "Attraction.txt");
+        hitItem.put("snippet", "Bell tower travel guide");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("prompt", "Bell tower travel guide");
+        hit.put("score", Collections.singletonList(0.91D));
+        hit.put("searchList", Collections.singletonList(hitItem));
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("KnowledgeNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"place\"}]}},"
+                + "{\"id\":\"115653\",\"type\":\"1006\",\"data\":{\"nodeMeta\":{\"title\":\"检索景点信息\",\"subTitle\":\"知识库检索\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"Query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"place\"}}}}],"
+                + "\"datasetParam\":[{\"name\":\"knowledgeList\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"literal\",\"content\":[\"kb-001\"]}}},"
+                + "{\"name\":\"topK\",\"input\":{\"type\":\"integer\",\"value\":{\"type\":\"literal\",\"content\":3}}},"
+                + "{\"name\":\"threshold\",\"input\":{\"type\":\"float\",\"value\":{\"type\":\"literal\",\"content\":0.4}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"list\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"115653\",\"name\":\"output.searchList\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"115653\"},"
+                + "{\"sourceNodeID\":\"115653\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"list\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("place", "Bell tower"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        List<Map<String, Object>> searchList = (List<Map<String, Object>>) output.get("output");
+        assertEquals("Attraction.txt", searchList.get(0).get("title"));
+        Map<String, Object> knowledgeOutput = castMap(castMap(output.get("nodeOutputs")).get("115653"));
+        assertEquals("Bell tower travel guide", castMap(knowledgeOutput.get("output")).get("prompt"));
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), captor.capture());
+        Map<String, Object> request = captor.getValue();
+        assertEquals("Bell tower", request.get("question"));
+        List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) request.get("knowledgeList");
+        assertEquals("kb-001", knowledgeList.get(0).get("knowledgeId"));
+        Map<String, Object> matchParams = (Map<String, Object>) request.get("knowledgeMatchParams");
+        assertEquals(3, matchParams.get("topK"));
+        assertEquals(0.4D, matchParams.get("threshold"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
