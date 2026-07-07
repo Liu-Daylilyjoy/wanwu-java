@@ -136,6 +136,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -1061,6 +1063,54 @@ public class AppServiceImplTest {
         Map<String, Object> matchParams = (Map<String, Object>) request.get("knowledgeMatchParams");
         assertEquals(3, matchParams.get("topK"));
         assertEquals(0.4D, matchParams.get("threshold"));
+    }
+
+    @Test
+    public void workflowRunExecutesDocumentParseNodeForTextFiles() throws Exception {
+        Path file = Files.createTempFile("wanwu-workflow-doc-", ".txt");
+        Files.write(file, Collections.singletonList("Wanwu document parser keeps workflow text."), StandardCharsets.UTF_8);
+        try {
+            InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+            AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+            WorkflowCreateCommand create = new WorkflowCreateCommand();
+            create.setName("DocumentParseFlow");
+            create.setSchema("{"
+                    + "\"nodes\":["
+                    + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"file\"}]}},"
+                    + "{\"id\":\"152281\",\"type\":\"1008\",\"data\":{\"nodeMeta\":{\"title\":\"Document Parse\"},"
+                    + "\"outputs\":[{\"type\":\"string\",\"name\":\"text\"}],"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"FileUrl\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"file\"}}}}]}}},"
+                    + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                    + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                    + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"152281\",\"name\":\"text\"}}}}]}}}"
+                    + "],"
+                    + "\"edges\":["
+                    + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"152281\"},"
+                    + "{\"sourceNodeID\":\"152281\",\"targetNodeID\":\"900001\"}"
+                    + "],"
+                    + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                    + "}");
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            WorkflowCreateResult created = service.createWorkflow(create);
+
+            WorkflowRunCommand run = new WorkflowRunCommand();
+            run.setWorkflowId(created.getWorkflowId());
+            run.setUserId("dev-admin");
+            run.setOrgId("default-org");
+            run.setInput(Collections.<String, Object>singletonMap("file", file.toUri().toString()));
+
+            Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+            assertEquals("Wanwu document parser keeps workflow text.", output.get("output"));
+            Map<String, Object> parseOutput = castMap(castMap(output.get("nodeOutputs")).get("152281"));
+            assertEquals("Wanwu document parser keeps workflow text.", parseOutput.get("text"));
+        } finally {
+            Files.deleteIfExists(file);
+        }
     }
 
     @Test

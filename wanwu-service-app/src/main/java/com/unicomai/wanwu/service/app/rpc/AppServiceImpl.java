@@ -168,9 +168,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -6179,6 +6183,8 @@ public class AppServiceImpl implements AppService {
             output.put("result", merged);
         } else if (workflowIsKnowledgeQueryNode(node, type, lowerType)) {
             output.putAll(workflowKnowledgeQueryOutput(userId, orgId, node, input));
+        } else if (workflowIsDocumentParseNode(node, type, lowerType)) {
+            output.putAll(workflowDocumentParseOutput(node, input));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -6432,6 +6438,138 @@ public class AppServiceImpl implements AppService {
             }
         }
         return scores;
+    }
+
+    private boolean workflowIsDocumentParseNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "1008".equals(type) || semantic.contains("document parse")
+                || semantic.contains("document_parse") || semantic.contains("file parse");
+    }
+
+    private Map<String, Object> workflowDocumentParseOutput(Map<String, Object> node,
+                                                            Map<String, Object> input) {
+        String fileUrl = workflowDocumentFileUrl(node, input);
+        String text = workflowDocumentText(fileUrl);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("text", text);
+        output.put("output", text);
+        output.put("result", text);
+        output.put("response", text);
+        output.put("fileUrl", fileUrl);
+        return output;
+    }
+
+    private String workflowDocumentFileUrl(Map<String, Object> node, Map<String, Object> input) {
+        Object configured = firstPresent(input, "FileUrl", "fileUrl", "url", "file", "inputFile", "input");
+        if (configured == null) {
+            configured = workflowConfiguredParam(node, "inputParameters", "FileUrl", input);
+        }
+        return configured == null ? "" : String.valueOf(configured);
+    }
+
+    private String workflowDocumentText(String source) {
+        if (isBlank(source)) {
+            return "";
+        }
+        byte[] bytes = workflowDocumentBytes(source.trim());
+        if (bytes.length == 0) {
+            return source;
+        }
+        return stripUtf8Bom(new String(bytes, StandardCharsets.UTF_8)).trim();
+    }
+
+    private byte[] workflowDocumentBytes(String source) {
+        try {
+            if (source.startsWith("file:")) {
+                return workflowReadPathLimited(Paths.get(URI.create(source)));
+            }
+            if (source.startsWith("http://") || source.startsWith("https://")) {
+                return workflowReadUrlLimited(source);
+            }
+            byte[] uploaded = workflowReadUploadedFile(source);
+            if (uploaded.length > 0) {
+                return uploaded;
+            }
+            Path path = Paths.get(source);
+            if (Files.isRegularFile(path)) {
+                return workflowReadPathLimited(path);
+            }
+            return new byte[0];
+        } catch (Exception ignored) {
+            return new byte[0];
+        }
+    }
+
+    private byte[] workflowReadUploadedFile(String source) throws IOException {
+        String normalized = source.replace('\\', '/');
+        String marker = "/file/download/";
+        int index = normalized.indexOf(marker);
+        if (index < 0) {
+            return new byte[0];
+        }
+        String fileId = normalized.substring(index + marker.length());
+        int queryIndex = fileId.indexOf('?');
+        if (queryIndex >= 0) {
+            fileId = fileId.substring(0, queryIndex);
+        }
+        Path path = Paths.get(System.getProperty("java.io.tmpdir"), "wanwu-java-uploads", "files",
+                workflowSafeFileName(fileId));
+        return workflowReadPathLimited(path);
+    }
+
+    private byte[] workflowReadUrlLimited(String source) throws IOException {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(source).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            int status = connection.getResponseCode();
+            if (status >= 400) {
+                return new byte[0];
+            }
+            return workflowReadBytesLimited(connection.getInputStream(), 5 * 1024 * 1024);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private byte[] workflowReadPathLimited(Path path) throws IOException {
+        if (!Files.isRegularFile(path) || Files.size(path) > 5 * 1024 * 1024) {
+            return new byte[0];
+        }
+        return Files.readAllBytes(path);
+    }
+
+    private byte[] workflowReadBytesLimited(InputStream stream, int maxBytes) throws IOException {
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            int total = 0;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBytes) {
+                    return new byte[0];
+                }
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private String workflowSafeFileName(String value) {
+        String name = isBlank(value) ? "upload.bin" : value.replace('\\', '_').replace('/', '_');
+        name = name.replace("..", "_").trim();
+        return name.isEmpty() ? "upload.bin" : name;
+    }
+
+    private String stripUtf8Bom(String text) {
+        if (text != null && text.startsWith("\uFEFF")) {
+            return text.substring(1);
+        }
+        return text == null ? "" : text;
     }
 
     private boolean workflowIsCodeNode(Map<String, Object> node, String type, String lowerType) {
