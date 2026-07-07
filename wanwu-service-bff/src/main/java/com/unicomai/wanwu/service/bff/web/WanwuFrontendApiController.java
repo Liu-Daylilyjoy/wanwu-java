@@ -4828,9 +4828,11 @@ public class WanwuFrontendApiController {
         StringBuilder frames = new StringBuilder();
         frames.append(sseEvent(agUiEvent("RUN_STARTED", threadId, runId, null, null, null)));
         if (result.getQaSearchList() != null && !result.getQaSearchList().isEmpty()) {
+            frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_qa_start", null)));
             frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_qa_search_list", result.getQaSearchList())));
         }
         if (result.getSearchList() != null && !result.getSearchList().isEmpty()) {
+            frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_knowledge_start", null)));
             frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_search_list", result.getSearchList())));
         }
         frames.append(sseEvent(agUiEvent("TEXT_MESSAGE_START", threadId, runId, messageId, null, null)));
@@ -4857,7 +4859,7 @@ public class WanwuFrontendApiController {
         }
         if (!isBlank(name)) {
             event.put("name", name);
-            event.put("value", value == null ? Collections.emptyList() : value);
+            event.put("value", value);
         }
         return event;
     }

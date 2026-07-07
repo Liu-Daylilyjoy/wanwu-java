@@ -4414,20 +4414,33 @@ public class WanwuFrontendApiControllerTest {
         searchItem.put("title", "PolicyGuide.txt");
         searchItem.put("snippet", "RAG evidence.");
         result.setSearchList(Collections.singletonList(searchItem));
+        Map<String, Object> qaSearchItem = new LinkedHashMap<>();
+        qaSearchItem.put("qaPairId", "qa-pair-001");
+        qaSearchItem.put("answer", "QA evidence.");
+        result.setQaSearchList(Collections.singletonList(qaSearchItem));
         when(appService.streamRagChat(any(RagChatCommand.class))).thenReturn(result);
 
-        mockMvc.perform(post("/user/api/v1/rag/chat/draft")
-                        .header("Authorization", "Bearer dev-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\",\"history\":[{\"query\":\"q1\",\"response\":\"a1\",\"needHistory\":true}],\"fileInfo\":[{\"fileName\":\"a.txt\",\"fileSize\":3,\"fileUrl\":\"http://file/a.txt\"}]}"))
+        String response = mockMvc.perform(post("/user/api/v1/rag/chat/draft")
+                                .header("Authorization", "Bearer dev-token")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"ragId\":\"rag-001\",\"question\":\"what is policy\",\"history\":[{\"query\":\"q1\",\"response\":\"a1\",\"needHistory\":true}],\"fileInfo\":[{\"fileName\":\"a.txt\",\"fileSize\":3,\"fileUrl\":\"http://file/a.txt\"}]}"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(content().string(containsString("\"type\":\"RUN_STARTED\"")))
                 .andExpect(content().string(containsString("\"type\":\"TEXT_MESSAGE_CONTENT\"")))
+                .andExpect(content().string(containsString("rag_qa_start")))
+                .andExpect(content().string(containsString("rag_qa_search_list")))
+                .andExpect(content().string(containsString("qa-pair-001")))
+                .andExpect(content().string(containsString("rag_knowledge_start")))
                 .andExpect(content().string(containsString("rag_search_list")))
                 .andExpect(content().string(containsString("PolicyGuide.txt")))
                 .andExpect(content().string(containsString("RAG local answer.")))
-                .andExpect(content().string(containsString("\"type\":\"RUN_FINISHED\"")));
+                .andExpect(content().string(containsString("\"type\":\"RUN_FINISHED\"")))
+                .andReturn().getResponse().getContentAsString();
+        assertTrue(response.indexOf("rag_qa_start") < response.indexOf("rag_qa_search_list"));
+        assertTrue(response.indexOf("rag_qa_search_list") < response.indexOf("rag_knowledge_start"));
+        assertTrue(response.indexOf("rag_knowledge_start") < response.indexOf("rag_search_list"));
+        assertTrue(response.indexOf("rag_search_list") < response.indexOf("\"type\":\"TEXT_MESSAGE_CONTENT\""));
 
         org.mockito.ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
         verify(appService).streamRagChat(captor.capture());
