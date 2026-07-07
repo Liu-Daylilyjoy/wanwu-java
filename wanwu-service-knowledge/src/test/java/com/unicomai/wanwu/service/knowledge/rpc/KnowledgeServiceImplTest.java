@@ -286,6 +286,31 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void qaHitReturnsLocalRerankInfoWhenRerankModeIsRequested() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Rerank QA", 1)).get("knowledgeId");
+        Map<String, Object> pair = service.createQaPair("dev-admin", "default-org",
+                qaPairCreate(knowledgeId, "How does QA rerank work?", "It returns local rerank evidence."));
+
+        Map<String, Object> request = qaHit(knowledgeId, "QA rerank");
+        map(request.get("knowledgeMatchParams")).put("rerankMod", "rerank_model");
+        map(request.get("knowledgeMatchParams")).put("rerankModelId", "qa-rerank-local");
+
+        Map<String, Object> hit = service.hitQaPairs("dev-admin", "default-org", request);
+        Map<String, Object> row = listOfMaps(hit.get("searchList")).get(0);
+        List<Map<String, Object>> rerankInfo = listOfMaps(row.get("rerankInfo"));
+        assertNotNull(rerankInfo);
+        assertFalse(rerankInfo.isEmpty());
+        Map<String, Object> rerank = rerankInfo.get(0);
+
+        assertEquals(pair.get("qaPairId"), row.get("qaPairId"));
+        assertEquals(1.0D, rerank.get("score"));
+        assertEquals("qa", rerank.get("type"));
+        assertEquals("qa-rerank-local", rerank.get("modelId"));
+        assertEquals(rerank.get("score"), listOfMaps(row.get("rerank_info")).get(0).get("score"));
+    }
+
+    @Test
     public void qaHitHonorsScoreThreshold() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Threshold QA", 1)).get("knowledgeId");
@@ -873,6 +898,31 @@ public class KnowledgeServiceImplTest {
         Map<String, Object> disabledHit = service.hitKnowledge("dev-admin", "default-org",
                 knowledgeHit(knowledgeId, "Wanwu Java retrieval"));
         assertEquals(0, listOfMaps(disabledHit.get("searchList")).size());
+    }
+
+    @Test
+    public void knowledgeHitReturnsLocalRerankInfoWhenRerankModeIsRequested() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Rerank KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-rerank", "RerankGuide.txt",
+                        "Rerank evidence should expose its local score."));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Rerank evidence");
+        map(request.get("knowledgeMatchParams")).put("rerankMod", "rerank_model");
+        map(request.get("knowledgeMatchParams")).put("rerankModelId", "rerank-local");
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+        Map<String, Object> row = listOfMaps(hit.get("searchList")).get(0);
+        List<Map<String, Object>> rerankInfo = listOfMaps(row.get("rerankInfo"));
+        assertNotNull(rerankInfo);
+        assertFalse(rerankInfo.isEmpty());
+        Map<String, Object> rerank = rerankInfo.get(0);
+
+        assertEquals(1.0D, rerank.get("score"));
+        assertEquals("text", rerank.get("type"));
+        assertEquals("rerank-local", rerank.get("modelId"));
+        assertEquals(rerank.get("score"), listOfMaps(row.get("rerank_info")).get(0).get("score"));
     }
 
     @Test

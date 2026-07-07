@@ -17,6 +17,7 @@ Date: 2026-07-01
 - Configured `knowledgebases[].id`, `knowledgeList[].knowledgeId`, and Go `perKnowledgeConfigs[].knowledgeId` values are translated to the Java knowledge-service hit contract as `knowledgeList[].knowledgeId`.
 - The existing `knowledgeBaseConfig.config` object or Go `globalConfig` object is passed through as `knowledgeMatchParams`, preserving frontend and proto settings such as `topK`, `threshold`, `matchType`, graph flags, and hybrid retrieval weights.
 - RAG chat now applies the Go rerank switch when building local KnowledgeService requests: `rerankConfig.modelId` feeds knowledge hits and `qaRerankConfig.modelId` feeds QA hits when `priorityMatch != 1`, with `rerankMod=rerank_model`; weighted-score mode keeps `rerankMod=weighted_score`.
+- Local document and QA hit cards now include Go/BFF-compatible `rerankInfo` / `rerank_info` rows when rerank mode is requested, using the deterministic local score plus the configured rerank model id as evidence until real provider rerank execution is reproduced.
 - RAG chat now converts frontend `fileInfo` image URLs ending in `.png`, `.jpg`, or `.jpeg` into an `attachmentList` request-context field with Go-style `fileType=image` and `fileUrl`; non-image files remain persisted in `fileInfoJson` but are not parsed in this Java slice.
 - Go proto per-knowledge rows are normalized by preserving `graphSwitch` and mapping `ragMetaFilter` to `metaDataFilterParams`.
 - QA knowledge requests now also expose Go-style top-level metadata filtering fields: `returnMeta=true`, `metadataFiltering`, and `metadataFilteringConditions[{filtering_qa_base_name,logical_operator,conditions[]}]`; regular knowledge requests expose the equivalent snake_case `metadata_filtering` and `metadata_filtering_conditions` context fields.
@@ -33,6 +34,7 @@ Date: 2026-07-01
 - `AppServiceImplTest#ragChatBuildsImageAttachmentListFromFileInfo` verifies Go-style image-only attachment conversion while preserving all original file metadata in the chat snapshot.
 - `KnowledgeServiceImplTest#knowledgeHitAppliesGoStyleMetadataFilters` verifies local document knowledge hits honor Go-style metadata filter groups.
 - `KnowledgeServiceImplTest#qaHitAppliesGoStyleMetadataFilters` verifies local QA hit execution honors Go-style metadata filter groups and returns filtered QA metadata.
+- `KnowledgeServiceImplTest#knowledgeHitReturnsLocalRerankInfoWhenRerankModeIsRequested` and `#qaHitReturnsLocalRerankInfoWhenRerankModeIsRequested` verify local rerank evidence appears on document and QA hit cards when rerank mode is requested.
 - `WanwuFrontendApiControllerTest#ragChatDraftReturnsAgUiSseAndMapsFrontendRequest` verifies that frontend RAG draft chat emits the Go-style QA and knowledge start/search-list AG-UI event order over text/event-stream.
 
 ## Remaining Gap

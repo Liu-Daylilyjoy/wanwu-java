@@ -360,12 +360,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     if (!isBlank(question) && score <= 0D) {
                         continue;
                     }
-                    searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score, question));
+                    searchList.add(toKnowledgeHitInfo(knowledge, doc, segment, score, question, matchParams));
                     scores.add(score);
                 }
             }
         }
-        appendDocInfoHits(question, safe, searchList, scores, threshold);
+        appendDocInfoHits(question, safe, matchParams, searchList, scores, threshold);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
         return knowledgeHitResult(question, searchList, scores, useGraph);
     }
@@ -1846,7 +1846,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 if (score <= 0D || score < threshold) {
                     continue;
                 }
-                searchList.add(toQaHitInfo(pair, knowledge));
+                searchList.add(toQaHitInfo(pair, knowledge, score, matchParams));
                 scores.add(score);
             }
         }
@@ -2050,7 +2050,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private Map<String, Object> toKnowledgeHitInfo(KnowledgeState knowledge, DocState doc,
-                                                   SegmentState segment, double score, String question) {
+                                                   SegmentState segment, double score, String question,
+                                                   Map<String, Object> matchParams) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         List<Map<String, Object>> childContentList = new ArrayList<Map<String, Object>>();
         List<Double> childScore = new ArrayList<Double>();
@@ -2069,7 +2070,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("childScore", childScore);
         result.put("contentType", "text");
         result.put("score", score);
-        result.put("rerankInfo", Collections.emptyList());
+        List<Map<String, Object>> rerankInfo = rerankInfo(matchParams, score, "text", doc.docId);
+        result.put("rerankInfo", rerankInfo);
+        result.put("rerank_info", rerankInfo);
         result.put("docId", doc.docId);
         result.put("contentId", segment.contentId);
         result.put("metaDataList", copyMetaList(doc.metaDataList));
@@ -2085,7 +2088,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return result;
     }
 
-    private Map<String, Object> toUploadedDocHitInfo(String docName, String snippet, double score) {
+    private Map<String, Object> toUploadedDocHitInfo(String docName, String snippet, double score,
+                                                     Map<String, Object> matchParams) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("title", docName);
         result.put("snippet", snippet);
@@ -2094,7 +2098,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("childScore", Collections.emptyList());
         result.put("contentType", "text");
         result.put("score", score);
-        result.put("rerankInfo", Collections.emptyList());
+        List<Map<String, Object>> rerankInfo = rerankInfo(matchParams, score, "text", docName);
+        result.put("rerankInfo", rerankInfo);
+        result.put("rerank_info", rerankInfo);
         return result;
     }
 
@@ -2217,7 +2223,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return safeName.isEmpty() ? "document.txt" : safeName;
     }
 
-    private Map<String, Object> toQaHitInfo(QaPairState pair, KnowledgeState knowledge) {
+    private Map<String, Object> toQaHitInfo(QaPairState pair, KnowledgeState knowledge, double score,
+                                            Map<String, Object> matchParams) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("title", pair.question);
         result.put("question", pair.question);
@@ -2228,6 +2235,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("contentType", "qa");
         result.put("meta_data", copyMetaList(pair.metaDataList));
         result.put("metaData", copyMetaList(pair.metaDataList));
+        List<Map<String, Object>> rerankInfo = rerankInfo(matchParams, score, "qa", pair.qaPairId);
+        result.put("rerankInfo", rerankInfo);
+        result.put("rerank_info", rerankInfo);
         return result;
     }
 
@@ -2236,6 +2246,32 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         result.put("searchList", searchList);
         result.put("score", scores);
         return result;
+    }
+
+    private List<Map<String, Object>> rerankInfo(Map<String, Object> matchParams, double score,
+                                                 String type, String fileUrl) {
+        if (!rerankRequested(matchParams)) {
+            return Collections.emptyList();
+        }
+        Map<String, Object> info = new LinkedHashMap<String, Object>();
+        info.put("type", type);
+        info.put("fileUrl", fileUrl);
+        info.put("score", score);
+        String modelId = firstText(matchParams, "rerankModelId", "rerank_model_id");
+        if (!isBlank(modelId)) {
+            info.put("modelId", modelId);
+            info.put("model", modelId);
+        }
+        return Collections.singletonList(info);
+    }
+
+    private boolean rerankRequested(Map<String, Object> matchParams) {
+        String rerankModelId = firstText(matchParams, "rerankModelId", "rerank_model_id");
+        if (!isBlank(rerankModelId)) {
+            return true;
+        }
+        String rerankMod = firstText(matchParams, "rerankMod", "rerank_mod");
+        return "rerank_model".equalsIgnoreCase(rerankMod) || "rerank model".equalsIgnoreCase(rerankMod);
     }
 
     private Map<String, Object> knowledgeHitResult(String question, List<Map<String, Object>> searchList,
@@ -3713,8 +3749,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return parentScore;
     }
 
-    private void appendDocInfoHits(String question, Map<String, Object> request, List<Map<String, Object>> searchList,
-                                   List<Double> scores, double threshold) {
+    private void appendDocInfoHits(String question, Map<String, Object> request, Map<String, Object> matchParams,
+                                   List<Map<String, Object>> searchList, List<Double> scores, double threshold) {
         for (Object raw : list(request.get("docInfoList"))) {
             Map<String, Object> docInfo = map(raw);
             String docName = defaultIfBlank(string(docInfo.get("docName")), string(docInfo.get("fileName")));
@@ -3726,7 +3762,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (score < threshold || (!isBlank(question) && score <= 0D)) {
                 continue;
             }
-            searchList.add(toUploadedDocHitInfo(docName, snippet, score));
+            searchList.add(toUploadedDocHitInfo(docName, snippet, score, matchParams));
             scores.add(score);
         }
     }
