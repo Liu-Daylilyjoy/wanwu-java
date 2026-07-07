@@ -950,6 +950,24 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitUsesRequestGraphSwitchForGraphCard() {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Rag Config Graph KB", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org", docImport(knowledgeId, "doc-rag-graph", "RagGraph.txt"));
+        service.createDocSegment("dev-admin", "default-org",
+                createSegment("doc-rag-graph", "RAG config graph switch enables local graph evidence.",
+                        Collections.singletonList("rag-graph")));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "RAG config graph");
+        map(request.get("knowledgeMatchParams")).put("useGraph", true);
+        listOfMaps(request.get("knowledgeList")).get(0).put("graphSwitch", 1);
+
+        Map<String, Object> hit = service.hitKnowledge("dev-admin", "default-org", request);
+
+        assertNotNull(findByContentType(listOfMaps(hit.get("searchList")), "graph"));
+    }
+
+    @Test
     public void knowledgeHitRanksAllCandidatesBeforeApplyingTopK() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Ranking KB", 0)).get("knowledgeId");

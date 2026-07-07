@@ -364,7 +364,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     scores.add(score);
                 }
             }
-            appendKnowledgeGraphHit(userId, orgId, knowledge, useGraph, matchParams, searchList, scores, threshold);
+            appendKnowledgeGraphHit(userId, orgId, safe, knowledge, useGraph, matchParams,
+                    searchList, scores, threshold);
         }
         appendDocInfoHits(question, safe, matchParams, searchList, scores, threshold);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
@@ -3785,10 +3786,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
-    private void appendKnowledgeGraphHit(String userId, String orgId, KnowledgeState knowledge, boolean useGraph,
-                                         Map<String, Object> matchParams, List<Map<String, Object>> searchList,
-                                         List<Double> scores, double threshold) {
-        if (!useGraph || knowledge.graphSwitch != 1) {
+    private void appendKnowledgeGraphHit(String userId, String orgId, Map<String, Object> request,
+                                         KnowledgeState knowledge, boolean useGraph, Map<String, Object> matchParams,
+                                         List<Map<String, Object>> searchList, List<Double> scores,
+                                         double threshold) {
+        if (!useGraph || !graphSwitchEnabledForHit(request, knowledge)) {
             return;
         }
         double score = 0.70D;
@@ -3798,6 +3800,39 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, Object> graph = getKnowledgeGraph(userId, orgId, singleton("knowledgeId", knowledge.knowledgeId));
         searchList.add(toGraphHitInfo(knowledge, graph, score, matchParams));
         scores.add(score);
+    }
+
+    private boolean graphSwitchEnabledForHit(Map<String, Object> request, KnowledgeState knowledge) {
+        if (knowledge.graphSwitch == 1) {
+            return true;
+        }
+        for (Object raw : list(request.get("knowledgeList"))) {
+            Map<String, Object> row = map(raw);
+            if (!knowledge.knowledgeId.equals(string(row.get("knowledgeId")))) {
+                continue;
+            }
+            if (graphSwitchValue(row.get("graphSwitch"))) {
+                return true;
+            }
+            if (graphSwitchValue(row.get("knowledgeGraph"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean graphSwitchValue(Object value) {
+        if (value instanceof Map) {
+            return graphSwitch(value);
+        }
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        String text = string(value);
+        return "1".equals(text) || "true".equalsIgnoreCase(text) || "enable".equalsIgnoreCase(text);
     }
 
     private void sortAndLimitKnowledgeHits(List<Map<String, Object>> searchList, List<Double> scores, int topK) {
