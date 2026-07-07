@@ -6180,6 +6180,8 @@ public class AppServiceImpl implements AppService {
             output.putAll(merged);
             output.put("text", String.valueOf(merged));
             output.put("result", merged);
+        } else if (workflowIsCodeNode(node, type, lowerType)) {
+            output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
             output.putAll(workflowHttpOutput(node, input));
         } else if (workflowIsJsonSerializeNode(node, type, lowerType)) {
@@ -6223,6 +6225,124 @@ public class AppServiceImpl implements AppService {
     private boolean workflowIsMergeNode(String type, String lowerType) {
         return "32".equals(type) || lowerType.contains("merge") || lowerType.contains("variable")
                 || lowerType.contains("assign");
+    }
+
+    private boolean workflowIsCodeNode(Map<String, Object> node, String type, String lowerType) {
+        String semantic = workflowNodeSemanticText(node, type, lowerType);
+        return "5".equals(type) || lowerType.contains("code") || semantic.contains("code");
+    }
+
+    private Map<String, Object> workflowCodeOutput(Map<String, Object> node, Map<String, Object> input) {
+        String code = workflowCodeText(node);
+        if (workflowLooksLikeJsonToCsvCode(node, code)) {
+            return workflowJsonToCsvOutput(input);
+        }
+        Object value = workflowPrimaryNodeInput(input);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("output", value);
+        output.put("result", value);
+        output.put("text", workflowJsonText(value));
+        output.put("response", value);
+        return output;
+    }
+
+    private String workflowCodeText(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        return defaultIfBlank(textValue(inputs, "code", "script"), textValue(data, "code", "script"));
+    }
+
+    private boolean workflowLooksLikeJsonToCsvCode(Map<String, Object> node, String code) {
+        String lower = defaultIfBlank(code, "").toLowerCase(java.util.Locale.ENGLISH);
+        if (lower.contains("json.loads") && lower.contains("csv")) {
+            return true;
+        }
+        Map<String, Object> data = mapValue(node.get("data"));
+        return workflowHasDeclaredOutput(data, "csv") && workflowHasDeclaredOutput(data, "header")
+                && workflowHasDeclaredOutput(data, "rows");
+    }
+
+    private boolean workflowHasDeclaredOutput(Map<String, Object> nodeOrData, String name) {
+        for (Object item : listValue(nodeOrData.get("outputs"))) {
+            if (name.equals(textValue(mapValue(item), "name", "key", "field"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, Object> workflowJsonToCsvOutput(Map<String, Object> input) {
+        Object raw = workflowPrimaryNodeInput(input);
+        Object parsed = raw;
+        if (raw instanceof String) {
+            try {
+                parsed = objectMapper.readValue(String.valueOf(raw), Object.class);
+            } catch (IOException ex) {
+                throw new IllegalArgumentException("workflow code json-to-csv input is invalid", ex);
+            }
+        }
+        List<Object> rows = listValue(parsed);
+        List<String> header = workflowCsvHeader(rows);
+        String csv = workflowCsvRows(rows, header);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("csv", csv);
+        result.put("header", join(header, ","));
+        result.put("rows", rows.size());
+
+        Map<String, Object> output = new LinkedHashMap<>(result);
+        output.put("output", result);
+        output.put("result", result);
+        output.put("text", csv);
+        output.put("response", result);
+        return output;
+    }
+
+    private List<String> workflowCsvHeader(List<Object> rows) {
+        if (rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<String, Object> first = mapValue(rows.get(0));
+        if (first.isEmpty()) {
+            return Collections.singletonList("value");
+        }
+        return new ArrayList<>(first.keySet());
+    }
+
+    private String workflowCsvRows(List<Object> rows, List<String> header) {
+        StringBuilder csv = new StringBuilder();
+        for (Object rowValue : rows) {
+            Map<String, Object> row = mapValue(rowValue);
+            for (int i = 0; i < header.size(); i++) {
+                if (i > 0) {
+                    csv.append(',');
+                }
+                Object value = row.isEmpty() ? rowValue : row.get(header.get(i));
+                csv.append(workflowCsvCell(value));
+            }
+            csv.append("\r\n");
+        }
+        return csv.toString();
+    }
+
+    private String workflowCsvCell(Object value) {
+        String text = value instanceof Map || value instanceof List
+                ? workflowJsonText(value)
+                : String.valueOf(value == null ? "" : value);
+        if (text.contains("\"") || text.contains(",") || text.contains("\r") || text.contains("\n")) {
+            return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
+    }
+
+    private String join(List<String> values, String delimiter) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                builder.append(delimiter);
+            }
+            builder.append(values.get(i));
+        }
+        return builder.toString();
     }
 
     private boolean workflowIsHttpNode(Map<String, Object> node, String type, String lowerType) {

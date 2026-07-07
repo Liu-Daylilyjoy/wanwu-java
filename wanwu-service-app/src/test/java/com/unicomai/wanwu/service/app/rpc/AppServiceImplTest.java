@@ -940,6 +940,63 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void workflowRunExecutesJsonToCsvCodeNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("CodeNodeFlow");
+        create.setSchema("{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"122185\",\"type\":\"5\",\"data\":{\"nodeMeta\":{\"title\":\"转换格式\",\"subTitle\":\"代码\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"csv\"},{\"type\":\"string\",\"name\":\"header\"},{\"type\":\"integer\",\"name\":\"rows\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"input\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"code\":\"import json\\nimport csv\\ndata = json.loads(input)\"}}},"
+                + "{\"id\":\"122024\",\"type\":\"15\",\"data\":{\"nodeMeta\":{\"title\":\"添加表头\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"String1\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"122185\",\"name\":\"header\"}}}},"
+                + "{\"name\":\"String2\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"122185\",\"name\":\"csv\"}}}}],"
+                + "\"concatParams\":[{\"name\":\"concatResult\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"literal\",\"content\":\"{{String1}}\\n{{String2}}\"}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"source\":\"block-output\",\"blockID\":\"122024\",\"name\":\"output\"}}}}]}}}"
+                + "],"
+                + "\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"122185\"},"
+                + "{\"sourceNodeID\":\"122185\",\"targetNodeID\":\"122024\"},"
+                + "{\"sourceNodeID\":\"122024\",\"targetNodeID\":\"900001\"}"
+                + "],"
+                + "\"outputs\":[{\"name\":\"output\",\"type\":\"string\"}]"
+                + "}");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult created = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(created.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input",
+                "[{\"name\":\"Alice\",\"score\":98},{\"name\":\"Bob\",\"score\":88}]"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        Map<String, Object> nodeOutputs = castMap(output.get("nodeOutputs"));
+        Map<String, Object> codeOutput = castMap(nodeOutputs.get("122185"));
+        assertEquals("name,score", codeOutput.get("header"));
+        assertEquals(2, codeOutput.get("rows"));
+        assertTrue(String.valueOf(codeOutput.get("csv")).contains("Alice,98"));
+        assertTrue(String.valueOf(codeOutput.get("csv")).contains("Bob,88"));
+        assertTrue(String.valueOf(output.get("output")).startsWith("name,score\nAlice,98"));
+    }
+
+    @Test
     public void workflowRunResolvesGoTemplateNodeInputsAndNumericEdges() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
