@@ -27,6 +27,8 @@ services:
         condition: service_healthy
       app:
         condition: service_healthy
+      rag:
+        condition: service_healthy
       operate:
         condition: service_healthy
     healthcheck:
@@ -82,7 +84,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${WANWU_IAM_DATASOURCE_PASSWORD:-}
       JAVA_OPTS: ${WANWU_IAM_JAVA_OPTS:-}
     ports:
-      - "8081:8081"
+      - "${WANWU_IAM_HTTP_PORT:-18081}:8081"
       - "20881:20881"
     depends_on:
       nacos:
@@ -181,6 +183,33 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8086/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  rag:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_MODULE: wanwu-service-rag
+    image: wanwu-java/rag:0.1.0-SNAPSHOT
+    container_name: wanwu-java-rag
+    environment:
+      DUBBO_REGISTRY_ADDRESS: ${DUBBO_REGISTRY_ADDRESS:-nacos://nacos:8848}
+      JAVA_OPTS: ${WANWU_RAG_JAVA_OPTS:-}
+    ports:
+      - "8089:8089"
+      - "20889:20889"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8089/actuator/health >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12

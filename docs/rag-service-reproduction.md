@@ -21,6 +21,12 @@
 
 This avoids creating a second RAG persistence model. Drafts, configs, snapshots, publish status, and chat records remain owned by `wanwu-service-app`.
 
+The Docker `full` profile starts the standalone RAG Dubbo service on HTTP port `8089` and Dubbo port `20889`. BFF startup waits for its health check, so one-command startup validates the same service topology used for continued development instead of leaving the RAG module outside Compose.
+
+The Java IAM debug port defaults to host `18081` (`WANWU_IAM_HTTP_PORT`) while remaining `8081` inside Compose. This lets the Java stack run beside the original Go stack, whose Nginx commonly occupies host port `8081`.
+
+`Dockerfile.service` shares a BuildKit Maven repository cache across service image builds and uses the repository mirror in `configs/maven/settings.xml`. This prevents every service image from downloading the same dependency graph and adds a stable Docker-only path for networks where Maven Central is slow; host Maven configuration is unchanged.
+
 The frontend, public OpenAPI, and standalone RAG service now share the AppService-owned runtime sequence: input safety, document/QA retrieval, grounded prompt construction, configured model invocation, output safety, and chat persistence. `ModelService.invokeModel` owns OpenAI-compatible provider execution and preserves upstream SSE deltas as response chunks; the frontend emits one AG-UI `TEXT_MESSAGE_CONTENT` event per chunk. Enabled RAG history is sent as ordered `user/assistant` messages, image uploads ending in `.png`, `.jpg`, or `.jpeg` are sent as OpenAI-compatible `image_url` parts, and retrieved knowledge/QA evidence is present in the system message before the current question. If the model is absent, inactive, or unreachable, AppService returns the strongest local evidence or an explicit no-relevant-knowledge response; the old demo response has been removed.
 
 ## Verification
@@ -44,7 +50,11 @@ The frontend, public OpenAPI, and standalone RAG service now share the AppServic
 - `KnowledgeServiceImplTest#knowledgeHitUsesRequestGraphSwitchForGraphCard`
 - `KnowledgeServiceImplTest#knowledgeHitUsesTokenOverlapForNaturalQuestions`
 - `KnowledgeServiceImplTest#qaHitUsesTokenOverlapForNaturalQuestions`
+- `docker compose --profile full config --quiet`
+- `powershell -ExecutionPolicy Bypass -File scripts/rag-smoke.ps1`
 
 ## Remaining Gap
 
-This slice reproduces the Go RPC boundary, state transitions, grounded configured-model answer loop, provider chunk propagation, image/history handling, rerank model ID propagation, local graph evidence, and metadata filtering. Provider-backed embeddings/rerank execution, asynchronous parser/indexer callbacks, object-storage lifecycle, non-image chat attachment parsing, full graph reasoning, and provider-specific non-OpenAI adapters remain later RAG runtime work.
+The unchanged frontend now has a complete functional RAG loop: lifecycle/config/publish, document and QA import, multi-format parsing, persisted indexing, text/vector/hybrid retrieval, provider rerank, graph evidence, grounded model generation, safety checks, AG-UI/OpenAPI SSE output, MySQL persistence, and one-command Docker startup are all exercised end to end.
+
+Remaining production-parity work is infrastructure rather than a broken frontend flow: asynchronous parser/indexer workers, object-storage lifecycle, OCR/ASR and multimodal document parsers, transport-level live token forwarding across Dubbo, provider-generated graph extraction/community reasoning, and non-OpenAI-specific adapters. Non-image chat attachments are intentionally not listed as a gap because the checked Go RAG runtime also accepts only image chat attachments; other files enter through Knowledge import.

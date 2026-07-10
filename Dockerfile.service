@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG MAVEN_IMAGE=maven:3.8.8-eclipse-temurin-8
 ARG RUNTIME_IMAGE=eclipse-temurin:8-jre
 
@@ -20,10 +22,13 @@ COPY wanwu-service-app/pom.xml wanwu-service-app/pom.xml
 COPY wanwu-service-mcp/pom.xml wanwu-service-mcp/pom.xml
 COPY wanwu-service-operate/pom.xml wanwu-service-operate/pom.xml
 COPY wanwu-service-rag/pom.xml wanwu-service-rag/pom.xml
+COPY configs/maven/settings.xml /root/.m2/settings.xml
 
 COPY . .
 ARG SERVICE_MODULE=wanwu-service-bff
-RUN mvn -B -pl ${SERVICE_MODULE} -am -DskipTests package
+RUN --mount=type=cache,id=wanwu-maven-repository,target=/root/.m2/repository \
+    mvn -B -s /root/.m2/settings.xml -Dmaven.wagon.http.retryHandler.count=5 \
+    -pl ${SERVICE_MODULE} -am -DskipTests package
 
 FROM ${RUNTIME_IMAGE}
 WORKDIR /app
