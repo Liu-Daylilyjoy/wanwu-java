@@ -627,7 +627,9 @@ public class AppServiceImplTest {
         config.setUserId("dev-admin");
         config.setOrgId("default-org");
         config.setModelConfig(modelConfig("llm-grounded-001"));
-        config.setKnowledgeBaseConfig(knowledgeConfig("kb-grounded-001"));
+        Map<String, Object> groundedKnowledgeConfig = knowledgeConfig("kb-grounded-001");
+        ((Map<String, Object>) groundedKnowledgeConfig.get("config")).put("maxHistory", 1);
+        config.setKnowledgeBaseConfig(groundedKnowledgeConfig);
         service.updateRagConfig(config);
 
         Map<String, Object> hitItem = new LinkedHashMap<>();
@@ -667,6 +669,121 @@ public class AppServiceImplTest {
         assertTrue(messagesJson.contains("How long is the return window?"));
         assertTrue(messagesJson.indexOf("Customers may return products within 30 days.")
                 < messagesJson.indexOf("How long is the return window?"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatAddsGraphEvidenceAndKeepsOnlyLatestConfiguredHistory() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                knowledgeService, null, modelService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("GraphHistoryRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        Map<String, Object> knowledgeConfig = knowledgeConfig("kb-graph-history-001");
+        ((Map<String, Object>) knowledgeConfig.get("config")).put("maxHistory", 2);
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setModelConfig(modelConfig("llm-graph-history-001"));
+        config.setKnowledgeBaseConfig(knowledgeConfig);
+        service.updateRagConfig(config);
+
+        Map<String, Object> customer = new LinkedHashMap<>();
+        customer.put("entity_name", "Customer Alice");
+        customer.put("entity_type", "customer");
+        customer.put("description", "Alice placed order 42.");
+        Map<String, Object> order = new LinkedHashMap<>();
+        order.put("entity_name", "Order 42");
+        order.put("entity_type", "order");
+        order.put("description", "Order 42 contains a red laptop.");
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source_entity", "Customer Alice");
+        edge.put("target_entity", "Order 42");
+        edge.put("description", "placed order");
+        Map<String, Object> graph = new LinkedHashMap<>();
+        graph.put("nodes", Arrays.asList(customer, order));
+        graph.put("edges", Collections.singletonList(edge));
+        Map<String, Object> graphCard = new LinkedHashMap<>();
+        graphCard.put("title", "Orders Graph");
+        graphCard.put("contentType", "graph");
+        graphCard.put("snippet", "Generic graph placeholder");
+        graphCard.put("graph", graph);
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(graphCard));
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        ModelInvokeResult invocationResult = new ModelInvokeResult();
+        invocationResult.setContent("Alice placed order 42.");
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenReturn(invocationResult);
+
+        List<Map<String, Object>> history = new ArrayList<>();
+        history.add(history("oldest question", "oldest answer", true));
+        history.add(history("ignored question", "ignored answer", false));
+        history.add(history("recent question", "recent answer", true));
+        history.add(history("latest question", "latest answer", true));
+        RagChatCommand chat = ragChatCommand(created.getRagId(), "Who placed order 42?", true);
+        chat.setHistory(history);
+        service.streamRagChat(chat);
+
+        ArgumentCaptor<ModelInvokeCommand> captor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService).invokeModel(captor.capture());
+        String messages = String.valueOf(captor.getValue().getPayload().get("messages"));
+        assertTrue(messages.contains("Customer Alice [customer]: Alice placed order 42."));
+        assertTrue(messages.contains("Customer Alice -> Order 42: placed order"));
+        assertTrue(messages.contains("recent question"));
+        assertTrue(messages.contains("latest question"));
+        assertFalse(messages.contains("oldest question"));
+        assertFalse(messages.contains("ignored question"));
+        assertFalse(messages.contains("Generic graph placeholder"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatOmitsHistoryWhenMaxHistoryIsZero() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                knowledgeService, null, modelService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("NoHistoryRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setModelConfig(modelConfig("llm-no-history-001"));
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-no-history-001"));
+        service.updateRagConfig(config);
+
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class)))
+                .thenReturn(Collections.<String, Object>emptyMap());
+        ModelInvokeResult invocationResult = new ModelInvokeResult();
+        invocationResult.setContent("No history used.");
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenReturn(invocationResult);
+
+        RagChatCommand chat = ragChatCommand(created.getRagId(), "current question", true);
+        chat.setHistory(Collections.singletonList(history("previous question", "previous answer", true)));
+        service.streamRagChat(chat);
+
+        ArgumentCaptor<ModelInvokeCommand> captor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService).invokeModel(captor.capture());
+        String messages = String.valueOf(captor.getValue().getPayload().get("messages"));
+        assertTrue(messages.contains("current question"));
+        assertFalse(messages.contains("previous question"));
+        assertFalse(messages.contains("previous answer"));
     }
 
     @Test
@@ -4177,6 +4294,14 @@ public class AppServiceImplTest {
         model.put("displayName", modelId);
         model.put("config", config);
         return model;
+    }
+
+    private Map<String, Object> history(String query, String response, boolean needHistory) {
+        Map<String, Object> history = new LinkedHashMap<>();
+        history.put("query", query);
+        history.put("response", response);
+        history.put("needHistory", needHistory);
+        return history;
     }
 
     private Map<String, Object> knowledgeConfig(String knowledgeId) {

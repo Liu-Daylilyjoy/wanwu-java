@@ -13,8 +13,8 @@ The Java runtime keeps the same ownership boundaries:
 1. `AppServiceImpl` resolves the draft or published RAG snapshot.
 2. Input safety rules run before retrieval or provider execution.
 3. `KnowledgeService` executes document and QA retrieval with the configured filters and ranking settings.
-4. Retrieved document and QA cards are converted into numbered, bounded system references.
-5. Enabled history items and image attachments are appended before the current user question.
+4. Retrieved document, QA, and graph cards are converted into numbered, bounded system references. Graph nodes, descriptions, and relationships are supplied to the model instead of the frontend-only graph placeholder.
+5. Enabled history items are trimmed to the latest configured `maxHistory` turns; zero disables history, matching the Python RAG runtime. Image attachments are appended before the current user question.
 6. `ModelService.invokeModel` resolves the active model and calls its OpenAI-compatible provider.
 7. Provider SSE deltas are aggregated for persistence and retained as individual response chunks for frontend AG-UI SSE output.
 8. Output safety rules run before the answer and evidence are persisted.
@@ -46,6 +46,8 @@ Docker development remains usable without provider credentials. If no active con
 - `ModelServiceImplTest#invokeModelAggregatesOpenAiCompatibleChatStream`
 - `ModelServiceImplTest#invokeModelReturnsEmbeddingAndRerankProviderResponses`
 - `AppServiceImplTest#ragChatRetrievesEvidenceBeforeInvokingConfiguredModel`
+- `AppServiceImplTest#ragChatAddsGraphEvidenceAndKeepsOnlyLatestConfiguredHistory`
+- `AppServiceImplTest#ragChatOmitsHistoryWhenMaxHistoryIsZero`
 - `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredEmbeddingModelForVectorRetrieval`
 - `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredProviderRerankOrderAndScores`
 - `KnowledgeServiceImplTest#documentImportExtractsPresentationLegacySpreadsheetAndZipArchive`

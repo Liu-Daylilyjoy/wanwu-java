@@ -240,6 +240,9 @@ public class AppServiceImpl implements AppService {
     private static final String DEV_USER_ID = "dev-admin";
     private static final String DEV_ORG_ID = "default-org";
     private static final String DEFAULT_VERSION = "v1.0.0";
+    private static final int RAG_GRAPH_MAX_NODES = 24;
+    private static final int RAG_GRAPH_MAX_EDGES = 32;
+    private static final int RAG_GRAPH_MAX_CHARS = 12000;
     private static final Pattern VERSION_PATTERN = Pattern.compile("^v\\d+\\.\\d+\\.\\d+$");
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
@@ -3918,7 +3921,7 @@ public class AppServiceImpl implements AppService {
         invocation.setOperation("chat");
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("stream", true);
-        payload.put("messages", ragModelMessages(command, searchList, qaSearchList));
+        payload.put("messages", ragModelMessages(command, config, searchList, qaSearchList));
         copyRagModelParameters(modelConfig, payload);
         invocation.setPayload(payload);
         try {
@@ -3929,15 +3932,27 @@ public class AppServiceImpl implements AppService {
     }
 
     private List<Map<String, Object>> ragModelMessages(RagChatCommand command,
+                                                        RagDraftConfigRecord config,
                                                         List<Map<String, Object>> searchList,
                                                         List<Map<String, Object>> qaSearchList) {
         List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
         addRagTextMessage(messages, "system", ragSystemPrompt(searchList, qaSearchList));
+        List<Map<String, Object>> historyItems = new ArrayList<Map<String, Object>>();
         for (Map<String, Object> history : safeMapList(command.getHistory())) {
             Object needHistory = firstPresent(history, "needHistory", "need_history");
             if (needHistory != null && !enabled(needHistory)) {
                 continue;
             }
+            historyItems.add(history);
+        }
+        int maxHistory = ragMaxHistory(config);
+        if (maxHistory > 0 && historyItems.size() > maxHistory) {
+            historyItems = new ArrayList<Map<String, Object>>(
+                    historyItems.subList(historyItems.size() - maxHistory, historyItems.size()));
+        } else if (maxHistory <= 0) {
+            historyItems = Collections.emptyList();
+        }
+        for (Map<String, Object> history : historyItems) {
             addRagTextMessage(messages, "user", firstNonBlank(
                     stringValue(history.get("query")),
                     stringValue(history.get("question")),
@@ -3951,6 +3966,15 @@ public class AppServiceImpl implements AppService {
         return messages;
     }
 
+    private int ragMaxHistory(RagDraftConfigRecord config) {
+        if (config == null || isBlank(config.getKnowledgeBaseConfigJson())) {
+            return 0;
+        }
+        Map<String, Object> knowledgeConfig = mapOrDefault(
+                config.getKnowledgeBaseConfigJson(), new LinkedHashMap<String, Object>());
+        return Math.max(0, intValue(knowledgeMatchParams(knowledgeConfig).get("maxHistory"), 0));
+    }
+
     private String ragSystemPrompt(List<Map<String, Object>> searchList,
                                    List<Map<String, Object>> qaSearchList) {
         StringBuilder prompt = new StringBuilder();
@@ -3962,10 +3986,7 @@ public class AppServiceImpl implements AppService {
             prompt.append("[K").append(index++).append("] ")
                     .append(firstNonBlank(stringValue(row.get("title")), "Knowledge reference"))
                     .append("\n")
-                    .append(firstNonBlank(
-                            stringValue(row.get("snippet")),
-                            stringValue(row.get("content")),
-                            stringValue(row.get("text"))))
+                    .append(ragReferenceText(row))
                     .append("\n\n");
         }
         index = 1;
@@ -3983,6 +4004,98 @@ public class AppServiceImpl implements AppService {
             prompt.append("No relevant reference was retrieved for this request.");
         }
         return prompt.toString().trim();
+    }
+
+    private String ragReferenceText(Map<String, Object> row) {
+        if ("graph".equalsIgnoreCase(stringValue(row.get("contentType")))) {
+            String graphText = ragGraphReference(row.get("graph"));
+            if (!isBlank(graphText)) {
+                return graphText;
+            }
+        }
+        return firstNonBlank(
+                stringValue(row.get("snippet")),
+                stringValue(row.get("content")),
+                stringValue(row.get("text")));
+    }
+
+    private String ragGraphReference(Object graphValue) {
+        Map<String, Object> graph = mapValue(graphValue);
+        if (graph.isEmpty()) {
+            return "";
+        }
+        StringBuilder reference = new StringBuilder();
+        List<Map<String, Object>> nodes = ragGraphItems(graph.get("nodes"));
+        if (!nodes.isEmpty()) {
+            reference.append("Graph entities:\n");
+            int count = 0;
+            for (Map<String, Object> node : nodes) {
+                if (count++ >= RAG_GRAPH_MAX_NODES || reference.length() >= RAG_GRAPH_MAX_CHARS) {
+                    break;
+                }
+                String name = firstNonBlank(
+                        stringValue(node.get("entity_name")),
+                        stringValue(node.get("name")),
+                        stringValue(node.get("id")));
+                if (isBlank(name)) {
+                    continue;
+                }
+                reference.append("- ").append(name);
+                String type = firstNonBlank(
+                        stringValue(node.get("entity_type")),
+                        stringValue(node.get("type")));
+                if (!isBlank(type)) {
+                    reference.append(" [").append(type).append("]");
+                }
+                String description = stringValue(node.get("description"));
+                if (!isBlank(description)) {
+                    reference.append(": ").append(description);
+                }
+                reference.append('\n');
+            }
+        }
+        List<Map<String, Object>> edges = ragGraphItems(graph.get("edges"));
+        if (!edges.isEmpty() && reference.length() < RAG_GRAPH_MAX_CHARS) {
+            reference.append("Graph relationships:\n");
+            int count = 0;
+            for (Map<String, Object> edge : edges) {
+                if (count++ >= RAG_GRAPH_MAX_EDGES || reference.length() >= RAG_GRAPH_MAX_CHARS) {
+                    break;
+                }
+                String source = firstNonBlank(
+                        stringValue(edge.get("source_entity")),
+                        stringValue(edge.get("source")));
+                String target = firstNonBlank(
+                        stringValue(edge.get("target_entity")),
+                        stringValue(edge.get("target")));
+                if (isBlank(source) || isBlank(target)) {
+                    continue;
+                }
+                reference.append("- ").append(source).append(" -> ").append(target);
+                String description = firstNonBlank(
+                        stringValue(edge.get("description")),
+                        stringValue(edge.get("relation")),
+                        stringValue(edge.get("label")));
+                if (!isBlank(description)) {
+                    reference.append(": ").append(description);
+                }
+                reference.append('\n');
+            }
+        }
+        if (reference.length() > RAG_GRAPH_MAX_CHARS) {
+            return reference.substring(0, RAG_GRAPH_MAX_CHARS);
+        }
+        return reference.toString().trim();
+    }
+
+    private List<Map<String, Object>> ragGraphItems(Object value) {
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (Object item : listValue(value)) {
+            if (item instanceof Map) {
+                items.add(mapValue(item));
+            }
+        }
+        return items;
     }
 
     private void addRagTextMessage(List<Map<String, Object>> messages, String role, String content) {
