@@ -426,6 +426,7 @@ public class McpServiceImpl implements McpService {
         Map<String, Object> server = require(mcpServers, orgId, mcpServerId, "mcp server");
         String name = firstText(request, "name", "toolName", "methodName");
         Map<String, Object> arguments = mapValue(request == null ? null : request.get("arguments"));
+        int timeoutMillis = mcpCallTimeoutMillis(request);
         Map<String, Object> tool = findServerTool(server, name);
         if (tool.isEmpty()) {
             return mcpCallResult(mcpServerId, name, arguments, tool,
@@ -434,7 +435,8 @@ public class McpServiceImpl implements McpService {
         }
         if ("custom".equals(text(tool, "type"))) {
             try {
-                return executeCustomMcpServerTool(orgId, mcpServerId, tool, name, arguments);
+                return executeCustomMcpServerTool(
+                        orgId, mcpServerId, tool, name, arguments, timeoutMillis);
             } catch (Exception ex) {
                 return mcpCallResult(mcpServerId, name, arguments, tool,
                         "MCP tool call failed: " + ex.getMessage(), true,
@@ -444,7 +446,7 @@ public class McpServiceImpl implements McpService {
         if ("openapi".equals(text(tool, "type"))) {
             try {
                 return executeOpenApiMcpServerTool(mcpServerId, tool, name, arguments,
-                        text(tool, "schema"), mapValue(tool.get("apiAuth")));
+                        text(tool, "schema"), mapValue(tool.get("apiAuth")), timeoutMillis);
             } catch (Exception ex) {
                 return mcpCallResult(mcpServerId, name, arguments, tool,
                         "MCP tool call failed: " + ex.getMessage(), true,
@@ -462,6 +464,21 @@ public class McpServiceImpl implements McpService {
         }
         return mcpCallResult(mcpServerId, name, arguments, tool, text, false,
                 Collections.<String, Object>emptyMap());
+    }
+
+    private int mcpCallTimeoutMillis(Map<String, Object> request) {
+        Object value = request == null ? null : request.get("timeoutMs");
+        if (value instanceof Number) {
+            return Math.min(180000, Math.max(1, ((Number) value).intValue()));
+        }
+        if (value != null && !blank(String.valueOf(value))) {
+            try {
+                return Math.min(180000, Math.max(1, Integer.parseInt(String.valueOf(value))));
+            } catch (NumberFormatException ignored) {
+                return MCP_REMOTE_TIMEOUT_MILLIS;
+            }
+        }
+        return MCP_REMOTE_TIMEOUT_MILLIS;
     }
 
     @Override
@@ -2019,18 +2036,20 @@ public class McpServiceImpl implements McpService {
 
     private Map<String, Object> executeCustomMcpServerTool(String orgId, String mcpServerId,
                                                            Map<String, Object> serverTool, String name,
-                                                           Map<String, Object> arguments) throws IOException {
+                                                           Map<String, Object> arguments,
+                                                           int timeoutMillis) throws IOException {
         Map<String, Object> customTool = require(customTools, orgId, text(serverTool, "id"), "custom tool");
         return executeOpenApiMcpServerTool(mcpServerId, serverTool, name, arguments,
-                text(customTool, "schema"), mapValue(customTool.get("apiAuth")));
+                text(customTool, "schema"), mapValue(customTool.get("apiAuth")), timeoutMillis);
     }
 
     private Map<String, Object> executeOpenApiMcpServerTool(String mcpServerId, Map<String, Object> serverTool,
                                                             String name, Map<String, Object> arguments,
-                                                            String schema, Map<String, Object> apiAuth)
+                                                            String schema, Map<String, Object> apiAuth,
+                                                            int timeoutMillis)
             throws IOException {
         OpenApiOperation operation = openApiOperation(schema, name);
-        HttpToolResponse response = callOpenApiOperation(operation, apiAuth, arguments);
+        HttpToolResponse response = callOpenApiOperation(operation, apiAuth, arguments, timeoutMillis);
         Object parsed = parseJsonValue(response.body);
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("status", response.status);
@@ -2126,7 +2145,8 @@ public class McpServiceImpl implements McpService {
     }
 
     private HttpToolResponse callOpenApiOperation(OpenApiOperation operation, Map<String, Object> apiAuth,
-                                                   Map<String, Object> arguments) throws IOException {
+                                                   Map<String, Object> arguments,
+                                                   int timeoutMillis) throws IOException {
         Map<String, Object> queryParams = new LinkedHashMap<>();
         Map<String, String> headerParams = new LinkedHashMap<>();
         Map<String, Object> bodyParams = new LinkedHashMap<>();
@@ -2177,8 +2197,8 @@ public class McpServiceImpl implements McpService {
         String url = appendQuery(joinUrl(operation.baseUrl, path), queryParams);
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod(operation.method);
-        connection.setConnectTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
-        connection.setReadTimeout(MCP_REMOTE_TIMEOUT_MILLIS);
+        connection.setConnectTimeout(Math.min(MCP_REMOTE_TIMEOUT_MILLIS, timeoutMillis));
+        connection.setReadTimeout(timeoutMillis);
         connection.setRequestProperty("Accept", "application/json");
         for (Map.Entry<String, String> header : headerParams.entrySet()) {
             connection.setRequestProperty(header.getKey(), header.getValue());

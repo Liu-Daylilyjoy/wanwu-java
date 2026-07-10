@@ -10,6 +10,7 @@ public class ModelInvokeCommand implements Serializable {
     private String orgId;
     private String modelId;
     private String operation;
+    private int timeoutMillis;
     private Map<String, Object> payload = new LinkedHashMap<String, Object>();
 
     public String getUserId() {
@@ -42,6 +43,14 @@ public class ModelInvokeCommand implements Serializable {
 
     public void setOperation(String operation) {
         this.operation = operation;
+    }
+
+    public int getTimeoutMillis() {
+        return timeoutMillis;
+    }
+
+    public void setTimeoutMillis(int timeoutMillis) {
+        this.timeoutMillis = timeoutMillis;
     }
 
     public Map<String, Object> getPayload() {

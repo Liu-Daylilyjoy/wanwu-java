@@ -244,6 +244,8 @@ public class AppServiceImpl implements AppService {
     private static final int RAG_GRAPH_MAX_NODES = 24;
     private static final int RAG_GRAPH_MAX_EDGES = 32;
     private static final int RAG_GRAPH_MAX_CHARS = 12000;
+    private static final int CHATFLOW_NODE_DEFAULT_TIMEOUT_MILLIS = 60000;
+    private static final int CHATFLOW_NODE_MAX_TIMEOUT_MILLIS = 180000;
     private static final Pattern VERSION_PATTERN = Pattern.compile("^v\\d+\\.\\d+\\.\\d+$");
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
@@ -270,9 +272,9 @@ public class AppServiceImpl implements AppService {
     private KnowledgeService knowledgeService;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private SafetyService safetyService;
-    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = CHATFLOW_NODE_MAX_TIMEOUT_MILLIS)
     private ModelService modelService;
-    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = CHATFLOW_NODE_MAX_TIMEOUT_MILLIS)
     private McpService mcpService;
 
     @Autowired
@@ -6873,6 +6875,10 @@ public class AppServiceImpl implements AppService {
                                                    int order,
                                                    String userId,
                                                    String orgId) {
+        boolean chatflow = APP_TYPE_CHATFLOW.equals(workflow.getAppType());
+        if (chatflow) {
+            validateChatflowNodeErrorPolicy(node);
+        }
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("nodeId", nodeId);
         output.put("type", type);
@@ -6894,7 +6900,7 @@ public class AppServiceImpl implements AppService {
                     ? defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name
                     : String.valueOf(result));
         } else if (workflowIsLlmNode(type, lowerType)) {
-            if (APP_TYPE_CHATFLOW.equals(workflow.getAppType())) {
+            if (chatflow) {
                 output.putAll(chatflowLlmOutput(node, input, userId, orgId));
             } else {
                 String prompt = workflowLlmPrompt(node, input);
@@ -6907,7 +6913,7 @@ public class AppServiceImpl implements AppService {
                 output.put("output", text);
             }
         } else if (workflowIsIntentNode(node, type, lowerType)) {
-            if (APP_TYPE_CHATFLOW.equals(workflow.getAppType())) {
+            if (chatflow) {
                 output.putAll(chatflowIntentOutput(node, input, userId, orgId));
             } else {
                 output.putAll(workflowIntentOutput(node, input));
@@ -6939,7 +6945,7 @@ public class AppServiceImpl implements AppService {
             output.putAll(workflowDocumentParseOutput(node, input));
         } else if (workflowIsToolNode(node, type, lowerType)) {
             output.putAll(workflowToolOutput(node, input, userId, orgId,
-                    APP_TYPE_CHATFLOW.equals(workflow.getAppType())));
+                    chatflow));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -7022,6 +7028,7 @@ public class AppServiceImpl implements AppService {
             invocation.setOrgId(orgId);
             invocation.setModelId(modelId);
             invocation.setOperation("chat");
+            invocation.setTimeoutMillis(chatflowNodeTimeoutMillis(node));
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("stream", false);
             payload.put("messages", chatflowIntentMessages(node, input, query, intents));
@@ -8086,6 +8093,7 @@ public class AppServiceImpl implements AppService {
             Map<String, Object> request = new LinkedHashMap<String, Object>();
             request.put("name", toolName);
             request.put("arguments", workflowDeclaredInputArguments(node, input));
+            request.put("timeoutMs", chatflowNodeTimeoutMillis(node));
             Map<String, Object> response = mcpService.callMcpServerTool(
                     userId, orgId, mcpServerId, request);
             if (strictProvider && (response == null || enabled(response.get("isError")))) {
@@ -8565,7 +8573,8 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> params = workflowHttpNameValueMap(firstList(inputs, data, "params", "query"), input);
         Map<String, Object> headers = workflowHttpNameValueMap(firstList(inputs, data, "headers", "header"), input);
         String body = workflowHttpBody(firstMap(inputs, data, "body", "requestBody"), input);
-        int timeoutMillis = workflowHttpTimeoutMillis(firstMap(inputs, data, "setting", "settings"));
+        int timeoutMillis = workflowHttpTimeoutMillis(
+                firstMap(inputs, data, "settingOnError", "setting", "settings"));
         return workflowHttpCall(method, workflowAppendQuery(url, params), headers, body, timeoutMillis);
     }
 
@@ -8884,6 +8893,7 @@ public class AppServiceImpl implements AppService {
             invocation.setOrgId(orgId);
             invocation.setModelId(modelId);
             invocation.setOperation("chat");
+            invocation.setTimeoutMillis(chatflowNodeTimeoutMillis(node));
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("stream", true);
             payload.put("messages", chatflowLlmMessages(node, input, prompt));
@@ -8993,6 +9003,48 @@ public class AppServiceImpl implements AppService {
             }
         }
         return 0L;
+    }
+
+    private void validateChatflowNodeErrorPolicy(Map<String, Object> node) {
+        Map<String, Object> setting = chatflowNodeErrorSetting(node);
+        Object processType = firstPresent(setting, "processType", "process_type");
+        if (processType == null) {
+            return;
+        }
+        int value;
+        try {
+            value = intValue(processType, 1);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("unsupported chatflow error process type: " + processType);
+        }
+        if (value != 1) {
+            throw new IllegalArgumentException("unsupported chatflow error process type: " + processType);
+        }
+    }
+
+    private int chatflowNodeTimeoutMillis(Map<String, Object> node) {
+        Object raw = firstPresent(chatflowNodeErrorSetting(node), "timeoutMs", "timeoutMillis", "timeout");
+        if (raw == null) {
+            return CHATFLOW_NODE_DEFAULT_TIMEOUT_MILLIS;
+        }
+        int timeout;
+        try {
+            timeout = intValue(raw, CHATFLOW_NODE_DEFAULT_TIMEOUT_MILLIS);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("invalid chatflow node timeout: " + raw);
+        }
+        return Math.min(CHATFLOW_NODE_MAX_TIMEOUT_MILLIS, Math.max(1, timeout));
+    }
+
+    private Map<String, Object> chatflowNodeErrorSetting(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        Map<String, Object> setting = mapValue(firstPresent(inputs,
+                "settingOnError", "setting_on_error", "errorSetting"));
+        if (!setting.isEmpty()) {
+            return setting;
+        }
+        return mapValue(firstPresent(data, "settingOnError", "setting_on_error", "errorSetting"));
     }
 
     private String chatflowLlmPrompt(Map<String, Object> node, Map<String, Object> input) {

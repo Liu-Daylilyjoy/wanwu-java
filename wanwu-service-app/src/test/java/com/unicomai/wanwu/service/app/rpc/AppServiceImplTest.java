@@ -2835,6 +2835,7 @@ public class AppServiceImplTest {
         List<ModelInvokeCommand> invocations = captor.getAllValues();
         assertEquals("llm-chatflow-001", invocations.get(1).getModelId());
         assertEquals("chat", invocations.get(1).getOperation());
+        assertEquals(7500, invocations.get(1).getTimeoutMillis());
         assertEquals(0.2D, Double.parseDouble(String.valueOf(
                 invocations.get(1).getPayload().get("temperature"))), 0.001D);
         String messagesJson = String.valueOf(invocations.get(1).getPayload().get("messages"));
@@ -2962,6 +2963,7 @@ public class AppServiceImplTest {
         verify(mcpService).callMcpServerTool(eq("dev-admin"), eq("default-org"),
                 eq("mcp-server-001"), captor.capture());
         assertEquals("search", captor.getValue().get("name"));
+        assertEquals(9000, captor.getValue().get("timeoutMs"));
         Map<String, Object> arguments = (Map<String, Object>) captor.getValue().get("arguments");
         assertEquals(Collections.<String, Object>singletonMap("query", "find coffee"), arguments);
     }
@@ -3138,6 +3140,36 @@ public class AppServiceImplTest {
         assertTrue(runs.get(0).getOutputJson().contains("workflow http url is required"));
         assertEquals(0L, repository.countConversationMessages(
                 "dev-admin", "default-org", conversationId));
+    }
+
+    @Test
+    public void chatflowRejectsUndocumentedNodeErrorProcessType() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("UnsupportedErrorPolicyChat");
+        create.setSchema(chatflowModelSchema().replace("\"processType\":1", "\"processType\":2"));
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Unsupported policy conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.chatflowOpenApiChat(chatflowChatCommand(
+                        chatflow.getWorkflowId(), conversationId, "trigger unsupported policy")));
+        assertEquals("unsupported chatflow error process type: 2", error.getMessage());
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, runs.size());
+        assertEquals("failed", runs.get(0).getStatus());
     }
 
     @Test
@@ -4686,6 +4718,7 @@ public class AppServiceImplTest {
                 + "\"inputs\":{"
                 + "\"inputParameters\":[{\"name\":\"Query\",\"input\":{\"type\":\"string\","
                 + "\"value\":{\"type\":\"ref\",\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"settingOnError\":{\"processType\":1,\"timeoutMs\":7500},"
                 + "\"llmParam\":["
                 + literalChatflowParam("modelId", "llm-chatflow-001") + ","
                 + literalChatflowParam("prompt", "Answer {{Query}} for {{city}}") + ","
@@ -4715,6 +4748,7 @@ public class AppServiceImplTest {
                 + "\"inputs\":{"
                 + "\"inputParameters\":[{\"name\":\"query\",\"input\":{\"type\":\"string\","
                 + "\"value\":{\"type\":\"ref\",\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"settingOnError\":{\"processType\":1,\"timeoutMs\":9000},"
                 + "\"mcpInfoList\":[{\"mcpServerId\":\"mcp-server-001\",\"toolName\":\"search\"}]}}},"
                 + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{"
                 + "\"nodeMeta\":{\"title\":\"End\"},\"inputs\":{\"inputParameters\":[{"

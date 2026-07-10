@@ -152,6 +152,37 @@ public class ModelServiceImplTest {
         }
     }
 
+    @Test
+    public void invokeModelHonorsCommandReadTimeout() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/embeddings", exchange -> {
+            try {
+                Thread.sleep(250L);
+                respondJson(exchange, "{\"data\":[]}");
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            ModelInfo model = importProviderModel("embedding", "timeout-embedding",
+                    server.getAddress().getPort());
+            ModelInvokeCommand command = invokeCommand(model.getModelId(), "embeddings");
+            command.setTimeoutMillis(50);
+            command.setPayload(Collections.<String, Object>singletonMap("input", "hello"));
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> service.invokeModel(command));
+
+            assertEquals("model inference request failed", error.getMessage());
+            assertTrue(error.getCause() instanceof java.net.SocketTimeoutException);
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private ModelInfo importProviderModel(String type, String modelName, int port) {
         ModelUpsertCommand create = new ModelUpsertCommand();
         create.setUserId("dev-admin");

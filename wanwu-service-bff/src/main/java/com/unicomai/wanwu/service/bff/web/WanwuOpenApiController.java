@@ -95,6 +95,7 @@ public class WanwuOpenApiController {
     private static final int KNOWLEDGE_SYSTEM = 30;
     private static final String STAT_SOURCE_OPENAPI = "openapi";
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
+    private static final int CHATFLOW_RPC_TIMEOUT_MILLIS = 180000;
     private static final long OAUTH_CODE_SECONDS = 600L;
     private static final long OAUTH_ACCESS_TOKEN_SECONDS = 86400L;
     private static final long OAUTH_REFRESH_TOKEN_SECONDS = 7L * 24L * 60L * 60L;
@@ -103,7 +104,7 @@ public class WanwuOpenApiController {
             new ConcurrentHashMap<String, OpenApiUploadedFile>();
     private static final OAuthJwtSupport OAUTH_JWT = new OAuthJwtSupport("wanwu-java", "wanwu-java-oauth-secret");
 
-    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = CHATFLOW_RPC_TIMEOUT_MILLIS)
     private AppService appService;
 
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)

@@ -25,6 +25,7 @@ public class OpenAiCompatibleInferenceClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int CONNECT_TIMEOUT_MILLIS = 5000;
     private static final int READ_TIMEOUT_MILLIS = 60000;
+    private static final int MAX_READ_TIMEOUT_MILLIS = 180000;
 
     public ModelInvokeResult invoke(ModelInfo model, ModelInvokeCommand command) {
         if (model == null || command == null) {
@@ -46,17 +47,21 @@ public class OpenAiCompatibleInferenceClient {
         }
         boolean stream = "chat".equals(operation) && booleanValue(payload.get("stream"));
         String url = modelEndpointUrl(endpoint, endpointSuffix(operation));
+        int timeoutMillis = command.getTimeoutMillis() <= 0
+                ? READ_TIMEOUT_MILLIS
+                : Math.min(MAX_READ_TIMEOUT_MILLIS, command.getTimeoutMillis());
         try {
             return stream
-                    ? postStream(url, apiKey, JSON.writeValueAsString(payload))
-                    : postJson(url, apiKey, JSON.writeValueAsString(payload), operation);
+                    ? postStream(url, apiKey, JSON.writeValueAsString(payload), timeoutMillis)
+                    : postJson(url, apiKey, JSON.writeValueAsString(payload), operation, timeoutMillis);
         } catch (IOException ex) {
             throw new IllegalStateException("model inference request failed", ex);
         }
     }
 
-    private ModelInvokeResult postStream(String endpoint, String apiKey, String json) throws IOException {
-        HttpURLConnection connection = openConnection(endpoint, apiKey, "text/event-stream");
+    private ModelInvokeResult postStream(String endpoint, String apiKey, String json, int timeoutMillis)
+            throws IOException {
+        HttpURLConnection connection = openConnection(endpoint, apiKey, "text/event-stream", timeoutMillis);
         writeBody(connection, json);
         try {
             int status = connection.getResponseCode();
@@ -72,9 +77,10 @@ public class OpenAiCompatibleInferenceClient {
     }
 
     @SuppressWarnings("unchecked")
-    private ModelInvokeResult postJson(String endpoint, String apiKey, String json, String operation)
+    private ModelInvokeResult postJson(String endpoint, String apiKey, String json, String operation,
+                                       int timeoutMillis)
             throws IOException {
-        HttpURLConnection connection = openConnection(endpoint, apiKey, "application/json");
+        HttpURLConnection connection = openConnection(endpoint, apiKey, "application/json", timeoutMillis);
         writeBody(connection, json);
         try {
             int status = connection.getResponseCode();
@@ -161,10 +167,11 @@ public class OpenAiCompatibleInferenceClient {
         return firstNonBlank(string(delta.get("content")), string(message.get("content")));
     }
 
-    private HttpURLConnection openConnection(String endpoint, String apiKey, String accept) throws IOException {
+    private HttpURLConnection openConnection(String endpoint, String apiKey, String accept, int timeoutMillis)
+            throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
-        connection.setReadTimeout(READ_TIMEOUT_MILLIS);
+        connection.setConnectTimeout(Math.min(CONNECT_TIMEOUT_MILLIS, timeoutMillis));
+        connection.setReadTimeout(timeoutMillis);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Authorization", "Bearer " + apiKey);
         connection.setRequestProperty("Content-Type", "application/json");
