@@ -121,6 +121,70 @@ public class ModelServiceImplTest {
     }
 
     @Test
+    public void invokeModelReturnsEmbeddingAndRerankProviderResponses() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/embeddings", exchange -> respondJson(exchange,
+                "{\"data\":[{\"index\":0,\"embedding\":[0.1,0.9]}],\"usage\":{\"total_tokens\":2}}"));
+        server.createContext("/v1/rerank", exchange -> respondJson(exchange,
+                "{\"results\":[{\"index\":1,\"relevance_score\":0.98}]}"));
+        server.start();
+        try {
+            ModelInfo embedding = importProviderModel("embedding", "test-embedding", server.getAddress().getPort());
+            ModelInfo rerank = importProviderModel("rerank", "test-rerank", server.getAddress().getPort());
+
+            ModelInvokeCommand embeddingCommand = invokeCommand(embedding.getModelId(), "embeddings");
+            embeddingCommand.setPayload(Collections.<String, Object>singletonMap("input", "hello"));
+            ModelInvokeResult embeddingResult = service.invokeModel(embeddingCommand);
+            Map<?, ?> embeddingRow = (Map<?, ?>) ((java.util.List<?>) embeddingResult.getResponse().get("data")).get(0);
+            assertEquals(Arrays.asList(0.1D, 0.9D), embeddingRow.get("embedding"));
+
+            ModelInvokeCommand rerankCommand = invokeCommand(rerank.getModelId(), "rerank");
+            Map<String, Object> rerankPayload = new LinkedHashMap<String, Object>();
+            rerankPayload.put("query", "hello");
+            rerankPayload.put("documents", Arrays.asList("first", "second"));
+            rerankCommand.setPayload(rerankPayload);
+            ModelInvokeResult rerankResult = service.invokeModel(rerankCommand);
+            Map<?, ?> rerankRow = (Map<?, ?>) ((java.util.List<?>) rerankResult.getResponse().get("results")).get(0);
+            assertEquals(1, ((Number) rerankRow.get("index")).intValue());
+            assertEquals(0.98D, ((Number) rerankRow.get("relevance_score")).doubleValue(), 0.0001D);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private ModelInfo importProviderModel(String type, String modelName, int port) {
+        ModelUpsertCommand create = new ModelUpsertCommand();
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        create.setProvider("OpenAI-API-compatible");
+        create.setModelType(type);
+        create.setModel(modelName);
+        create.setDisplayName(modelName);
+        Map<String, Object> config = new LinkedHashMap<String, Object>();
+        config.put("apiKey", "local-test-key");
+        config.put("inferUrl", "http://127.0.0.1:" + port + "/v1");
+        create.setConfig(config);
+        return service.importModel(create);
+    }
+
+    private ModelInvokeCommand invokeCommand(String modelId, String operation) {
+        ModelInvokeCommand command = new ModelInvokeCommand();
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        command.setModelId(modelId);
+        command.setOperation(operation);
+        return command;
+    }
+
+    private void respondJson(com.sun.net.httpserver.HttpExchange exchange, String body) throws java.io.IOException {
+        byte[] response = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        exchange.getResponseBody().write(response);
+        exchange.close();
+    }
+
+    @Test
     public void modelCrudAndStatusFollowGoFrontendContract() {
         ModelUpsertCommand create = new ModelUpsertCommand();
         create.setUserId("dev-admin");

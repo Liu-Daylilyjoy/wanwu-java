@@ -21,6 +21,8 @@ The Java runtime keeps the same ownership boundaries:
 
 Model credentials remain in model-service configuration. RAG and BFF code pass only a model ID and inference payload through the internal Dubbo contract.
 
+Document segments and QA pairs persist their embedding and embedding model ID in the knowledge snapshot. Text, vector, and weighted hybrid retrieval share one ranking path. Provider rerank updates both the final score and the evidence card; provider failures fall back to the recall score without failing the chat.
+
 ## Model Inference Contract
 
 `ModelInvokeCommand` supports these operations:
@@ -40,7 +42,10 @@ Docker development remains usable without provider credentials. If no active con
 ## Verification
 
 - `ModelServiceImplTest#invokeModelAggregatesOpenAiCompatibleChatStream`
+- `ModelServiceImplTest#invokeModelReturnsEmbeddingAndRerankProviderResponses`
 - `AppServiceImplTest#ragChatRetrievesEvidenceBeforeInvokingConfiguredModel`
+- `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredEmbeddingModelForVectorRetrieval`
+- `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredProviderRerankOrderAndScores`
 - Full `ModelServiceImplTest`
 - Full `AppServiceImplTest`
 - Frontend and OpenAPI RAG delegation/SSE tests

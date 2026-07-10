@@ -1,5 +1,8 @@
 package com.unicomai.wanwu.service.knowledge.rpc;
 
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -715,6 +719,84 @@ public class KnowledgeServiceImplTest {
     }
 
     @Test
+    public void knowledgeHitUsesConfiguredEmbeddingModelForVectorRetrieval() {
+        ModelService modelService = mock(ModelService.class);
+        service = new KnowledgeServiceImpl(null, modelService);
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenAnswer(invocation -> {
+            ModelInvokeCommand command = invocation.getArgument(0);
+            String input = String.valueOf(command.getPayload().get("input")).toLowerCase();
+            return embeddingResult(input.contains("vehicle") || input.contains("automobile")
+                    ? Arrays.asList(1.0D, 0.0D)
+                    : Arrays.asList(0.0D, 1.0D));
+        });
+
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Vector Docs", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-feline", "Feline.txt", "Feline health manual."));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-vehicle", "Vehicle.txt", "Vehicle warranty manual."));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "automobile coverage");
+        Map<String, Object> params = new LinkedHashMap<String, Object>();
+        params.put("topK", 1);
+        params.put("threshold", 0.8D);
+        params.put("matchType", "vector");
+        request.put("knowledgeMatchParams", params);
+
+        List<Map<String, Object>> hits = listOfMaps(
+                service.hitKnowledge("dev-admin", "default-org", request).get("searchList"));
+
+        assertEquals(1, hits.size());
+        assertEquals("doc-vehicle", hits.get(0).get("docId"));
+        assertEquals(1.0D, ((Number) hits.get(0).get("score")).doubleValue(), 0.0001D);
+    }
+
+    @Test
+    public void knowledgeHitUsesConfiguredProviderRerankOrderAndScores() {
+        ModelService modelService = mock(ModelService.class);
+        service = new KnowledgeServiceImpl(null, modelService);
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenAnswer(invocation -> {
+            ModelInvokeCommand command = invocation.getArgument(0);
+            if ("rerank".equals(command.getOperation())) {
+                Map<String, Object> first = new LinkedHashMap<String, Object>();
+                first.put("index", 1);
+                first.put("relevance_score", 0.99D);
+                Map<String, Object> second = new LinkedHashMap<String, Object>();
+                second.put("index", 0);
+                second.put("relevance_score", 0.20D);
+                ModelInvokeResult result = new ModelInvokeResult();
+                result.setResponse(Collections.<String, Object>singletonMap("results", Arrays.asList(first, second)));
+                return result;
+            }
+            return embeddingResult(Arrays.asList(1.0D, 0.0D));
+        });
+
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Rerank Provider Docs", 0)).get("knowledgeId");
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-first", "First.txt", "Policy ranking first candidate."));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithContent(knowledgeId, "doc-second", "Second.txt", "Policy ranking second candidate."));
+
+        Map<String, Object> request = knowledgeHit(knowledgeId, "Policy ranking");
+        Map<String, Object> params = new LinkedHashMap<String, Object>();
+        params.put("topK", 2);
+        params.put("matchType", "text");
+        params.put("rerankMod", "rerank_model");
+        params.put("rerankModelId", "rerank-3");
+        request.put("knowledgeMatchParams", params);
+
+        List<Map<String, Object>> hits = listOfMaps(
+                service.hitKnowledge("dev-admin", "default-org", request).get("searchList"));
+
+        assertEquals("doc-second", hits.get(0).get("docId"));
+        assertEquals(0.99D, ((Number) hits.get(0).get("score")).doubleValue(), 0.0001D);
+        assertEquals(0.99D, ((Number) listOfMaps(hits.get(0).get("rerank_info")).get(0).get("score"))
+                .doubleValue(), 0.0001D);
+    }
+
+    @Test
     public void documentImportSplitsInlineContentIntoSearchableSegments() {
         String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
                 createKnowledge("Parsed Docs", 0)).get("knowledgeId");
@@ -1253,6 +1335,14 @@ public class KnowledgeServiceImplTest {
         request.put("category", category);
         request.put("avatar", singleton("path", ""));
         return request;
+    }
+
+    private ModelInvokeResult embeddingResult(List<Double> embedding) {
+        Map<String, Object> row = new LinkedHashMap<String, Object>();
+        row.put("embedding", embedding);
+        ModelInvokeResult result = new ModelInvokeResult();
+        result.setResponse(Collections.<String, Object>singletonMap("data", Collections.singletonList(row)));
+        return result;
     }
 
     private Map<String, Object> updateKnowledge(String knowledgeId, String name) {

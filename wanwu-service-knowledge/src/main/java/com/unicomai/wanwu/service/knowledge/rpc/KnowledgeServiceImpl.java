@@ -5,11 +5,16 @@ import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
+import com.unicomai.wanwu.service.knowledge.retrieval.LocalSemanticVectorizer;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -75,6 +80,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final LocalSemanticVectorizer LOCAL_VECTORIZER = new LocalSemanticVectorizer();
 
     static {
         JSON.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
@@ -116,13 +122,20 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Autowired(required = false)
     private KnowledgeRecordMapper knowledgeRecordMapper;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
 
     public KnowledgeServiceImpl() {
         seedSplitters();
     }
 
     KnowledgeServiceImpl(KnowledgeRecordMapper knowledgeRecordMapper) {
+        this(knowledgeRecordMapper, null);
+    }
+
+    KnowledgeServiceImpl(KnowledgeRecordMapper knowledgeRecordMapper, ModelService modelService) {
         this.knowledgeRecordMapper = knowledgeRecordMapper;
+        this.modelService = modelService;
         seedSplitters();
         loadPersistedSnapshot();
     }
@@ -342,6 +355,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (knowledge == null || !matchesOwner(orgId, knowledge)) {
                 continue;
             }
+            VectorValue queryVector = vectorForText(knowledge, question);
             for (DocState doc : docs(knowledgeId)) {
                 if (doc.status != DOC_STATUS_FINISHED) {
                     continue;
@@ -353,7 +367,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     if (!segment.available) {
                         continue;
                     }
-                    double score = knowledgeHitScore(question, knowledge, doc, segment);
+                    ensureSegmentIndex(doc, segment);
+                    double score = knowledgeHitScore(question, knowledge, doc, segment, matchParams, queryVector);
                     if (score < threshold) {
                         continue;
                     }
@@ -368,6 +383,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     searchList, scores, threshold);
         }
         appendDocInfoHits(question, safe, matchParams, searchList, scores, threshold);
+        applyProviderRerank(userId, orgId, question, matchParams, searchList, scores);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
         return knowledgeHitResult(question, searchList, scores, useGraph);
     }
@@ -945,6 +961,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         segment.parent = false;
         segment.childNum = 0;
         segments(docId).add(segment);
+        indexSegment(findDoc(docId), segment);
         saveSnapshot();
     }
 
@@ -964,6 +981,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             SegmentState segment = newSegment(docId, string(imported.get("content")), target.size() + 1);
             segment.labels = stringList(imported.get("labels"));
             target.add(segment);
+            indexSegment(findDoc(docId), segment);
         }
         saveSnapshot();
     }
@@ -988,6 +1006,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         SegmentState segment = findSegment(string(safe.get("docId")), string(safe.get("contentId")));
         if (segment != null) {
             segment.content = string(safe.get("content"));
+            indexSegment(findDoc(segment.docId), segment);
             saveSnapshot();
         }
     }
@@ -1667,6 +1686,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         pair.enabled = true;
         pair.errorMsg = "";
         pair.metaDataList.addAll(normalizeQaMetaList(safe.get("metaDataList")));
+        indexQaPair(pair);
         qaPairs(knowledgeId).add(pair);
         qaPairsById.put(qaPairId, pair);
         saveSnapshot();
@@ -1683,6 +1703,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             pair.metaDataList.clear();
             pair.metaDataList.addAll(normalizeQaMetaList(safe.get("metaDataList")));
         }
+        indexQaPair(pair);
         saveSnapshot();
     }
 
@@ -1837,6 +1858,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (knowledge == null) {
                 continue;
             }
+            VectorValue queryVector = vectorForText(knowledge, question);
             for (QaPairState pair : qaPairs(knowledgeId)) {
                 if (!pair.enabled || pair.status != QA_STATUS_FINISHED) {
                     continue;
@@ -1844,7 +1866,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 if (metadataFiltering && !qaMetadataFiltersMatch(pair, knowledge, metadataFilters)) {
                     continue;
                 }
-                double score = qaHitScore(question, pair);
+                ensureQaIndex(pair);
+                double score = qaHitScore(question, pair, matchParams, queryVector);
                 if (score <= 0D || score < threshold) {
                     continue;
                 }
@@ -1852,6 +1875,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 scores.add(score);
             }
         }
+        applyProviderRerank(userId, orgId, question, matchParams, searchList, scores);
         sortAndLimitKnowledgeHits(searchList, scores, topK);
         return qaHitResult(searchList, scores);
     }
@@ -2937,6 +2961,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         boolean parentChild = "1".equals(string(docSegment.get("segmentMethod")));
         for (String chunk : chunks) {
             SegmentState segment = newSegment(doc.docId, chunk, segments.size() + 1);
+            indexSegment(doc, segment);
             segments.add(segment);
             if (parentChild) {
                 List<String> children = splitContent(chunk, docSegment, true);
@@ -3732,7 +3757,231 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return knowledgeIds;
     }
 
-    private double knowledgeHitScore(String question, KnowledgeState knowledge, DocState doc, SegmentState segment) {
+    private void indexSegment(DocState doc, SegmentState segment) {
+        if (doc == null || segment == null) {
+            return;
+        }
+        KnowledgeState knowledge = knowledgeBases.get(doc.knowledgeId);
+        if (knowledge == null) {
+            return;
+        }
+        VectorValue vector = vectorForText(knowledge, segment.content);
+        segment.embedding = new ArrayList<Double>(vector.values);
+        segment.embeddingModelId = vector.modelId;
+    }
+
+    private void ensureSegmentIndex(DocState doc, SegmentState segment) {
+        if (segment != null && (segment.embedding == null || segment.embedding.isEmpty())) {
+            indexSegment(doc, segment);
+        }
+    }
+
+    private void indexQaPair(QaPairState pair) {
+        if (pair == null) {
+            return;
+        }
+        KnowledgeState knowledge = knowledgeBases.get(pair.knowledgeId);
+        if (knowledge == null) {
+            return;
+        }
+        VectorValue vector = vectorForText(knowledge,
+                defaultIfBlank(pair.question, "") + "\n" + defaultIfBlank(pair.answer, ""));
+        pair.embedding = new ArrayList<Double>(vector.values);
+        pair.embeddingModelId = vector.modelId;
+    }
+
+    private void ensureQaIndex(QaPairState pair) {
+        if (pair != null && (pair.embedding == null || pair.embedding.isEmpty())) {
+            indexQaPair(pair);
+        }
+    }
+
+    private VectorValue vectorForText(KnowledgeState knowledge, String text) {
+        String modelId = knowledge == null ? "" : knowledge.embeddingModelId;
+        if (!isBlank(modelId) && modelService != null && !isBlank(text)) {
+            try {
+                ModelInvokeCommand command = new ModelInvokeCommand();
+                command.setUserId(defaultIfBlank(knowledge.userId, DEFAULT_USER_ID));
+                command.setOrgId(defaultIfBlank(knowledge.orgId, DEFAULT_ORG_ID));
+                command.setModelId(modelId);
+                command.setOperation("embeddings");
+                Map<String, Object> payload = new LinkedHashMap<String, Object>();
+                payload.put("input", Collections.singletonList(text));
+                command.setPayload(payload);
+                List<Double> embedding = embeddingValues(modelService.invokeModel(command));
+                if (!embedding.isEmpty()) {
+                    return new VectorValue(modelId, embedding);
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return new VectorValue(LocalSemanticVectorizer.MODEL_ID, LOCAL_VECTORIZER.vectorize(text));
+    }
+
+    private List<Double> embeddingValues(ModelInvokeResult result) {
+        if (result == null || result.getResponse() == null) {
+            return Collections.emptyList();
+        }
+        List<Object> data = list(firstPresent(result.getResponse(), "data", "embeddings"));
+        if (data.isEmpty()) {
+            return doubleList(result.getResponse().get("embedding"));
+        }
+        Map<String, Object> first = map(data.get(0));
+        return doubleList(firstPresent(first, "embedding", "vector"));
+    }
+
+    private List<Double> doubleList(Object value) {
+        List<Double> result = new ArrayList<Double>();
+        for (Object item : list(value)) {
+            if (item instanceof Number) {
+                result.add(((Number) item).doubleValue());
+            } else {
+                try {
+                    result.add(Double.parseDouble(string(item)));
+                } catch (NumberFormatException ignored) {
+                    return Collections.emptyList();
+                }
+            }
+        }
+        return result;
+    }
+
+    private String retrievalMethod(Map<String, Object> matchParams) {
+        String value = firstText(matchParams, "matchType", "match_type", "retrieveMethod", "retrieve_method")
+                .toLowerCase(Locale.ENGLISH);
+        if ("vector".equals(value) || "semantic_search".equals(value) || "semantic".equals(value)) {
+            return "vector";
+        }
+        if ("text".equals(value) || "full_text_search".equals(value) || "keyword".equals(value)) {
+            return "text";
+        }
+        if ("mix".equals(value) || "hybrid_search".equals(value) || "hybrid".equals(value)) {
+            return "mix";
+        }
+        return "";
+    }
+
+    private double retrievalWeight(Map<String, Object> matchParams, boolean vector) {
+        Map<String, Object> weights = map(firstPresent(matchParams, "weights", "weight"));
+        Object raw = vector
+                ? firstPresent(matchParams, "semanticsPriority", "semanticPriority", "vectorWeight", "vector_weight")
+                : firstPresent(matchParams, "keywordPriority", "textWeight", "text_weight");
+        if (raw == null) {
+            raw = vector
+                    ? firstPresent(weights, "vectorWeight", "vector_weight")
+                    : firstPresent(weights, "textWeight", "text_weight");
+        }
+        double value = doubleValue(raw, 0.5D);
+        return value > 1D ? value / 100D : Math.max(0D, value);
+    }
+
+    private double semanticScore(VectorValue query, List<Double> indexed, String indexedModelId) {
+        if (query == null || query.values.isEmpty() || indexed == null || indexed.isEmpty()) {
+            return 0D;
+        }
+        if (!query.modelId.equals(indexedModelId)) {
+            return 0D;
+        }
+        return LOCAL_VECTORIZER.cosine(query.values, indexed);
+    }
+
+    private void applyProviderRerank(String userId,
+                                     String orgId,
+                                     String question,
+                                     Map<String, Object> matchParams,
+                                     List<Map<String, Object>> searchList,
+                                     List<Double> scores) {
+        String modelId = firstText(matchParams, "rerankModelId", "rerank_model_id");
+        if (modelService == null || isBlank(modelId) || searchList.isEmpty() || !rerankRequested(matchParams)) {
+            return;
+        }
+        try {
+            ModelInvokeCommand command = new ModelInvokeCommand();
+            command.setUserId(defaultIfBlank(userId, DEFAULT_USER_ID));
+            command.setOrgId(defaultIfBlank(orgId, DEFAULT_ORG_ID));
+            command.setModelId(modelId);
+            command.setOperation("rerank");
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("query", question);
+            List<String> documents = new ArrayList<String>();
+            for (Map<String, Object> row : searchList) {
+                documents.add(firstText(row, "snippet", "answer", "content", "text", "title"));
+            }
+            payload.put("documents", documents);
+            payload.put("top_n", documents.size());
+            payload.put("return_documents", false);
+            command.setPayload(payload);
+            applyRerankResults(modelId, modelService.invokeModel(command), searchList, scores);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void applyRerankResults(String modelId,
+                                    ModelInvokeResult result,
+                                    List<Map<String, Object>> searchList,
+                                    List<Double> scores) {
+        if (result == null || result.getResponse() == null) {
+            return;
+        }
+        List<Object> ranked = list(firstPresent(result.getResponse(), "results", "data"));
+        for (Object raw : ranked) {
+            Map<String, Object> item = map(raw);
+            int index = intValue(firstPresent(item, "index", "document_index"), -1);
+            if (index < 0 || index >= searchList.size()) {
+                continue;
+            }
+            double score = doubleValue(firstPresent(item, "relevance_score", "score"), -1D);
+            if (score < 0D) {
+                continue;
+            }
+            while (scores.size() <= index) {
+                scores.add(0D);
+            }
+            scores.set(index, score);
+            Map<String, Object> row = searchList.get(index);
+            row.put("score", score);
+            Map<String, Object> evidence = new LinkedHashMap<String, Object>();
+            evidence.put("type", defaultIfBlank(string(row.get("contentType")), "text"));
+            evidence.put("fileUrl", firstText(row, "docId", "qaPairId", "title"));
+            evidence.put("score", score);
+            evidence.put("modelId", modelId);
+            evidence.put("model", modelId);
+            List<Map<String, Object>> rerankInfo = Collections.singletonList(evidence);
+            row.put("rerankInfo", rerankInfo);
+            row.put("rerank_info", rerankInfo);
+        }
+    }
+
+    private double knowledgeHitScore(String question, KnowledgeState knowledge, DocState doc, SegmentState segment,
+                                     Map<String, Object> matchParams, VectorValue queryVector) {
+        double lexical = lexicalKnowledgeHitScore(question, knowledge, doc, segment);
+        String method = retrievalMethod(matchParams);
+        if ("text".equals(method)) {
+            return lexical;
+        }
+        List<Double> indexed = queryVector != null && LocalSemanticVectorizer.MODEL_ID.equals(queryVector.modelId)
+                && !LocalSemanticVectorizer.MODEL_ID.equals(segment.embeddingModelId)
+                ? LOCAL_VECTORIZER.vectorize(segment.content)
+                : segment.embedding;
+        String indexedModelId = indexed == segment.embedding
+                ? segment.embeddingModelId
+                : LocalSemanticVectorizer.MODEL_ID;
+        double semantic = semanticScore(queryVector, indexed, indexedModelId);
+        if ("vector".equals(method)) {
+            return semantic;
+        }
+        if ("mix".equals(method)) {
+            double vectorWeight = retrievalWeight(matchParams, true);
+            double textWeight = retrievalWeight(matchParams, false);
+            double total = vectorWeight + textWeight;
+            return total <= 0D ? Math.max(lexical, semantic)
+                    : (semantic * vectorWeight + lexical * textWeight) / total;
+        }
+        return lexical;
+    }
+
+    private double lexicalKnowledgeHitScore(String question, KnowledgeState knowledge, DocState doc,
+                                            SegmentState segment) {
         if (isBlank(question)) {
             return 1.0D;
         }
@@ -3890,7 +4139,35 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
-    private double qaHitScore(String question, QaPairState pair) {
+    private double qaHitScore(String question, QaPairState pair, Map<String, Object> matchParams,
+                              VectorValue queryVector) {
+        double lexical = lexicalQaHitScore(question, pair);
+        String method = retrievalMethod(matchParams);
+        if ("text".equals(method)) {
+            return lexical;
+        }
+        List<Double> indexed = queryVector != null && LocalSemanticVectorizer.MODEL_ID.equals(queryVector.modelId)
+                && !LocalSemanticVectorizer.MODEL_ID.equals(pair.embeddingModelId)
+                ? LOCAL_VECTORIZER.vectorize(defaultIfBlank(pair.question, "") + "\n" + defaultIfBlank(pair.answer, ""))
+                : pair.embedding;
+        String indexedModelId = indexed == pair.embedding
+                ? pair.embeddingModelId
+                : LocalSemanticVectorizer.MODEL_ID;
+        double semantic = semanticScore(queryVector, indexed, indexedModelId);
+        if ("vector".equals(method)) {
+            return semantic;
+        }
+        if ("mix".equals(method)) {
+            double vectorWeight = retrievalWeight(matchParams, true);
+            double textWeight = retrievalWeight(matchParams, false);
+            double total = vectorWeight + textWeight;
+            return total <= 0D ? Math.max(lexical, semantic)
+                    : (semantic * vectorWeight + lexical * textWeight) / total;
+        }
+        return lexical;
+    }
+
+    private double lexicalQaHitScore(String question, QaPairState pair) {
         if (isBlank(question)) {
             return 1.0D;
         }
@@ -4426,8 +4703,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         return fallback;
     }
 
-    private Object firstPresent(Map<String, Object> source, String firstKey, String secondKey) {
-        return source.containsKey(firstKey) ? source.get(firstKey) : source.get(secondKey);
+    private Object firstPresent(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                return source.get(key);
+            }
+        }
+        return null;
     }
 
     private List<Integer> intList(Object raw) {
@@ -4877,6 +5159,22 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private boolean parent;
         private int childNum;
         private List<ChildSegmentState> childSegments = new ArrayList<ChildSegmentState>();
+        private String embeddingModelId;
+        private List<Double> embedding = new ArrayList<Double>();
+    }
+
+    private static final class VectorValue {
+        private final String modelId;
+        private final List<Double> values;
+
+        private VectorValue(String modelId, List<Double> values) {
+            this.modelId = defaultVectorModelId(modelId);
+            this.values = values == null ? Collections.<Double>emptyList() : values;
+        }
+
+        private static String defaultVectorModelId(String modelId) {
+            return modelId == null || modelId.trim().isEmpty() ? LocalSemanticVectorizer.MODEL_ID : modelId;
+        }
     }
 
     private static final class KnowledgeHitRank {
@@ -4942,6 +5240,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         private boolean enabled;
         private String errorMsg;
         private final List<Map<String, Object>> metaDataList = new ArrayList<Map<String, Object>>();
+        private String embeddingModelId;
+        private List<Double> embedding = new ArrayList<Double>();
     }
 
     private static final class ReportState {
