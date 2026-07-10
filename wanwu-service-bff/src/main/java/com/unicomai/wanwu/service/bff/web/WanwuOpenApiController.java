@@ -465,7 +465,6 @@ public class WanwuOpenApiController {
             command.setFileInfo(mapList(body.containsKey("file_info") ? body.get("file_info") : body.get("fileInfo")));
             command.setUserId(ctx.userId);
             command.setOrgId(ctx.orgId);
-            attachConfiguredOpenApiRagModelResponse(ctx, command, startedAt);
             RagChatResult result = appService.streamRagChat(command);
             Map<String, Object> response = openApiRagChat(result);
             recordAppStatistic(ctx, command.getRagId(), RAG_APP_TYPE, true, stream, startedAt);

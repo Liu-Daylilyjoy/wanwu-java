@@ -4082,7 +4082,6 @@ public class WanwuFrontendApiController {
             RagChatCommand command = request == null ? new RagChatRequest().toCommand(draft) : request.toCommand(draft);
             command.setUserId(userContext.getUserId());
             command.setOrgId(userContext.getOrgId());
-            attachConfiguredRagModelResponse(userContext, command, draft, startedAt);
             RagChatResult result = appService.streamRagChat(command);
             if (!draft) {
                 recordAppStatistic(userContext, command.getRagId(), RAG_APP_TYPE, true, true, startedAt, STAT_SOURCE_WEB);
@@ -4914,9 +4913,14 @@ public class WanwuFrontendApiController {
             frames.append(sseEvent(agUiEvent("CUSTOM", threadId, runId, null, "rag_search_list", result.getSearchList())));
         }
         frames.append(sseEvent(agUiEvent("TEXT_MESSAGE_START", threadId, runId, messageId, null, null)));
-        Map<String, Object> content = agUiEvent("TEXT_MESSAGE_CONTENT", threadId, runId, messageId, null, null);
-        content.put("delta", defaultIfBlank(result.getResponse(), ""));
-        frames.append(sseEvent(content));
+        List<String> chunks = result.getResponseChunks() == null || result.getResponseChunks().isEmpty()
+                ? Collections.singletonList(defaultIfBlank(result.getResponse(), ""))
+                : result.getResponseChunks();
+        for (String chunk : chunks) {
+            Map<String, Object> content = agUiEvent("TEXT_MESSAGE_CONTENT", threadId, runId, messageId, null, null);
+            content.put("delta", defaultIfBlank(chunk, ""));
+            frames.append(sseEvent(content));
+        }
         frames.append(sseEvent(agUiEvent("TEXT_MESSAGE_END", threadId, runId, messageId, null, null)));
         frames.append(sseEvent(agUiEvent("RUN_FINISHED", threadId, runId, null, null, null)));
         return frames.toString();

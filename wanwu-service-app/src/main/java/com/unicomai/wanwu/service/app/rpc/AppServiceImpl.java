@@ -130,6 +130,9 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
@@ -263,36 +266,38 @@ public class AppServiceImpl implements AppService {
     private KnowledgeService knowledgeService;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private SafetyService safetyService;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private ModelService modelService;
 
     @Autowired
     public AppServiceImpl(ApplicationRepository applicationRepository) {
-        this(applicationRepository, Clock.systemUTC(), new ObjectMapper(), null, null);
+        this(applicationRepository, Clock.systemUTC(), new ObjectMapper(), null, null, null);
     }
 
     public AppServiceImpl(ApplicationRepository applicationRepository, Clock clock) {
-        this(applicationRepository, clock, new ObjectMapper(), null, null);
+        this(applicationRepository, clock, new ObjectMapper(), null, null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, KnowledgeService knowledgeService) {
-        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, null);
+        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository,
                    Clock clock,
                    KnowledgeService knowledgeService,
                    SafetyService safetyService) {
-        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, safetyService);
+        this(applicationRepository, clock, new ObjectMapper(), knowledgeService, safetyService, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository, Clock clock, ObjectMapper objectMapper) {
-        this(applicationRepository, clock, objectMapper, null, null);
+        this(applicationRepository, clock, objectMapper, null, null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository,
                    Clock clock,
                    ObjectMapper objectMapper,
                    KnowledgeService knowledgeService) {
-        this(applicationRepository, clock, objectMapper, knowledgeService, null);
+        this(applicationRepository, clock, objectMapper, knowledgeService, null, null);
     }
 
     AppServiceImpl(ApplicationRepository applicationRepository,
@@ -300,11 +305,21 @@ public class AppServiceImpl implements AppService {
                    ObjectMapper objectMapper,
                    KnowledgeService knowledgeService,
                    SafetyService safetyService) {
+        this(applicationRepository, clock, objectMapper, knowledgeService, safetyService, null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository,
+                   Clock clock,
+                   ObjectMapper objectMapper,
+                   KnowledgeService knowledgeService,
+                   SafetyService safetyService,
+                   ModelService modelService) {
         this.applicationRepository = applicationRepository;
         this.clock = clock;
         this.objectMapper = objectMapper;
         this.knowledgeService = knowledgeService;
         this.safetyService = safetyService;
+        this.modelService = modelService;
     }
 
     @Override
@@ -1590,9 +1605,12 @@ public class AppServiceImpl implements AppService {
         RagChatResult result = new RagChatResult();
         result.setRagId(command.getRagId());
         result.setQuestion(command.getQuestion());
-        String response = defaultIfBlank(command.getOverrideResponse(),
-                deterministicRagResponse(rag, command.getQuestion(), command.getFileInfo()));
-        response = enrichRagResponse(response, knowledgeHit, searchList, qaHit, qaSearchList);
+        ModelInvokeResult modelResult = invokeRagModel(userId, orgId, command, config, searchList, qaSearchList);
+        String response = modelResult == null ? "" : defaultIfBlank(modelResult.getContent(), "");
+        if (isBlank(response)) {
+            response = defaultIfBlank(command.getOverrideResponse(),
+                    offlineRagResponse(command.getQuestion(), searchList, qaSearchList));
+        }
         SensitiveBlock outputBlock = matchSensitiveResponse(userId, orgId, safetyConfigJson, response);
         if (outputBlock != null) {
             response = outputBlock.reply;
@@ -1600,6 +1618,9 @@ public class AppServiceImpl implements AppService {
             qaSearchList = Collections.emptyList();
         }
         result.setResponse(response);
+        result.setResponseChunks(outputBlock != null
+                ? Collections.singletonList(response)
+                : ragResponseChunks(modelResult, response));
         result.setSearchList(searchList);
         result.setQaSearchList(qaSearchList);
         result.setCreatedAt(clock.millis());
@@ -3872,10 +3893,177 @@ public class AppServiceImpl implements AppService {
         return "Demo response from " + defaultIfBlank(assistant.getName(), "Agent") + ": " + prompt;
     }
 
-    private String deterministicRagResponse(AppRecord rag, String question, List<Map<String, Object>> fileInfo) {
-        int fileCount = fileInfo == null ? 0 : fileInfo.size();
-        String suffix = fileCount > 0 ? " Attached files: " + fileCount + "." : "";
-        return "Demo RAG response from " + defaultIfBlank(rag.getName(), "RAG") + ": " + question + suffix;
+    private ModelInvokeResult invokeRagModel(String userId,
+                                             String orgId,
+                                             RagChatCommand command,
+                                             RagDraftConfigRecord config,
+                                             List<Map<String, Object>> searchList,
+                                             List<Map<String, Object>> qaSearchList) {
+        if (modelService == null || config == null || isBlank(config.getModelConfigJson())) {
+            return null;
+        }
+        Map<String, Object> modelConfig = mapOrDefault(
+                config.getModelConfigJson(), new LinkedHashMap<String, Object>());
+        String modelId = firstNonBlank(
+                stringValue(modelConfig.get("modelId")),
+                stringValue(modelConfig.get("model_id")),
+                stringValue(mapValue(modelConfig.get("config")).get("modelId")));
+        if (isBlank(modelId)) {
+            return null;
+        }
+        ModelInvokeCommand invocation = new ModelInvokeCommand();
+        invocation.setUserId(userId);
+        invocation.setOrgId(orgId);
+        invocation.setModelId(modelId);
+        invocation.setOperation("chat");
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("stream", true);
+        payload.put("messages", ragModelMessages(command, searchList, qaSearchList));
+        copyRagModelParameters(modelConfig, payload);
+        invocation.setPayload(payload);
+        try {
+            return modelService.invokeModel(invocation);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private List<Map<String, Object>> ragModelMessages(RagChatCommand command,
+                                                        List<Map<String, Object>> searchList,
+                                                        List<Map<String, Object>> qaSearchList) {
+        List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+        addRagTextMessage(messages, "system", ragSystemPrompt(searchList, qaSearchList));
+        for (Map<String, Object> history : safeMapList(command.getHistory())) {
+            Object needHistory = firstPresent(history, "needHistory", "need_history");
+            if (needHistory != null && !enabled(needHistory)) {
+                continue;
+            }
+            addRagTextMessage(messages, "user", firstNonBlank(
+                    stringValue(history.get("query")),
+                    stringValue(history.get("question")),
+                    stringValue(history.get("prompt"))));
+            addRagTextMessage(messages, "assistant", firstNonBlank(
+                    stringValue(history.get("response")),
+                    stringValue(history.get("answer")),
+                    stringValue(history.get("content"))));
+        }
+        addRagQuestionMessage(messages, command.getQuestion(), command.getFileInfo());
+        return messages;
+    }
+
+    private String ragSystemPrompt(List<Map<String, Object>> searchList,
+                                   List<Map<String, Object>> qaSearchList) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Answer the user's question using the supplied references. ")
+                .append("Do not invent facts that are absent from the references. ")
+                .append("When references are insufficient, say so clearly.\n\n");
+        int index = 1;
+        for (Map<String, Object> row : safeMapList(searchList)) {
+            prompt.append("[K").append(index++).append("] ")
+                    .append(firstNonBlank(stringValue(row.get("title")), "Knowledge reference"))
+                    .append("\n")
+                    .append(firstNonBlank(
+                            stringValue(row.get("snippet")),
+                            stringValue(row.get("content")),
+                            stringValue(row.get("text"))))
+                    .append("\n\n");
+        }
+        index = 1;
+        for (Map<String, Object> row : safeMapList(qaSearchList)) {
+            prompt.append("[Q").append(index++).append("] ")
+                    .append(firstNonBlank(stringValue(row.get("question")), stringValue(row.get("title"))))
+                    .append("\n")
+                    .append(firstNonBlank(
+                            stringValue(row.get("answer")),
+                            stringValue(row.get("snippet")),
+                            stringValue(row.get("content"))))
+                    .append("\n\n");
+        }
+        if ((searchList == null || searchList.isEmpty()) && (qaSearchList == null || qaSearchList.isEmpty())) {
+            prompt.append("No relevant reference was retrieved for this request.");
+        }
+        return prompt.toString().trim();
+    }
+
+    private void addRagTextMessage(List<Map<String, Object>> messages, String role, String content) {
+        if (isBlank(content)) {
+            return;
+        }
+        Map<String, Object> message = new LinkedHashMap<String, Object>();
+        message.put("role", role);
+        message.put("content", content);
+        messages.add(message);
+    }
+
+    private void addRagQuestionMessage(List<Map<String, Object>> messages,
+                                       String question,
+                                       List<Map<String, Object>> fileInfo) {
+        List<Map<String, Object>> images = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> file : safeMapList(fileInfo)) {
+            String fileUrl = firstNonBlank(
+                    stringValue(file.get("fileUrl")),
+                    stringValue(file.get("file_url")),
+                    stringValue(file.get("url")));
+            if (!isRagImageAttachment(fileUrl)) {
+                continue;
+            }
+            Map<String, Object> imageUrl = new LinkedHashMap<String, Object>();
+            imageUrl.put("url", fileUrl);
+            Map<String, Object> image = new LinkedHashMap<String, Object>();
+            image.put("type", "image_url");
+            image.put("image_url", imageUrl);
+            images.add(image);
+        }
+        if (images.isEmpty()) {
+            addRagTextMessage(messages, "user", question);
+            return;
+        }
+        List<Map<String, Object>> content = new ArrayList<Map<String, Object>>();
+        Map<String, Object> text = new LinkedHashMap<String, Object>();
+        text.put("type", "text");
+        text.put("text", question);
+        content.add(text);
+        content.addAll(images);
+        Map<String, Object> message = new LinkedHashMap<String, Object>();
+        message.put("role", "user");
+        message.put("content", content);
+        messages.add(message);
+    }
+
+    private void copyRagModelParameters(Map<String, Object> modelConfig, Map<String, Object> payload) {
+        Map<String, Object> parameters = mapValue(modelConfig.get("config"));
+        copyIfPresent(parameters, payload, "temperature", "temperature");
+        copyIfPresent(parameters, payload, "top_p", "top_p");
+        copyIfPresent(parameters, payload, "topP", "top_p");
+        copyIfPresent(parameters, payload, "frequency_penalty", "frequency_penalty");
+        copyIfPresent(parameters, payload, "frequencyPenalty", "frequency_penalty");
+        copyIfPresent(parameters, payload, "enable_thinking", "enable_thinking");
+        copyIfPresent(parameters, payload, "enableThinking", "enable_thinking");
+        copyIfPresent(parameters, payload, "max_tokens", "max_tokens");
+        copyIfPresent(parameters, payload, "maxTokens", "max_tokens");
+    }
+
+    private List<String> ragResponseChunks(ModelInvokeResult modelResult, String response) {
+        if (modelResult == null || modelResult.getChunks() == null || modelResult.getChunks().isEmpty()) {
+            return isBlank(response) ? Collections.<String>emptyList() : Collections.singletonList(response);
+        }
+        StringBuilder joined = new StringBuilder();
+        for (String chunk : modelResult.getChunks()) {
+            joined.append(defaultIfBlank(chunk, ""));
+        }
+        return response.equals(joined.toString())
+                ? new ArrayList<String>(modelResult.getChunks())
+                : Collections.singletonList(response);
+    }
+
+    private String offlineRagResponse(String question,
+                                      List<Map<String, Object>> searchList,
+                                      List<Map<String, Object>> qaSearchList) {
+        String evidence = firstNonBlank(firstHitText(searchList), firstHitText(qaSearchList));
+        if (!isBlank(evidence)) {
+            return evidence;
+        }
+        return "No relevant knowledge was found for: " + defaultIfBlank(question, "the question");
     }
 
     private static class SensitiveBlock {
@@ -4287,6 +4475,10 @@ public class AppServiceImpl implements AppService {
             return (List<Object>) value;
         }
         return Collections.emptyList();
+    }
+
+    private List<Map<String, Object>> safeMapList(List<Map<String, Object>> value) {
+        return value == null ? Collections.<Map<String, Object>>emptyList() : value;
     }
 
     private List<Map<String, Object>> hitSearchList(Map<String, Object> hit) {

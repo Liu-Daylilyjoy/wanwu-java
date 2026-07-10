@@ -1,5 +1,6 @@
 package com.unicomai.wanwu.service.app.rpc;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.app.dto.AssistantConfigUpdateCommand;
 import com.unicomai.wanwu.api.app.dto.AssistantActionDeleteCommand;
@@ -92,6 +93,9 @@ import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.model.ModelService;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.api.safety.SafetyService;
 import com.unicomai.wanwu.api.app.dto.WorkflowCopyCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowCreateCommand;
@@ -435,7 +439,7 @@ public class AppServiceImplTest {
         RagChatResult draftResult = service.streamRagChat(draft);
         assertEquals(created.getRagId(), draftResult.getRagId());
         assertEquals("what is policy", draftResult.getQuestion());
-        assertEquals(true, draftResult.getResponse().contains("PolicyRag"));
+        assertEquals(true, draftResult.getResponse().contains("No relevant knowledge was found"));
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.streamRagChat(ragChatCommand(created.getRagId(), "published", false)));
@@ -452,7 +456,7 @@ public class AppServiceImplTest {
         RagChatResult published = service.streamRagChat(
                 ragChatCommand(created.getRagId(), "published", false));
         assertEquals("published", published.getQuestion());
-        assertEquals(true, published.getResponse().contains("Demo RAG response"));
+        assertEquals(true, published.getResponse().contains("No relevant knowledge was found"));
     }
 
     @Test
@@ -520,8 +524,9 @@ public class AppServiceImplTest {
         config.setSafetyConfig(safetyConfig("table-001"));
         service.updateRagConfig(config);
 
-        RagChatResult result = service.streamRagChat(
-                ragChatCommand(created.getRagId(), "plain question", true));
+        RagChatCommand command = ragChatCommand(created.getRagId(), "plain question", true);
+        command.setOverrideResponse("GuardedRag generated output");
+        RagChatResult result = service.streamRagChat(command);
 
         assertEquals("Safety reply", result.getResponse());
         assertTrue(result.getSearchList().isEmpty());
@@ -600,6 +605,68 @@ public class AppServiceImplTest {
         List<Map<String, Object>> knowledgeList = (List<Map<String, Object>>) request.get("knowledgeList");
         assertEquals("kb-001", knowledgeList.get(0).get("knowledgeId"));
         assertEquals(5, ((Map<String, Object>) request.get("knowledgeMatchParams")).get("topK"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void ragChatRetrievesEvidenceBeforeInvokingConfiguredModel() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                knowledgeService, null, modelService);
+
+        RagCreateCommand create = new RagCreateCommand();
+        create.setName("GroundedRag");
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        RagCreateResult created = service.createRag(create);
+
+        RagConfigUpdateCommand config = new RagConfigUpdateCommand();
+        config.setRagId(created.getRagId());
+        config.setUserId("dev-admin");
+        config.setOrgId("default-org");
+        config.setModelConfig(modelConfig("llm-grounded-001"));
+        config.setKnowledgeBaseConfig(knowledgeConfig("kb-grounded-001"));
+        service.updateRagConfig(config);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "ReturnsPolicy.txt");
+        hitItem.put("knowledgeName", "Policy KB");
+        hitItem.put("snippet", "Customers may return products within 30 days.");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("searchList", Collections.singletonList(hitItem));
+        hit.put("score", Collections.singletonList(0.93D));
+        hit.put("prompt", "Customers may return products within 30 days.");
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class))).thenReturn(hit);
+
+        ModelInvokeResult invocationResult = new ModelInvokeResult();
+        invocationResult.setContent("The return window is 30 days.");
+        invocationResult.setChunks(Arrays.asList("The return window ", "is 30 days."));
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenReturn(invocationResult);
+
+        RagChatCommand chat = ragChatCommand(created.getRagId(), "How long is the return window?", true);
+        Map<String, Object> history = new LinkedHashMap<>();
+        history.put("query", "Do you know the policy?");
+        history.put("response", "I will check it.");
+        history.put("needHistory", true);
+        chat.setHistory(Collections.singletonList(history));
+        RagChatResult result = service.streamRagChat(chat);
+
+        assertEquals("The return window is 30 days.", result.getResponse());
+        assertEquals(invocationResult.getChunks(), result.getResponseChunks());
+        ArgumentCaptor<ModelInvokeCommand> captor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService).invokeModel(captor.capture());
+        ModelInvokeCommand invoked = captor.getValue();
+        assertEquals("llm-grounded-001", invoked.getModelId());
+        assertEquals("chat", invoked.getOperation());
+        assertEquals(Boolean.TRUE, invoked.getPayload().get("stream"));
+        String messagesJson = String.valueOf(invoked.getPayload().get("messages"));
+        assertTrue(messagesJson.contains("Customers may return products within 30 days."));
+        assertTrue(messagesJson.contains("Do you know the policy?"));
+        assertTrue(messagesJson.contains("How long is the return window?"));
+        assertTrue(messagesJson.indexOf("Customers may return products within 30 days.")
+                < messagesJson.indexOf("How long is the return window?"));
     }
 
     @Test

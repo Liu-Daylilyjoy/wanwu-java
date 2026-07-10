@@ -438,7 +438,7 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
-    public void ragOpenApiChatUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+    public void ragOpenApiChatLeavesGroundedModelExecutionToAppService() throws Exception {
         AtomicReference<String> upstreamBody = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
@@ -474,7 +474,7 @@ public class WanwuOpenApiControllerTest {
                 RagChatCommand command = invocation.getArgument(0);
                 RagChatResult result = new RagChatResult();
                 result.setRagId(command.getRagId());
-                result.setResponse(command.getOverrideResponse());
+                result.setResponse("openapi rag answer");
                 result.setSearchList(Collections.emptyList());
                 result.setQaSearchList(Collections.emptyList());
                 return result;
@@ -489,19 +489,10 @@ public class WanwuOpenApiControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.output").value("openapi rag answer"));
 
-            assertTrue(upstreamBody.get().contains("\"stream\":true"));
-            assertTrue(upstreamBody.get().contains("\"role\":\"user\",\"content\":\"openapi previous question\""));
-            assertTrue(upstreamBody.get().contains("\"role\":\"assistant\",\"content\":\"openapi previous answer\""));
-            assertTrue(upstreamBody.get().contains("\"content\":\"what is policy\""));
-            assertTrue(upstreamBody.get().indexOf("\"content\":\"openapi previous question\"")
-                    < upstreamBody.get().indexOf("\"content\":\"openapi previous answer\""));
-            assertTrue(upstreamBody.get().indexOf("\"content\":\"openapi previous answer\"")
-                    < upstreamBody.get().indexOf("\"content\":\"what is policy\""));
-            assertTrue(!upstreamBody.get().contains("openapi ignored question"));
+            assertEquals(null, upstreamBody.get());
             ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
             verify(appService).streamRagChat(captor.capture());
-            assertEquals("openapi rag answer", captor.getValue().getOverrideResponse());
-            verify(appService).getPublishedRag(any(RagDetailQuery.class));
+            assertEquals(null, captor.getValue().getOverrideResponse());
         } finally {
             server.stop(0);
         }

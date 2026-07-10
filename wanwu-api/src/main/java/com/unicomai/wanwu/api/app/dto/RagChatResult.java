@@ -12,6 +12,7 @@ public class RagChatResult implements Serializable {
     private String ragId;
     private String question;
     private String response;
+    private List<String> responseChunks = new ArrayList<String>();
     private List<Map<String, Object>> searchList = new ArrayList<>();
     private List<Map<String, Object>> qaSearchList = new ArrayList<>();
     private long createdAt;
@@ -38,6 +39,14 @@ public class RagChatResult implements Serializable {
 
     public void setResponse(String response) {
         this.response = response;
+    }
+
+    public List<String> getResponseChunks() {
+        return responseChunks;
+    }
+
+    public void setResponseChunks(List<String> responseChunks) {
+        this.responseChunks = responseChunks == null ? new ArrayList<String>() : responseChunks;
     }
 
     public List<Map<String, Object>> getSearchList() {

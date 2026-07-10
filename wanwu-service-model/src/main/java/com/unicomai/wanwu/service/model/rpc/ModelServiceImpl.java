@@ -14,6 +14,8 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordQuery;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.dto.ModelStatusCommand;
@@ -30,6 +32,7 @@ import com.unicomai.wanwu.common.core.model.ServiceNames;
 import com.unicomai.wanwu.common.rpc.RpcConstants;
 import com.unicomai.wanwu.service.model.persistence.entity.ModelRecordEntity;
 import com.unicomai.wanwu.service.model.persistence.mapper.ModelRecordMapper;
+import com.unicomai.wanwu.service.model.inference.OpenAiCompatibleInferenceClient;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -87,6 +90,7 @@ public class ModelServiceImpl implements ModelService {
     private final List<ModelExperienceDialogRecordInfo> experienceDialogRecords = new ArrayList<ModelExperienceDialogRecordInfo>();
     private final AtomicLong nextId = new AtomicLong(100);
     private final AtomicLong nextExperienceId = new AtomicLong(1000);
+    private final OpenAiCompatibleInferenceClient inferenceClient = new OpenAiCompatibleInferenceClient();
     @Autowired(required = false)
     private ModelRecordMapper modelRecordMapper;
 
@@ -196,6 +200,32 @@ public class ModelServiceImpl implements ModelService {
             throw new IllegalArgumentException("model permission denied: " + modelId);
         }
         return copyForUser(model, userId);
+    }
+
+    @Override
+    public ModelInvokeResult invokeModel(ModelInvokeCommand command) {
+        if (command == null || isBlank(command.getModelId())) {
+            throw new IllegalArgumentException("modelId cannot be empty");
+        }
+        ModelInfo model = getModel(command.getUserId(), command.getOrgId(), command.getModelId());
+        if (!Boolean.TRUE.equals(model.getIsActive())) {
+            throw new IllegalArgumentException("model is inactive: " + command.getModelId());
+        }
+        validateModelOperation(model, command.getOperation());
+        return inferenceClient.invoke(model, command);
+    }
+
+    private void validateModelOperation(ModelInfo model, String operation) {
+        String type = defaultIfBlank(model.getModelType(), "").toLowerCase(Locale.ENGLISH);
+        String value = defaultIfBlank(operation, "").toLowerCase(Locale.ENGLISH);
+        boolean valid = ("chat".equals(value) && MODEL_TYPE_LLM.equals(type))
+                || ("embeddings".equals(value) && MODEL_TYPE_EMBEDDING.equals(type))
+                || ("multimodal-embeddings".equals(value) && MODEL_TYPE_MULTI_EMBEDDING.equals(type))
+                || ("rerank".equals(value) && MODEL_TYPE_RERANK.equals(type))
+                || ("multimodal-rerank".equals(value) && MODEL_TYPE_MULTI_RERANK.equals(type));
+        if (!valid) {
+            throw new IllegalArgumentException("model type does not support operation: " + operation);
+        }
     }
 
     @Override

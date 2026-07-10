@@ -11,6 +11,8 @@ import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogRecordSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogSaveCommand;
 import com.unicomai.wanwu.api.model.dto.ModelListQuery;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.api.model.dto.ModelListResult;
 import com.unicomai.wanwu.api.model.dto.ModelStatusCommand;
 import com.unicomai.wanwu.api.model.dto.ModelTypeQuery;
@@ -35,6 +37,8 @@ public interface ModelService {
     void changeModelStatus(ModelStatusCommand command);
 
     ModelInfo getModel(String userId, String orgId, String modelId);
+
+    ModelInvokeResult invokeModel(ModelInvokeCommand command);
 
     List<String> listModelIdsByUuids(List<String> uuids);
 

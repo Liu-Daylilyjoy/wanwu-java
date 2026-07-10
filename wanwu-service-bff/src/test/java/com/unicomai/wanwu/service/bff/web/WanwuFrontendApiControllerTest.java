@@ -4454,7 +4454,7 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
-    public void ragDraftChatUsesConfiguredOpenAiCompatibleModelBeforePersisting() throws Exception {
+    public void ragDraftChatLeavesGroundedModelExecutionToAppService() throws Exception {
         AtomicReference<String> upstreamBody = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
@@ -4482,7 +4482,8 @@ public class WanwuFrontendApiControllerTest {
                 RagChatResult result = new RagChatResult();
                 result.setRagId(command.getRagId());
                 result.setQuestion(command.getQuestion());
-                result.setResponse(command.getOverrideResponse());
+                result.setResponse("rag answer");
+                result.setResponseChunks(Arrays.asList("rag ", "answer"));
                 result.setSearchList(Collections.emptyList());
                 result.setQaSearchList(Collections.emptyList());
                 result.setCreatedAt(1782806400000L);
@@ -4501,22 +4502,13 @@ public class WanwuFrontendApiControllerTest {
                                     + "{\"query\":\"ignored question\",\"response\":\"ignored answer\",\"needHistory\":false}]}"))
                     .andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-                    .andExpect(content().string(containsString("rag answer")));
+                    .andExpect(content().string(containsString("\"delta\":\"rag \"")))
+                    .andExpect(content().string(containsString("\"delta\":\"answer\"")));
 
-            assertTrue(upstreamBody.get().contains("\"stream\":true"));
-            assertTrue(upstreamBody.get().contains("\"role\":\"user\",\"content\":\"previous question\""));
-            assertTrue(upstreamBody.get().contains("\"role\":\"assistant\",\"content\":\"previous answer\""));
-            assertTrue(upstreamBody.get().contains("\"type\":\"text\",\"text\":\"what is policy\""));
-            assertTrue(upstreamBody.get().contains("\"type\":\"image_url\",\"image_url\":{\"url\":\"https://files.example.test/diagram.png\"}"));
-            assertTrue(!upstreamBody.get().contains("notes.txt"));
-            assertTrue(upstreamBody.get().indexOf("\"content\":\"previous question\"")
-                    < upstreamBody.get().indexOf("\"content\":\"previous answer\""));
-            assertTrue(upstreamBody.get().indexOf("\"content\":\"previous answer\"")
-                    < upstreamBody.get().indexOf("\"type\":\"text\",\"text\":\"what is policy\""));
-            assertTrue(!upstreamBody.get().contains("ignored question"));
+            assertEquals(null, upstreamBody.get());
             ArgumentCaptor<RagChatCommand> captor = forClass(RagChatCommand.class);
             verify(appService).streamRagChat(captor.capture());
-            assertEquals("rag answer", captor.getValue().getOverrideResponse());
+            assertEquals(null, captor.getValue().getOverrideResponse());
         } finally {
             server.stop(0);
         }

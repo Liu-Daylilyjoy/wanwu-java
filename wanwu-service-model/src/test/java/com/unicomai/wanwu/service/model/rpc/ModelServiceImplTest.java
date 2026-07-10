@@ -1,6 +1,9 @@
 package com.unicomai.wanwu.service.model.rpc;
 
+import com.sun.net.httpserver.HttpServer;
 import com.unicomai.wanwu.api.model.dto.ModelInfo;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
+import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogDeleteCommand;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogInfo;
 import com.unicomai.wanwu.api.model.dto.ModelExperienceDialogListQuery;
@@ -27,6 +30,10 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,6 +69,55 @@ public class ModelServiceImplTest {
         assertEquals("builtin", first.getImportSource());
         assertNotNull(first.getConfig());
         assertFalse(first.getTags().isEmpty());
+    }
+
+    @Test
+    public void invokeModelAggregatesOpenAiCompatibleChatStream() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            byte[] response = ("data: {\"choices\":[{\"delta\":{\"content\":\"grounded \"}}]}\n\n"
+                    + "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}],"
+                    + "\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"total_tokens\":10}}\n\n"
+                    + "data: [DONE]\n\n").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            ModelUpsertCommand create = new ModelUpsertCommand();
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            create.setProvider("OpenAI-API-compatible");
+            create.setModelType("llm");
+            create.setModel("test-chat");
+            create.setDisplayName("Test Chat");
+            Map<String, Object> config = new LinkedHashMap<String, Object>();
+            config.put("apiKey", "local-test-key");
+            config.put("inferUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+            create.setConfig(config);
+            ModelInfo model = service.importModel(create);
+
+            ModelInvokeCommand command = new ModelInvokeCommand();
+            command.setUserId("dev-admin");
+            command.setOrgId("default-org");
+            command.setModelId(model.getModelId());
+            command.setOperation("chat");
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("stream", true);
+            payload.put("messages", Collections.singletonList(
+                    Collections.<String, Object>singletonMap("content", "question")));
+            command.setPayload(payload);
+
+            ModelInvokeResult result = service.invokeModel(command);
+
+            assertEquals("grounded answer", result.getContent());
+            assertEquals(Arrays.asList("grounded ", "answer"), result.getChunks());
+            assertEquals(10, ((Number) result.getUsage().get("total_tokens")).intValue());
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
