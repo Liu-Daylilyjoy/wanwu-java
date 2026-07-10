@@ -2059,6 +2059,7 @@ public class AppServiceImpl implements AppService {
         List<String> chunks = chatflowExecutionChunks(steps, response);
         List<Map<String, Object>> searchList = chatflowExecutionSearchList(steps);
         List<Map<String, Object>> nodeEvents = chatflowExecutionNodeEvents(steps);
+        Map<String, Object> usage = chatflowExecutionUsage(steps);
         long now = clock.millis();
         AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
         message.setCreatedAt(now);
@@ -2092,6 +2093,7 @@ public class AppServiceImpl implements AppService {
         result.put("chunks", chunks);
         result.put("search_list", searchList);
         result.put("node_events", nodeEvents);
+        result.put("usage", usage);
         return result;
     }
 
@@ -3279,6 +3281,16 @@ public class AppServiceImpl implements AppService {
             events.add(event);
         }
         return events;
+    }
+
+    private Map<String, Object> chatflowExecutionUsage(List<Map<String, Object>> steps) {
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            Map<String, Object> usage = mapValue(mapValue(steps.get(i).get("output")).get("usage"));
+            if (!usage.isEmpty()) {
+                return new LinkedHashMap<String, Object>(usage);
+            }
+        }
+        return Collections.emptyMap();
     }
 
     private Map<String, Object> chatflowConversationInfo(AssistantConversationRecord conversation) {

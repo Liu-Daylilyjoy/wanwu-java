@@ -585,8 +585,18 @@ public class WanwuOpenApiControllerTest {
         chatResult.put("code", 0);
         chatResult.put("message", "success");
         chatResult.put("conversation_id", conversationId);
-        chatResult.put("response", "Chatflow response: hello chatflow");
+        chatResult.put("response", "Hello from Chatflow");
         chatResult.put("finish", 1);
+        chatResult.put("run_id", "workflow-run-chatflow-001");
+        chatResult.put("chunks", java.util.Arrays.asList("Hello from ", "Chatflow"));
+        chatResult.put("search_list", Collections.emptyList());
+        chatResult.put("node_events", Collections.singletonList(
+                Collections.<String, Object>singletonMap("node_id", "llm-1")));
+        Map<String, Object> chatUsage = new LinkedHashMap<>();
+        chatUsage.put("prompt_tokens", 8);
+        chatUsage.put("completion_tokens", 3);
+        chatUsage.put("total_tokens", 11);
+        chatResult.put("usage", chatUsage);
         when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class))).thenReturn(chatResult);
 
         Map<String, Object> userMessage = new LinkedHashMap<>();
@@ -628,14 +638,29 @@ public class WanwuOpenApiControllerTest {
                 .andReturn().getResponse().getContentAsString();
         assertEquals(conversationId, JsonPath.read(createdBody, "$.data.conversation_id"));
 
-        mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
+        String chatBody = mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
                         .header("Authorization", "Bearer dev-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uuid\":\"chatflow-openapi-001\",\"conversation_id\":\"" + conversationId + "\",\"query\":\"hello chatflow\",\"parameters\":{\"city\":\"Beijing\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
-                .andExpect(content().string(containsString("hello chatflow")))
-                .andExpect(content().string(containsString(conversationId)));
+                .andExpect(header().string("Cache-Control", "no-cache"))
+                .andExpect(header().string("X-Accel-Buffering", "no"))
+                .andExpect(content().string(containsString("event: conversation.chat.created")))
+                .andExpect(content().string(containsString("event: conversation.message.delta")))
+                .andExpect(content().string(containsString("event: conversation.chat.completed")))
+                .andExpect(content().string(containsString("event: done")))
+                .andExpect(content().string(containsString("Hello from Chatflow")))
+                .andExpect(content().string(containsString("\"token_count\":11")))
+                .andExpect(content().string(containsString(conversationId)))
+                .andReturn().getResponse().getContentAsString();
+        assertTrue(chatBody.indexOf("event: conversation.chat.created")
+                < chatBody.indexOf("event: conversation.chat.in_progress"));
+        assertTrue(chatBody.indexOf("event: conversation.chat.in_progress")
+                < chatBody.indexOf("event: conversation.message.delta"));
+        assertTrue(chatBody.indexOf("event: conversation.message.completed")
+                < chatBody.indexOf("event: conversation.chat.completed"));
+        assertTrue(chatBody.indexOf("event: conversation.chat.completed") < chatBody.indexOf("event: done"));
 
         mockMvc.perform(post("/service/api/openapi/v1/chatflow/conversation/message/list")
                         .header("Authorization", "Bearer dev-token")

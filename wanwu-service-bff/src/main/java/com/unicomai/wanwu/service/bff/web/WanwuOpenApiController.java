@@ -559,7 +559,12 @@ public class WanwuOpenApiController {
         try {
             Map<String, Object> data = serviceChatflowChat(ctx, body);
             recordAppStatistic(ctx, chatflowId, CHATFLOW_APP_TYPE, true, true, startedAt);
-            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body("data: " + toJson(data) + "\n\n");
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .header(HttpHeaders.CACHE_CONTROL, "no-cache")
+                    .header(HttpHeaders.CONNECTION, "keep-alive")
+                    .header("X-Accel-Buffering", "no")
+                    .body(chatflowSse(data, chatflowId));
         } catch (IllegalArgumentException ex) {
             recordAppStatistic(ctx, chatflowId, CHATFLOW_APP_TYPE, false, true, startedAt);
             return ResponseEntity.badRequest()
@@ -1676,6 +1681,125 @@ public class WanwuOpenApiController {
     private String legacyOpenApiSse(Map<String, Object> response) {
         return "data: " + toJson(response) + "\n\n"
                 + "data: [DONE]\n\n";
+    }
+
+    private String chatflowSse(Map<String, Object> result, String chatflowId) {
+        Map<String, Object> data = result == null
+                ? Collections.<String, Object>emptyMap()
+                : result;
+        String conversationId = firstText(data, "conversation_id", "conversationId");
+        String runId = defaultIfBlank(firstText(data, "run_id", "runId"), "chatflow-run-" + compactId());
+        String messageId = runId + "-message";
+        String sectionId = runId + "-section";
+        String response = text(data, "response");
+        StringBuilder stream = new StringBuilder();
+
+        Map<String, Object> created = chatflowChatState(
+                runId, conversationId, chatflowId, sectionId, "created");
+        appendChatflowSseEvent(stream, 1, "conversation.chat.created", created);
+        Map<String, Object> inProgress = chatflowChatState(
+                runId, conversationId, chatflowId, sectionId, "in_progress");
+        appendChatflowSseEvent(stream, 2, "conversation.chat.in_progress", inProgress);
+
+        int eventId = 3;
+        for (String chunk : chatflowChunks(data, response)) {
+            appendChatflowSseEvent(stream, eventId++, "conversation.message.delta",
+                    chatflowMessageState(messageId, runId, conversationId, chatflowId, sectionId, chunk));
+        }
+        Map<String, Object> completedMessage = chatflowMessageState(
+                messageId, runId, conversationId, chatflowId, sectionId, response);
+        completedMessage.put("search_list", data.get("search_list"));
+        completedMessage.put("node_events", data.get("node_events"));
+        appendChatflowSseEvent(stream, eventId++, "conversation.message.completed", completedMessage);
+
+        Map<String, Object> completed = chatflowChatState(
+                runId, conversationId, chatflowId, sectionId, "completed");
+        completed.put("usage", chatflowUsage(data.get("usage")));
+        appendChatflowSseEvent(stream, eventId++, "conversation.chat.completed", completed);
+        Map<String, Object> done = new LinkedHashMap<>();
+        done.put("debug_url", "/workflow?execute_id=" + runId + "&workflow_id=" + chatflowId);
+        appendChatflowSseEvent(stream, eventId, "done", done);
+        return stream.toString();
+    }
+
+    private Map<String, Object> chatflowChatState(String runId,
+                                                   String conversationId,
+                                                   String chatflowId,
+                                                   String sectionId,
+                                                   String status) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("id", runId);
+        state.put("conversation_id", conversationId);
+        state.put("bot_id", chatflowId);
+        state.put("status", status);
+        state.put("execute_id", runId);
+        state.put("section_id", sectionId);
+        return state;
+    }
+
+    private Map<String, Object> chatflowMessageState(String messageId,
+                                                      String runId,
+                                                      String conversationId,
+                                                      String chatflowId,
+                                                      String sectionId,
+                                                      String content) {
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("id", messageId);
+        message.put("chat_id", runId);
+        message.put("conversation_id", conversationId);
+        message.put("bot_id", chatflowId);
+        message.put("role", "assistant");
+        message.put("type", "answer");
+        message.put("content", defaultIfBlank(content, ""));
+        message.put("content_type", "text");
+        message.put("section_id", sectionId);
+        return message;
+    }
+
+    private List<String> chatflowChunks(Map<String, Object> data, String response) {
+        List<String> chunks = new ArrayList<>();
+        Object value = data.get("chunks");
+        if (value instanceof List) {
+            for (Object item : (List<?>) value) {
+                if (item != null && !String.valueOf(item).isEmpty()) {
+                    chunks.add(String.valueOf(item));
+                }
+            }
+        }
+        if (chunks.isEmpty() && !isBlank(response)) {
+            chunks.add(response);
+        }
+        return chunks;
+    }
+
+    private Map<String, Object> chatflowUsage(Object value) {
+        Map<String, Object> source = objectMap(value);
+        Map<String, Object> usage = new LinkedHashMap<>();
+        int inputCount = firstInt(source, "input_count", "input_tokens", "prompt_tokens");
+        int outputCount = firstInt(source, "output_count", "output_tokens", "completion_tokens");
+        int tokenCount = firstInt(source, "token_count", "total_tokens");
+        usage.put("token_count", tokenCount > 0 ? tokenCount : inputCount + outputCount);
+        usage.put("output_count", outputCount);
+        usage.put("input_count", inputCount);
+        return usage;
+    }
+
+    private int firstInt(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                return intValue(source.get(key), 0);
+            }
+        }
+        return 0;
+    }
+
+    private void appendChatflowSseEvent(StringBuilder stream,
+                                        int id,
+                                        String event,
+                                        Map<String, Object> data) {
+        stream.append("id: ").append(id).append('\n');
+        stream.append("event: ").append(event).append('\n');
+        stream.append("data: ").append(toJson(data)).append("\n\n");
     }
 
     private String toJson(Object value) {
