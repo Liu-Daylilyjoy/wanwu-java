@@ -130,6 +130,7 @@ import com.unicomai.wanwu.api.app.dto.WorkflowRunCommand;
 import com.unicomai.wanwu.api.app.dto.WorkflowRunResult;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
@@ -271,6 +272,8 @@ public class AppServiceImpl implements AppService {
     private SafetyService safetyService;
     @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
     private ModelService modelService;
+    @DubboReference(version = RpcConstants.VERSION, check = false, timeout = RpcConstants.DEFAULT_TIMEOUT_MILLIS)
+    private McpService mcpService;
 
     @Autowired
     public AppServiceImpl(ApplicationRepository applicationRepository) {
@@ -317,12 +320,23 @@ public class AppServiceImpl implements AppService {
                    KnowledgeService knowledgeService,
                    SafetyService safetyService,
                    ModelService modelService) {
+        this(applicationRepository, clock, objectMapper, knowledgeService, safetyService, modelService, null);
+    }
+
+    AppServiceImpl(ApplicationRepository applicationRepository,
+                   Clock clock,
+                   ObjectMapper objectMapper,
+                   KnowledgeService knowledgeService,
+                   SafetyService safetyService,
+                   ModelService modelService,
+                   McpService mcpService) {
         this.applicationRepository = applicationRepository;
         this.clock = clock;
         this.objectMapper = objectMapper;
         this.knowledgeService = knowledgeService;
         this.safetyService = safetyService;
         this.modelService = modelService;
+        this.mcpService = mcpService;
     }
 
     @Override
@@ -6867,7 +6881,11 @@ public class AppServiceImpl implements AppService {
                 output.put("output", text);
             }
         } else if (workflowIsIntentNode(node, type, lowerType)) {
-            output.putAll(workflowIntentOutput(node, input));
+            if (APP_TYPE_CHATFLOW.equals(workflow.getAppType())) {
+                output.putAll(chatflowIntentOutput(node, input, userId, orgId));
+            } else {
+                output.putAll(workflowIntentOutput(node, input));
+            }
         } else if (workflowIsSelectorNode(node, type, lowerType)) {
             output.putAll(workflowSelectorOutput(node, input));
         } else if (workflowIsInputNode(node, type, lowerType)) {
@@ -6894,7 +6912,7 @@ public class AppServiceImpl implements AppService {
         } else if (workflowIsDocumentParseNode(node, type, lowerType)) {
             output.putAll(workflowDocumentParseOutput(node, input));
         } else if (workflowIsToolNode(node, type, lowerType)) {
-            output.putAll(workflowToolOutput(node, input));
+            output.putAll(workflowToolOutput(node, input, userId, orgId));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -6958,6 +6976,132 @@ public class AppServiceImpl implements AppService {
         output.put("response", intent);
         output.put("text", intent);
         return output;
+    }
+
+    private Map<String, Object> chatflowIntentOutput(Map<String, Object> node,
+                                                      Map<String, Object> input,
+                                                      String userId,
+                                                      String orgId) {
+        String query = chatflowInputQuestion(input);
+        List<String> intents = workflowIntentNames(node);
+        String modelId = chatflowLlmModelId(node, input);
+        ModelInvokeResult modelResult = null;
+        if (modelService != null && !isBlank(modelId) && !intents.isEmpty()) {
+            ModelInvokeCommand invocation = new ModelInvokeCommand();
+            invocation.setUserId(userId);
+            invocation.setOrgId(orgId);
+            invocation.setModelId(modelId);
+            invocation.setOperation("chat");
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("stream", false);
+            payload.put("messages", chatflowIntentMessages(node, input, query, intents));
+            copyChatflowLlmParameters(node, input, payload);
+            invocation.setPayload(payload);
+            try {
+                modelResult = modelService.invokeModel(invocation);
+            } catch (RuntimeException ignored) {
+                modelResult = null;
+            }
+        }
+        IntentClassification classification = chatflowIntentClassification(
+                modelResult == null ? "" : modelResult.getContent(), intents);
+        if (classification.classificationId < 0) {
+            int fallbackId = workflowIntentClassification(query, intents);
+            String fallbackReason = fallbackId < 0 ? "No configured intent matched" : "Matched by fallback rules";
+            classification = new IntentClassification(fallbackId, fallbackReason);
+        }
+        int classificationId = classification.classificationId;
+        String intent = classificationId >= 0 && classificationId < intents.size()
+                ? intents.get(classificationId)
+                : "";
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("classificationId", classificationId);
+        output.put("intent", intent);
+        output.put("branch", classificationId >= 0 ? "branch_" + classificationId : "default");
+        output.put("reason", classification.reason);
+        output.put("output", intent);
+        output.put("result", intent);
+        output.put("response", intent);
+        output.put("text", intent);
+        output.put("modelId", modelId);
+        output.put("providerFallback", modelResult == null || isBlank(modelResult.getContent()));
+        if (modelResult != null) {
+            output.put("usage", modelResult.getUsage());
+        }
+        return output;
+    }
+
+    private List<Map<String, Object>> chatflowIntentMessages(Map<String, Object> node,
+                                                              Map<String, Object> input,
+                                                              String query,
+                                                              List<String> intents) {
+        List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+        Object configuredSystemPrompt = workflowConfiguredParam(node, "llmParam", "systemPrompt", input);
+        addChatflowTextMessage(messages, "system", configuredSystemPrompt == null
+                ? "Classify the user request into one configured intent."
+                : String.valueOf(configuredSystemPrompt));
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Return JSON only: {\"classificationId\":<zero-based integer>,\"reason\":\"<brief reason>\"}.\n");
+        prompt.append("Configured intents:\n");
+        for (int i = 0; i < intents.size(); i++) {
+            prompt.append(i).append(": ").append(intents.get(i)).append('\n');
+        }
+        prompt.append("User request: ").append(query);
+        addChatflowTextMessage(messages, "user", prompt.toString());
+        return messages;
+    }
+
+    private IntentClassification chatflowIntentClassification(String content, List<String> intents) {
+        String normalized = defaultIfBlank(content, "").trim();
+        if (normalized.startsWith("```")) {
+            normalized = normalized.replaceFirst("^```(?:json)?\\s*", "")
+                    .replaceFirst("\\s*```$", "").trim();
+        }
+        if (!isBlank(normalized)) {
+            try {
+                Map<String, Object> parsed = objectMapper.readValue(normalized, MAP_TYPE);
+                Object rawId = firstPresent(parsed, "classificationId", "classification_id", "intentId", "intent_id");
+                int classificationId = chatflowIntentId(rawId, intents.size());
+                if (classificationId < 0) {
+                    classificationId = workflowIntentNameIndex(
+                            firstNonBlank(stringValue(parsed.get("intent")), stringValue(parsed.get("name"))), intents);
+                }
+                if (classificationId >= 0) {
+                    return new IntentClassification(classificationId,
+                            defaultIfBlank(stringValue(parsed.get("reason")), "Matched by intent model"));
+                }
+            } catch (IOException ignored) {
+                int classificationId = workflowIntentNameIndex(normalized, intents);
+                if (classificationId >= 0) {
+                    return new IntentClassification(classificationId, "Matched by intent model");
+                }
+            }
+        }
+        return new IntentClassification(-1, "");
+    }
+
+    private int chatflowIntentId(Object value, int intentCount) {
+        if (value == null) {
+            return -1;
+        }
+        try {
+            int id = value instanceof Number
+                    ? ((Number) value).intValue()
+                    : Integer.parseInt(String.valueOf(value));
+            return id >= 0 && id < intentCount ? id : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private int workflowIntentNameIndex(String value, List<String> intents) {
+        String normalized = defaultIfBlank(value, "").trim();
+        for (int i = 0; i < intents.size(); i++) {
+            if (normalized.equalsIgnoreCase(intents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private List<String> workflowIntentNames(Map<String, Object> node) {
@@ -7880,7 +8024,21 @@ public class AppServiceImpl implements AppService {
         return "1009".equals(type) || semantic.contains("mcp") || semantic.contains("tool node");
     }
 
-    private Map<String, Object> workflowToolOutput(Map<String, Object> node, Map<String, Object> input) {
+    private Map<String, Object> workflowToolOutput(Map<String, Object> node,
+                                                   Map<String, Object> input,
+                                                   String userId,
+                                                   String orgId) {
+        Map<String, Object> mcpConfig = workflowMcpConfig(node);
+        String mcpServerId = workflowMcpServerId(mcpConfig);
+        String toolName = workflowMcpToolName(mcpConfig);
+        if (mcpService != null && !isBlank(mcpServerId) && !isBlank(toolName)) {
+            Map<String, Object> request = new LinkedHashMap<String, Object>();
+            request.put("name", toolName);
+            request.put("arguments", workflowDeclaredInputArguments(node, input));
+            Map<String, Object> response = mcpService.callMcpServerTool(
+                    userId, orgId, mcpServerId, request);
+            return workflowMcpOutput(mcpServerId, toolName, response);
+        }
         List<Map<String, Object>> content = workflowToolContent(node, input);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("content", content);
@@ -7891,6 +8049,79 @@ public class AppServiceImpl implements AppService {
         output.put("output", result);
         output.put("response", result);
         output.put("text", workflowJsonText(content));
+        output.put("providerFallback", true);
+        return output;
+    }
+
+    private Map<String, Object> workflowMcpConfig(Map<String, Object> node) {
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        Object raw = firstPresent(inputs, "mcpInfoList", "mcpInfo", "toolInfoList", "toolInfo");
+        for (Object item : listValue(raw)) {
+            Map<String, Object> config = mapValue(item);
+            if (!config.isEmpty()) {
+                return config;
+            }
+        }
+        return mapValue(raw);
+    }
+
+    private String workflowMcpServerId(Map<String, Object> config) {
+        String id = textValue(config,
+                "mcpServerId", "mcp_server_id", "serverId", "server_id", "mcpId", "mcp_id");
+        if (!isBlank(id)) {
+            return id;
+        }
+        Map<String, Object> server = mapValue(firstPresent(config, "server", "mcpServer", "mcp"));
+        return textValue(server,
+                "mcpServerId", "mcp_server_id", "serverId", "server_id", "mcpId", "mcp_id", "id");
+    }
+
+    private String workflowMcpToolName(Map<String, Object> config) {
+        String name = textValue(config, "toolName", "tool_name", "methodName", "method_name", "actionName");
+        if (!isBlank(name)) {
+            return name;
+        }
+        Map<String, Object> tool = mapValue(firstPresent(config, "tool", "toolInfo", "action", "method"));
+        name = textValue(tool, "toolName", "tool_name", "methodName", "method_name", "actionName", "name");
+        if (!isBlank(name)) {
+            return name;
+        }
+        return textValue(config, "name");
+    }
+
+    private Map<String, Object> workflowDeclaredInputArguments(Map<String, Object> node,
+                                                                Map<String, Object> input) {
+        Map<String, Object> arguments = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = mapValue(node.get("data"));
+        Map<String, Object> inputs = mapValue(data.get("inputs"));
+        for (Object item : listValue(inputs.get("inputParameters"))) {
+            Map<String, Object> parameter = mapValue(item);
+            String name = textValue(parameter, "name", "key", "field", "variable");
+            if (!isBlank(name) && input.containsKey(name)) {
+                arguments.put(name, input.get(name));
+            }
+        }
+        return arguments;
+    }
+
+    private Map<String, Object> workflowMcpOutput(String mcpServerId,
+                                                   String toolName,
+                                                   Map<String, Object> response) {
+        Map<String, Object> result = response == null
+                ? new LinkedHashMap<String, Object>()
+                : new LinkedHashMap<String, Object>(response);
+        List<Map<String, Object>> content = objectMapList(result.get("content"));
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("mcpServerId", mcpServerId);
+        output.put("toolName", toolName);
+        output.put("result", result);
+        output.put("content", content);
+        output.put("output", result);
+        output.put("response", result);
+        output.put("text", workflowJsonText(content.isEmpty() ? result : content));
+        output.put("providerFallback", false);
+        output.put("providerError", enabled(result.get("isError")));
         return output;
     }
 
@@ -9434,6 +9665,16 @@ public class AppServiceImpl implements AppService {
             this.steps = steps;
             this.edgeEvaluations = edgeEvaluations;
             this.skippedNodeIds = skippedNodeIds;
+        }
+    }
+
+    private static class IntentClassification {
+        private final int classificationId;
+        private final String reason;
+
+        private IntentClassification(int classificationId, String reason) {
+            this.classificationId = classificationId;
+            this.reason = reason;
         }
     }
 

@@ -19,6 +19,9 @@ Date: 2026-07-10
 - Runtime input contains the OpenAPI `parameters` plus reserved aliases `query`, `Query`, `question`, `message`, and `input`, so existing start-node schemas can consume the current user message without frontend changes.
 - LLM nodes invoke `ModelService` only when the owning application is a Chatflow. Workflow LLM behavior remains unchanged.
 - LLM configuration resolves Coze-style `llmParam` values for model id, prompt, system prompt, history switch/rounds, temperature, top-p, frequency penalty, and max tokens.
+- Intent nodes invoke the configured model for Chatflow and parse a structured zero-based `classificationId` and `reason`; invalid or unavailable provider output falls back to the existing deterministic classifier.
+- Knowledge nodes call `KnowledgeService`, and their prompt/search cards can be referenced by downstream LLM nodes. Aggregated cards are returned as `search_list` and persisted with the turn.
+- Configured `type=1009` MCP nodes resolve the server/tool from `mcpInfoList`, pass only declared node inputs as arguments, and call `McpService.callMcpServerTool`. Unconfigured template nodes retain an explicit `providerFallback=true` local preview.
 - When `enableChatHistory=true`, the configured number of persisted prior turns is inserted before the current prompt. Provider chunks and usage metadata are retained in node output.
 - Chat responses expose `run_id`, `chunks`, `search_list`, and `node_events`; chunks, knowledge hits, and node events are also stored with the conversation message.
 - SSE output follows the repository manual: `conversation.chat.created`, `conversation.chat.in_progress`, one `conversation.message.delta` per provider chunk, `conversation.message.completed`, `conversation.chat.completed`, and `done`. Provider token usage is normalized to `input_count`, `output_count`, and `token_count`.
@@ -31,10 +34,13 @@ Date: 2026-07-10
 
 - `AppServiceImplTest#chatflowOpenApiConversationsPersistMessagesAndListState` verifies persisted create, chat, message list, conversation list, and delete behavior.
 - `AppServiceImplTest#chatflowOpenApiChatExecutesConfiguredModelWithConversationHistory` verifies start-to-LLM-to-end graph execution, provider chunks, model parameters, persisted answers, and second-turn history ordering.
+- `AppServiceImplTest#chatflowOpenApiChatGroundsModelWithKnowledgeNodeResults` verifies knowledge evidence reaches the Chatflow LLM and search cards reach the API result.
+- `AppServiceImplTest#chatflowOpenApiChatExecutesConfiguredMcpNode` verifies real MCP dispatch and declared-argument isolation.
+- `AppServiceImplTest#chatflowOpenApiChatUsesConfiguredModelForIntentNode` verifies provider-backed intent classification.
 - `WanwuOpenApiControllerTest#chatflowOpenApiRoutesUseAppServiceConversationState` verifies the OpenAPI route family uses AppService first while preserving the Go-shaped response contracts.
 - `WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies Chatflow OpenAPI service failures are not hidden by the BFF fallback and are counted as failed stream calls.
 - Full `AppServiceImplTest` regression passes on Java 8.
 
 ## Remaining Gap
 
-The Java runtime now executes the supported graph nodes and real model/knowledge/HTTP integrations and reproduces the documented multi-frame SSE contract. Remaining Chatflow parity work is published-versus-draft OpenAPI selection and authorization, real tool/MCP/code-node providers, file upload consumption, failure-node policies, and exact provider/runtime usage attribution.
+The Java runtime now executes the supported graph nodes and real model, knowledge, HTTP, and MCP integrations and reproduces the documented multi-frame SSE contract. Remaining Chatflow parity work is published-versus-draft OpenAPI selection and authorization, general-purpose code-node isolation, file upload consumption, failure-node policies, and exact provider/runtime usage attribution.

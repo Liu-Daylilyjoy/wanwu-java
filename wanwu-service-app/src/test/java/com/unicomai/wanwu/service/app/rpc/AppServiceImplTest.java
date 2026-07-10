@@ -93,6 +93,7 @@ import com.unicomai.wanwu.api.app.dto.RagDetailQuery;
 import com.unicomai.wanwu.api.app.dto.RagUpdateCommand;
 import com.unicomai.wanwu.api.common.ServiceDescriptor;
 import com.unicomai.wanwu.api.knowledge.KnowledgeService;
+import com.unicomai.wanwu.api.mcp.McpService;
 import com.unicomai.wanwu.api.model.ModelService;
 import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
@@ -2841,6 +2842,153 @@ public class AppServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void chatflowOpenApiChatExecutesConfiguredMcpNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        McpService mcpService = mock(McpService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                null, null, null, mcpService);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("McpChat");
+        create.setSchema(chatflowMcpSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("MCP conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        Map<String, Object> providerContent = new LinkedHashMap<>();
+        providerContent.put("type", "text");
+        providerContent.put("text", "provider MCP result");
+        Map<String, Object> providerResult = new LinkedHashMap<>();
+        providerResult.put("isError", false);
+        providerResult.put("content", Collections.singletonList(providerContent));
+        when(mcpService.callMcpServerTool(eq("dev-admin"), eq("default-org"),
+                eq("mcp-server-001"), any(Map.class))).thenReturn(providerResult);
+
+        ChatflowConversationChatCommand chat = chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "find coffee");
+        Map<String, Object> result = service.chatflowOpenApiChat(chat);
+
+        assertTrue(String.valueOf(result.get("response")).contains("provider MCP result"));
+        List<Map<String, Object>> events = castList(result.get("node_events"));
+        Map<String, Object> mcpOutput = castMap(events.get(1).get("output"));
+        assertEquals(false, mcpOutput.get("providerFallback"));
+        assertEquals("mcp-server-001", mcpOutput.get("mcpServerId"));
+        assertEquals("search", mcpOutput.get("toolName"));
+
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        verify(mcpService).callMcpServerTool(eq("dev-admin"), eq("default-org"),
+                eq("mcp-server-001"), captor.capture());
+        assertEquals("search", captor.getValue().get("name"));
+        Map<String, Object> arguments = (Map<String, Object>) captor.getValue().get("arguments");
+        assertEquals(Collections.<String, Object>singletonMap("query", "find coffee"), arguments);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void chatflowOpenApiChatGroundsModelWithKnowledgeNodeResults() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                knowledgeService, null, modelService, null);
+
+        Map<String, Object> hitItem = new LinkedHashMap<>();
+        hitItem.put("title", "ReturnsPolicy.txt");
+        hitItem.put("snippet", "Returns are accepted within 30 days.");
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("prompt", "Returns are accepted within 30 days.");
+        hit.put("score", Collections.singletonList(0.94D));
+        hit.put("searchList", Collections.singletonList(hitItem));
+        when(knowledgeService.hitKnowledge(eq("dev-admin"), eq("default-org"), any(Map.class)))
+                .thenReturn(hit);
+        ModelInvokeResult modelResult = new ModelInvokeResult();
+        modelResult.setContent("The return window is 30 days.");
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenReturn(modelResult);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("KnowledgeChat");
+        create.setSchema(chatflowKnowledgeModelSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Knowledge conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        Map<String, Object> result = service.chatflowOpenApiChat(chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "How long can I return it?"));
+
+        assertEquals("The return window is 30 days.", result.get("response"));
+        List<Map<String, Object>> searchList = castList(result.get("search_list"));
+        assertEquals(1, searchList.size());
+        assertEquals("ReturnsPolicy.txt", searchList.get(0).get("title"));
+        ArgumentCaptor<ModelInvokeCommand> modelCaptor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService).invokeModel(modelCaptor.capture());
+        String messages = String.valueOf(modelCaptor.getValue().getPayload().get("messages"));
+        assertTrue(messages.contains("Returns are accepted within 30 days."));
+        ArgumentCaptor<Map> knowledgeCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(knowledgeService).hitKnowledge(eq("dev-admin"), eq("default-org"), knowledgeCaptor.capture());
+        assertEquals("How long can I return it?", knowledgeCaptor.getValue().get("question"));
+    }
+
+    @Test
+    public void chatflowOpenApiChatUsesConfiguredModelForIntentNode() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                null, null, modelService, null);
+
+        ModelInvokeResult modelResult = new ModelInvokeResult();
+        modelResult.setContent("{\"classificationId\":1,\"reason\":\"The user reports a service failure\"}");
+        when(modelService.invokeModel(any(ModelInvokeCommand.class))).thenReturn(modelResult);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("IntentChat");
+        create.setSchema(chatflowIntentSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Intent conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        Map<String, Object> result = service.chatflowOpenApiChat(chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "The delivery never arrived"));
+
+        assertEquals("Complaint", result.get("response"));
+        Map<String, Object> intentOutput = castMap(castList(result.get("node_events")).get(1).get("output"));
+        assertEquals(1, intentOutput.get("classificationId"));
+        assertEquals("The user reports a service failure", intentOutput.get("reason"));
+        assertEquals(false, intentOutput.get("providerFallback"));
+        ArgumentCaptor<ModelInvokeCommand> captor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService).invokeModel(captor.capture());
+        assertEquals("llm-intent-001", captor.getValue().getModelId());
+        String messages = String.valueOf(captor.getValue().getPayload().get("messages"));
+        assertTrue(messages.contains("0: Consultation"));
+        assertTrue(messages.contains("1: Complaint"));
+        assertTrue(messages.contains("The delivery never arrived"));
+    }
+
+    @Test
     public void apiKeyLifecycleMatchesGoUserOpenApiKeyBehavior() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
@@ -4352,6 +4500,75 @@ public class AppServiceImplTest {
                 + "],\"edges\":["
                 + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"llm-1\"},"
                 + "{\"sourceNodeID\":\"llm-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowMcpSchema() {
+        return "{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"mcp-1\",\"type\":\"1009\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"Search\",\"subTitle\":\"MCP Tool\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"result\"}],"
+                + "\"inputs\":{"
+                + "\"inputParameters\":[{\"name\":\"query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"mcpInfoList\":[{\"mcpServerId\":\"mcp-server-001\",\"toolName\":\"search\"}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"End\"},\"inputs\":{\"inputParameters\":[{"
+                + "\"name\":\"output\",\"input\":{\"type\":\"object\",\"value\":{"
+                + "\"type\":\"ref\",\"content\":{\"blockID\":\"mcp-1\",\"name\":\"result.content\"}}}}]}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"mcp-1\"},"
+                + "{\"sourceNodeID\":\"mcp-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowKnowledgeModelSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"knowledge-1\",\"type\":\"1006\",\"data\":{\"nodeMeta\":{\"title\":\"Knowledge\"},"
+                + "\"outputs\":[{\"type\":\"object\",\"name\":\"output\"}],\"inputs\":{"
+                + "\"inputParameters\":[{\"name\":\"Query\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"datasetParam\":[{\"name\":\"knowledgeList\",\"input\":{\"value\":{\"type\":\"literal\","
+                + "\"content\":[\"kb-policy-001\"]}}},{\"name\":\"topK\",\"input\":{\"value\":{\"type\":\"literal\","
+                + "\"content\":3}}}]}}},"
+                + "{\"id\":\"llm-1\",\"type\":\"3\",\"data\":{\"nodeMeta\":{\"title\":\"Answer\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],\"inputs\":{"
+                + "\"inputParameters\":[{\"name\":\"evidence\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"knowledge-1\",\"name\":\"output.prompt\"}}}}],"
+                + "\"llmParam\":["
+                + literalChatflowParam("modelId", "llm-chatflow-knowledge-001") + ","
+                + literalChatflowParam("prompt", "Question: {{Query}} Evidence: {{evidence}}")
+                + "]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"llm-1\",\"name\":\"output\"}}}}]}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"knowledge-1\"},"
+                + "{\"sourceNodeID\":\"knowledge-1\",\"targetNodeID\":\"llm-1\"},"
+                + "{\"sourceNodeID\":\"llm-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowIntentSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"intent-1\",\"type\":\"22\",\"data\":{\"nodeMeta\":{\"title\":\"Intent\"},"
+                + "\"outputs\":[{\"type\":\"integer\",\"name\":\"classificationId\"},"
+                + "{\"type\":\"string\",\"name\":\"intent\"},{\"type\":\"string\",\"name\":\"reason\"}],"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"query\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"llmParam\":{\"modelId\":\"llm-intent-001\",\"temperature\":0.1},"
+                + "\"intents\":[{\"name\":\"Consultation\"},{\"name\":\"Complaint\"}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"intent-1\",\"name\":\"intent\"}}}}]}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"intent-1\"},"
+                + "{\"sourceNodeID\":\"intent-1\",\"targetNodeID\":\"900001\"}]}";
     }
 
     private String literalChatflowParam(String name, Object value) {
