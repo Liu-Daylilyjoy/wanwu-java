@@ -172,6 +172,7 @@ services:
       SPRING_DATASOURCE_URL: ${WANWU_APP_DATASOURCE_URL:-jdbc:mysql://mysql:3306/app_service?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=Asia/Shanghai}
       SPRING_DATASOURCE_USERNAME: ${WANWU_APP_DATASOURCE_USERNAME:-root}
       SPRING_DATASOURCE_PASSWORD: ${WANWU_APP_DATASOURCE_PASSWORD:-}
+      WANWU_BFF_INTERNAL_BASE_URL: ${WANWU_BFF_INTERNAL_BASE_URL:-http://bff:8080}
       JAVA_OPTS: ${WANWU_APP_JAVA_OPTS:-}
     ports:
       - "8086:8086"

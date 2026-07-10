@@ -25,6 +25,8 @@ Date: 2026-07-10
 - When `enableChatHistory=true`, the configured number of persisted prior turns is inserted before the current prompt. Provider chunks and usage metadata are retained in node output.
 - Chat responses expose `run_id`, `chunks`, `search_list`, and `node_events`; chunks, knowledge hits, and node events are also stored with the conversation message.
 - SSE output follows the repository manual: `conversation.chat.created`, `conversation.chat.in_progress`, one `conversation.message.delta` per provider chunk, `conversation.message.completed`, `conversation.chat.completed`, and `done`. Provider token usage is normalized to `input_count`, `output_count`, and `token_count`.
+- Graph failures are persisted as `workflow_runs.status=failed` with the scoped input and error output. BFF returns an explicit failed OpenAPI response and statistic instead of silently substituting a local fake answer.
+- Relative URLs returned by Chatflow/OpenAPI file upload are resolved by AppService through `WANWU_BFF_INTERNAL_BASE_URL` (`http://bff:8080` in Compose), allowing document-parse nodes to consume the uploaded bytes across containers.
 - Empty development canvases fall back to the current user query instead of the removed hard-coded `Chatflow response:` placeholder.
 - `POST /service/api/openapi/v1/chatflow/conversation/message/list` returns Go-shaped message rows under `data`, with `has_more`, `first_id`, and `last_id`.
 - `POST /service/api/openapi/v1/chatflow/conversation/list` returns `conversations`, `list`, and `total`.
@@ -37,10 +39,12 @@ Date: 2026-07-10
 - `AppServiceImplTest#chatflowOpenApiChatGroundsModelWithKnowledgeNodeResults` verifies knowledge evidence reaches the Chatflow LLM and search cards reach the API result.
 - `AppServiceImplTest#chatflowOpenApiChatExecutesConfiguredMcpNode` verifies real MCP dispatch and declared-argument isolation.
 - `AppServiceImplTest#chatflowOpenApiChatUsesConfiguredModelForIntentNode` verifies provider-backed intent classification.
+- `AppServiceImplTest#chatflowOpenApiChatPersistsFailedGraphRuns` verifies failed-run diagnostics and no false assistant message.
+- `AppServiceImplTest#chatflowDocumentNodeDownloadsOpenApiUploadedFileUrl` verifies cross-service upload consumption.
 - `WanwuOpenApiControllerTest#chatflowOpenApiRoutesUseAppServiceConversationState` verifies the OpenAPI route family uses AppService first while preserving the Go-shaped response contracts.
 - `WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies Chatflow OpenAPI service failures are not hidden by the BFF fallback and are counted as failed stream calls.
 - Full `AppServiceImplTest` regression passes on Java 8.
 
 ## Remaining Gap
 
-The Java runtime now executes the supported graph nodes and real model, knowledge, HTTP, and MCP integrations and reproduces the documented multi-frame SSE contract. Remaining Chatflow parity work is published-versus-draft OpenAPI selection and authorization, general-purpose code-node isolation, file upload consumption, failure-node policies, and exact provider/runtime usage attribution.
+The Java runtime now executes the supported graph nodes and real model, knowledge, HTTP, and MCP integrations and reproduces the documented multi-frame SSE contract. Remaining Chatflow parity work is general-purpose code-node isolation, per-node retry/default-value failure policies, and exact provider/runtime usage attribution.

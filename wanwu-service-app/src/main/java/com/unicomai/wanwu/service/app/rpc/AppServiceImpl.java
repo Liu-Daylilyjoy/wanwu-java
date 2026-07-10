@@ -1848,27 +1848,28 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("workflow draft not found");
         }
         long startedAt = clock.millis();
-        WorkflowDraftRecord draft = workflowRuntimeDraft(userId, orgId, command.getWorkflowId());
+        String runId = newWorkflowRunId();
         Map<String, Object> input = command.getInput() == null
                 ? Collections.<String, Object>emptyMap()
                 : command.getInput();
-        Map<String, Object> output = workflowRunOutput(workflow, draft, input, userId, orgId);
+        Map<String, Object> output;
+        try {
+            WorkflowDraftRecord draft = workflowRuntimeDraft(userId, orgId, command.getWorkflowId());
+            output = workflowRunOutput(workflow, draft, input, userId, orgId);
+        } catch (RuntimeException ex) {
+            long failedAt = Math.max(startedAt, clock.millis());
+            Map<String, Object> failedOutput = new LinkedHashMap<String, Object>();
+            failedOutput.put("workflowId", command.getWorkflowId());
+            failedOutput.put("workflow_id", command.getWorkflowId());
+            failedOutput.put("status", "failed");
+            failedOutput.put("error", defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()));
+            persistWorkflowRun(userId, orgId, command.getWorkflowId(), runId, "failed",
+                    input, failedOutput, startedAt, failedAt);
+            throw ex;
+        }
         long finishedAt = Math.max(startedAt, clock.millis());
-        String runId = newWorkflowRunId();
-
-        WorkflowRunRecord record = new WorkflowRunRecord();
-        record.setCreatedAt(startedAt);
-        record.setUpdatedAt(finishedAt);
-        record.setFinishedAt(finishedAt);
-        record.setUserId(userId);
-        record.setOrgId(orgId);
-        record.setWorkflowId(command.getWorkflowId());
-        record.setRunId(runId);
-        record.setStatus("success");
-        record.setInputJson(toJsonOrNull(input));
-        record.setOutputJson(toJsonOrNull(output));
-        record.setCostMillis(Math.max(0L, finishedAt - startedAt));
-        applicationRepository.saveWorkflowRun(record);
+        WorkflowRunRecord record = persistWorkflowRun(userId, orgId, command.getWorkflowId(), runId, "success",
+                input, output, startedAt, finishedAt);
 
         WorkflowRunResult result = new WorkflowRunResult(command.getWorkflowId(), output);
         result.setRunId(runId);
@@ -1877,6 +1878,31 @@ public class AppServiceImpl implements AppService {
         result.setFinishedAt(finishedAt);
         result.setCostMillis(record.getCostMillis());
         return result;
+    }
+
+    private WorkflowRunRecord persistWorkflowRun(String userId,
+                                                  String orgId,
+                                                  String workflowId,
+                                                  String runId,
+                                                  String status,
+                                                  Map<String, Object> input,
+                                                  Map<String, Object> output,
+                                                  long startedAt,
+                                                  long finishedAt) {
+        WorkflowRunRecord record = new WorkflowRunRecord();
+        record.setCreatedAt(startedAt);
+        record.setUpdatedAt(finishedAt);
+        record.setFinishedAt(finishedAt);
+        record.setUserId(userId);
+        record.setOrgId(orgId);
+        record.setWorkflowId(workflowId);
+        record.setRunId(runId);
+        record.setStatus(status);
+        record.setInputJson(toJsonOrNull(input));
+        record.setOutputJson(toJsonOrNull(output));
+        record.setCostMillis(Math.max(0L, finishedAt - startedAt));
+        applicationRepository.saveWorkflowRun(record);
+        return record;
     }
 
     private WorkflowDraftRecord workflowRuntimeDraft(String userId, String orgId, String workflowId) {
@@ -7936,6 +7962,14 @@ public class AppServiceImpl implements AppService {
             byte[] uploaded = workflowReadUploadedFile(source);
             if (uploaded.length > 0) {
                 return uploaded;
+            }
+            if (source.startsWith("/service/api/openapi/v1/file/download/")) {
+                String bffBaseUrl = firstNonBlank(
+                        System.getProperty("wanwu.bff.internal-base-url"),
+                        System.getenv("WANWU_BFF_INTERNAL_BASE_URL"));
+                if (!isBlank(bffBaseUrl)) {
+                    return workflowReadUrlLimited(bffBaseUrl.replaceAll("/+$", "") + source);
+                }
             }
             Path path = Paths.get(source);
             if (Files.isRegularFile(path)) {

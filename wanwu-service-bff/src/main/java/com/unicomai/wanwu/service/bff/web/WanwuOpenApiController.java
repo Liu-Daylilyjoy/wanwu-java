@@ -1365,7 +1365,10 @@ public class WanwuOpenApiController {
                 }
             } catch (IllegalArgumentException ex) {
                 throw ex;
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException ex) {
+                throw new IllegalArgumentException(
+                        "chatflow execution failed: " + defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()),
+                        ex);
             }
         }
         return chatflowSessionStore.chat(ctx.userId, ctx.orgId, chatflowId, conversationId, queryText, parameters);

@@ -143,6 +143,7 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -2989,6 +2990,88 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void chatflowOpenApiChatPersistsFailedGraphRuns() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("BrokenHttpChat");
+        create.setSchema(chatflowInvalidHttpSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Failure conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.chatflowOpenApiChat(chatflowChatCommand(
+                        chatflow.getWorkflowId(), conversationId, "trigger failure")));
+        assertEquals("workflow http url is required", error.getMessage());
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, runs.size());
+        assertEquals("failed", runs.get(0).getStatus());
+        assertTrue(runs.get(0).getOutputJson().contains("workflow http url is required"));
+        assertEquals(0L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
+    }
+
+    @Test
+    public void chatflowDocumentNodeDownloadsOpenApiUploadedFileUrl() throws Exception {
+        HttpServer server = HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        server.createContext("/service/api/openapi/v1/file/download/openapi-file-001", exchange -> {
+            byte[] response = "Uploaded policy content from BFF.".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        server.start();
+        String previous = System.getProperty("wanwu.bff.internal-base-url");
+        System.setProperty("wanwu.bff.internal-base-url",
+                "http://127.0.0.1:" + server.getAddress().getPort());
+        try {
+            InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+            AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+            WorkflowCreateCommand create = new WorkflowCreateCommand();
+            create.setName("DocumentChat");
+            create.setSchema(chatflowDocumentSchema());
+            create.setUserId("dev-admin");
+            create.setOrgId("default-org");
+            WorkflowCreateResult chatflow = service.createChatflow(create);
+
+            ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+            createConversation.setChatflowId(chatflow.getWorkflowId());
+            createConversation.setConversationName("Document conversation");
+            createConversation.setUserId("dev-admin");
+            createConversation.setOrgId("default-org");
+            String conversationId = String.valueOf(
+                    service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+            ChatflowConversationChatCommand chat = chatflowChatCommand(
+                    chatflow.getWorkflowId(), conversationId, "parse the upload");
+            chat.setParameters(Collections.<String, Object>singletonMap(
+                    "FileUrl", "/service/api/openapi/v1/file/download/openapi-file-001"));
+            Map<String, Object> result = service.chatflowOpenApiChat(chat);
+
+            assertEquals("Uploaded policy content from BFF.", result.get("response"));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("wanwu.bff.internal-base-url");
+            } else {
+                System.setProperty("wanwu.bff.internal-base-url", previous);
+            }
+            server.stop(0);
+        }
+    }
+
+    @Test
     public void apiKeyLifecycleMatchesGoUserOpenApiKeyBehavior() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
         AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
@@ -4569,6 +4652,32 @@ public class AppServiceImplTest {
                 + "],\"edges\":["
                 + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"intent-1\"},"
                 + "{\"sourceNodeID\":\"intent-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowInvalidHttpSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"}}},"
+                + "{\"id\":\"http-1\",\"type\":\"45\",\"data\":{\"nodeMeta\":{\"title\":\"HTTP\"},"
+                + "\"inputs\":{\"apiInfo\":{\"method\":\"GET\",\"url\":\"\"}}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"http-1\"},"
+                + "{\"sourceNodeID\":\"http-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowDocumentSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"}}},"
+                + "{\"id\":\"document-1\",\"type\":\"1008\",\"data\":{\"nodeMeta\":{\"title\":\"Parse\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"text\"}],\"inputs\":{\"inputParameters\":[{"
+                + "\"name\":\"FileUrl\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"100001\",\"name\":\"FileUrl\"}}}}]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"document-1\",\"name\":\"text\"}}}}]}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"document-1\"},"
+                + "{\"sourceNodeID\":\"document-1\",\"targetNodeID\":\"900001\"}]}";
     }
 
     private String literalChatflowParam(String name, Object value) {

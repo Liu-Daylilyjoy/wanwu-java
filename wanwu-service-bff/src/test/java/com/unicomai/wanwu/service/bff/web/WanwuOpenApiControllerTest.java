@@ -740,6 +740,30 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void chatflowOpenApiChatDoesNotMaskRuntimeFailuresWithLocalFallback() throws Exception {
+        when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class)))
+                .thenThrow(new IllegalStateException("provider unavailable"));
+
+        mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-openapi-001\","
+                                + "\"conversation_id\":\"conversation-chatflow-openapi-001\","
+                                + "\"query\":\"hello\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(1001))
+                .andExpect(jsonPath("$.message")
+                        .value("chatflow execution failed: provider unavailable"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        containsString("Chatflow response:"))));
+
+        ArgumentCaptor<RecordAppStatisticCommand> statisticCaptor = forClass(RecordAppStatisticCommand.class);
+        verify(appService).recordAppStatistic(statisticCaptor.capture());
+        assertEquals(false, statisticCaptor.getValue().isSuccess());
+        assertEquals(true, statisticCaptor.getValue().isStream());
+    }
+
+    @Test
     public void modelKnowledgeUploadOauthAndMcpShellsDoNotReturnNotFound() throws Exception {
         when(modelService.listModels(any())).thenReturn(new ModelListResult(Collections.emptyList(), 0));
         when(knowledgeService.createKnowledge(eq("dev-admin"), eq("default-org"), any()))
