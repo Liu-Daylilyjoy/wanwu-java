@@ -6938,7 +6938,8 @@ public class AppServiceImpl implements AppService {
         } else if (workflowIsDocumentParseNode(node, type, lowerType)) {
             output.putAll(workflowDocumentParseOutput(node, input));
         } else if (workflowIsToolNode(node, type, lowerType)) {
-            output.putAll(workflowToolOutput(node, input, userId, orgId));
+            output.putAll(workflowToolOutput(node, input, userId, orgId,
+                    APP_TYPE_CHATFLOW.equals(workflow.getAppType())));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
             output.putAll(workflowCodeOutput(node, input));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
@@ -7012,7 +7013,10 @@ public class AppServiceImpl implements AppService {
         List<String> intents = workflowIntentNames(node);
         String modelId = chatflowLlmModelId(node, input);
         ModelInvokeResult modelResult = null;
-        if (modelService != null && !isBlank(modelId) && !intents.isEmpty()) {
+        if (!isBlank(modelId) && !intents.isEmpty()) {
+            if (modelService == null) {
+                throw new IllegalArgumentException("chatflow model service unavailable: " + modelId);
+            }
             ModelInvokeCommand invocation = new ModelInvokeCommand();
             invocation.setUserId(userId);
             invocation.setOrgId(orgId);
@@ -7023,10 +7027,18 @@ public class AppServiceImpl implements AppService {
             payload.put("messages", chatflowIntentMessages(node, input, query, intents));
             copyChatflowLlmParameters(node, input, payload);
             invocation.setPayload(payload);
+            long startedAt = clock.millis();
             try {
                 modelResult = modelService.invokeModel(invocation);
-            } catch (RuntimeException ignored) {
-                modelResult = null;
+                if (modelResult == null) {
+                    throw new IllegalStateException("empty model response");
+                }
+                recordChatflowModelStatistic(userId, orgId, modelId, modelResult, startedAt, true, false);
+            } catch (RuntimeException ex) {
+                recordChatflowModelStatistic(userId, orgId, modelId, null, startedAt, false, false);
+                throw new IllegalArgumentException(
+                        "chatflow model invocation failed: "
+                                + defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()), ex);
             }
         }
         IntentClassification classification = chatflowIntentClassification(
@@ -7050,7 +7062,7 @@ public class AppServiceImpl implements AppService {
         output.put("response", intent);
         output.put("text", intent);
         output.put("modelId", modelId);
-        output.put("providerFallback", modelResult == null || isBlank(modelResult.getContent()));
+        output.put("providerFallback", isBlank(modelId) || intents.isEmpty());
         if (modelResult != null) {
             output.put("usage", modelResult.getUsage());
         }
@@ -8061,16 +8073,28 @@ public class AppServiceImpl implements AppService {
     private Map<String, Object> workflowToolOutput(Map<String, Object> node,
                                                    Map<String, Object> input,
                                                    String userId,
-                                                   String orgId) {
+                                                   String orgId,
+                                                   boolean strictProvider) {
         Map<String, Object> mcpConfig = workflowMcpConfig(node);
         String mcpServerId = workflowMcpServerId(mcpConfig);
         String toolName = workflowMcpToolName(mcpConfig);
-        if (mcpService != null && !isBlank(mcpServerId) && !isBlank(toolName)) {
+        boolean configured = !isBlank(mcpServerId) && !isBlank(toolName);
+        if (configured && mcpService == null && strictProvider) {
+            throw new IllegalArgumentException("chatflow mcp service unavailable: " + mcpServerId);
+        }
+        if (mcpService != null && configured) {
             Map<String, Object> request = new LinkedHashMap<String, Object>();
             request.put("name", toolName);
             request.put("arguments", workflowDeclaredInputArguments(node, input));
             Map<String, Object> response = mcpService.callMcpServerTool(
                     userId, orgId, mcpServerId, request);
+            if (strictProvider && (response == null || enabled(response.get("isError")))) {
+                String detail = response == null
+                        ? "empty provider response"
+                        : workflowJsonText(firstPresent(response, "content", "error", "message"));
+                throw new IllegalArgumentException("chatflow mcp invocation failed: "
+                        + defaultIfBlank(detail, "provider returned an error"));
+            }
             return workflowMcpOutput(mcpServerId, toolName, response);
         }
         List<Map<String, Object>> content = workflowToolContent(node, input);
@@ -8851,7 +8875,10 @@ public class AppServiceImpl implements AppService {
         String prompt = chatflowLlmPrompt(node, input);
         String modelId = chatflowLlmModelId(node, input);
         ModelInvokeResult modelResult = null;
-        if (modelService != null && !isBlank(modelId)) {
+        if (!isBlank(modelId)) {
+            if (modelService == null) {
+                throw new IllegalArgumentException("chatflow model service unavailable: " + modelId);
+            }
             ModelInvokeCommand invocation = new ModelInvokeCommand();
             invocation.setUserId(userId);
             invocation.setOrgId(orgId);
@@ -8862,10 +8889,18 @@ public class AppServiceImpl implements AppService {
             payload.put("messages", chatflowLlmMessages(node, input, prompt));
             copyChatflowLlmParameters(node, input, payload);
             invocation.setPayload(payload);
+            long startedAt = clock.millis();
             try {
                 modelResult = modelService.invokeModel(invocation);
-            } catch (RuntimeException ignored) {
-                modelResult = null;
+                if (modelResult == null) {
+                    throw new IllegalStateException("empty model response");
+                }
+                recordChatflowModelStatistic(userId, orgId, modelId, modelResult, startedAt, true, true);
+            } catch (RuntimeException ex) {
+                recordChatflowModelStatistic(userId, orgId, modelId, null, startedAt, false, true);
+                throw new IllegalArgumentException(
+                        "chatflow model invocation failed: "
+                                + defaultIfBlank(ex.getMessage(), ex.getClass().getSimpleName()), ex);
             }
         }
         String response = modelResult == null ? "" : defaultIfBlank(modelResult.getContent(), "");
@@ -8889,12 +8924,75 @@ public class AppServiceImpl implements AppService {
         output.put("response", response);
         output.put("output", response);
         output.put("chunks", chunks);
-        output.put("providerFallback", modelResult == null);
+        output.put("providerFallback", isBlank(modelId));
         if (modelResult != null) {
             output.put("usage", modelResult.getUsage());
             output.put("providerResponse", modelResult.getResponse());
         }
         return output;
+    }
+
+    private void recordChatflowModelStatistic(String userId,
+                                              String orgId,
+                                              String modelId,
+                                              ModelInvokeResult result,
+                                              long startedAt,
+                                              boolean success,
+                                              boolean stream) {
+        Map<String, Object> usage = result == null
+                ? Collections.<String, Object>emptyMap()
+                : result.getUsage();
+        Map<String, Object> response = result == null
+                ? Collections.<String, Object>emptyMap()
+                : result.getResponse();
+        long promptTokens = chatflowLongMetric(usage,
+                "prompt_tokens", "promptTokens", "input_tokens", "inputTokens", "input_count");
+        long completionTokens = chatflowLongMetric(usage,
+                "completion_tokens", "completionTokens", "output_tokens", "outputTokens", "output_count");
+        long totalTokens = chatflowLongMetric(usage,
+                "total_tokens", "totalTokens", "token_count", "tokenCount");
+        if (totalTokens <= 0L) {
+            totalTokens = promptTokens + completionTokens;
+        }
+
+        RecordModelStatisticCommand command = new RecordModelStatisticCommand();
+        command.setUserId(userId);
+        command.setOrgId(orgId);
+        command.setModelId(modelId);
+        command.setModel(defaultIfBlank(textValue(response, "model", "model_name", "modelName"), modelId));
+        command.setProvider(textValue(response, "provider", "provider_name", "providerName"));
+        command.setModelType("llm");
+        command.setPromptTokens(promptTokens);
+        command.setCompletionTokens(completionTokens);
+        command.setTotalTokens(totalTokens);
+        command.setFirstTokenLatency(chatflowLongMetric(response,
+                "first_token_latency", "firstTokenLatency", "first_token_cost", "firstTokenCost"));
+        command.setCosts(Math.max(0L, clock.millis() - startedAt));
+        command.setSuccess(success);
+        command.setStream(stream);
+        command.setCallTime(startedAt);
+        try {
+            recordModelStatistic(command);
+        } catch (RuntimeException ignored) {
+            // Statistics must never replace the provider result or its original failure.
+        }
+    }
+
+    private long chatflowLongMetric(Map<String, Object> source, String... keys) {
+        Object value = firstPresent(source == null
+                ? Collections.<String, Object>emptyMap()
+                : source, keys);
+        if (value instanceof Number) {
+            return Math.max(0L, ((Number) value).longValue());
+        }
+        if (value != null && !isBlank(String.valueOf(value))) {
+            try {
+                return Math.max(0L, Long.parseLong(String.valueOf(value).trim()));
+            } catch (NumberFormatException ignored) {
+                return 0L;
+            }
+        }
+        return 0L;
     }
 
     private String chatflowLlmPrompt(Map<String, Object> node, Map<String, Object> input) {

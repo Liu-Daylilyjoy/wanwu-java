@@ -2795,9 +2795,25 @@ public class AppServiceImplTest {
         ModelInvokeResult firstModelResult = new ModelInvokeResult();
         firstModelResult.setContent("first provider answer");
         firstModelResult.setChunks(Arrays.asList("first provider ", "answer"));
+        Map<String, Object> firstUsage = new LinkedHashMap<>();
+        firstUsage.put("prompt_tokens", 10);
+        firstUsage.put("completion_tokens", 4);
+        firstUsage.put("total_tokens", 14);
+        firstModelResult.setUsage(firstUsage);
+        Map<String, Object> firstProvider = new LinkedHashMap<>();
+        firstProvider.put("provider", "openai-compatible");
+        firstProvider.put("model", "support-model");
+        firstProvider.put("first_token_latency", 17);
+        firstModelResult.setResponse(firstProvider);
         ModelInvokeResult secondModelResult = new ModelInvokeResult();
         secondModelResult.setContent("second provider answer");
         secondModelResult.setChunks(Arrays.asList("second provider ", "answer"));
+        Map<String, Object> secondUsage = new LinkedHashMap<>();
+        secondUsage.put("input_count", 8);
+        secondUsage.put("output_count", 3);
+        secondUsage.put("token_count", 11);
+        secondModelResult.setUsage(secondUsage);
+        secondModelResult.setResponse(firstProvider);
         when(modelService.invokeModel(any(ModelInvokeCommand.class)))
                 .thenReturn(firstModelResult, secondModelResult);
 
@@ -2840,6 +2856,63 @@ public class AppServiceImplTest {
         assertEquals(4, rows.size());
         assertEquals("first provider answer", rows.get(1).get("content"));
         assertEquals("second provider answer", rows.get(3).get("content"));
+
+        assertEquals(1, repository.modelStatisticAggregates.size());
+        ModelStatisticAggregateRecord statistics = repository.modelStatisticAggregates.get(0);
+        assertEquals("llm-chatflow-001", statistics.getModelId());
+        assertEquals("support-model", statistics.getModel());
+        assertEquals("openai-compatible", statistics.getProvider());
+        assertEquals(18L, statistics.getPromptTokens());
+        assertEquals(7L, statistics.getCompletionTokens());
+        assertEquals(25L, statistics.getTotalTokens());
+        assertEquals(34L, statistics.getFirstTokenLatency());
+        assertEquals(2L, statistics.getCallCount());
+        assertEquals(2L, statistics.getStreamCount());
+        assertEquals(0L, statistics.getCallFailure());
+    }
+
+    @Test
+    public void chatflowConfiguredModelFailurePersistsFailedRunAndStatistic() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                null, null, modelService);
+        when(modelService.invokeModel(any(ModelInvokeCommand.class)))
+                .thenThrow(new IllegalStateException("provider offline"));
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("FailedModelChat");
+        create.setSchema(chatflowModelSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Failed model conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.chatflowOpenApiChat(chatflowChatCommand(
+                        chatflow.getWorkflowId(), conversationId, "trigger provider failure")));
+        assertEquals("chatflow model invocation failed: provider offline", error.getMessage());
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, runs.size());
+        assertEquals("failed", runs.get(0).getStatus());
+        assertEquals(0L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
+
+        assertEquals(1, repository.modelStatisticAggregates.size());
+        ModelStatisticAggregateRecord statistics = repository.modelStatisticAggregates.get(0);
+        assertEquals("llm-chatflow-001", statistics.getModelId());
+        assertEquals(1L, statistics.getCallCount());
+        assertEquals(1L, statistics.getStreamCount());
+        assertEquals(1L, statistics.getCallFailure());
+        assertEquals(1L, statistics.getStreamFailure());
     }
 
     @Test
@@ -2891,6 +2964,51 @@ public class AppServiceImplTest {
         assertEquals("search", captor.getValue().get("name"));
         Map<String, Object> arguments = (Map<String, Object>) captor.getValue().get("arguments");
         assertEquals(Collections.<String, Object>singletonMap("query", "find coffee"), arguments);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void chatflowConfiguredMcpErrorPersistsFailedRun() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        McpService mcpService = mock(McpService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                null, null, null, mcpService);
+
+        Map<String, Object> providerContent = new LinkedHashMap<>();
+        providerContent.put("type", "text");
+        providerContent.put("text", "tool unavailable");
+        Map<String, Object> providerResult = new LinkedHashMap<>();
+        providerResult.put("isError", true);
+        providerResult.put("content", Collections.singletonList(providerContent));
+        when(mcpService.callMcpServerTool(eq("dev-admin"), eq("default-org"),
+                eq("mcp-server-001"), any(Map.class))).thenReturn(providerResult);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("FailedMcpChat");
+        create.setSchema(chatflowMcpSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Failed MCP conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.chatflowOpenApiChat(chatflowChatCommand(
+                        chatflow.getWorkflowId(), conversationId, "trigger tool failure")));
+        assertTrue(error.getMessage().startsWith("chatflow mcp invocation failed:"));
+        assertTrue(error.getMessage().contains("tool unavailable"));
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, runs.size());
+        assertEquals("failed", runs.get(0).getStatus());
+        assertEquals(0L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
     }
 
     @Test
