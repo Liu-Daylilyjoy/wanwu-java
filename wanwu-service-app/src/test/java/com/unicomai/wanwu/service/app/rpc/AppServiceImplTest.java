@@ -1658,6 +1658,62 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void chatflowRejectsUnknownCodeOutsideSafeBuiltInPatterns() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("UnsafeCodeChat");
+        create.setSchema(unknownCodeSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Unsafe code conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.chatflowOpenApiChat(chatflowChatCommand(
+                        chatflow.getWorkflowId(), conversationId, "do not execute this")));
+        assertEquals("unsupported chatflow code node; configure an isolated code runner", error.getMessage());
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, runs.size());
+        assertEquals("failed", runs.get(0).getStatus());
+        assertEquals(0L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
+    }
+
+    @Test
+    public void workflowUnknownCodeRetainsLegacyPassThrough() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("LegacyCodeWorkflow");
+        create.setSchema(unknownCodeSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult workflow = service.createWorkflow(create);
+
+        WorkflowRunCommand run = new WorkflowRunCommand();
+        run.setWorkflowId(workflow.getWorkflowId());
+        run.setUserId("dev-admin");
+        run.setOrgId("default-org");
+        run.setInput(Collections.<String, Object>singletonMap("input", "legacy input"));
+
+        Map<String, Object> output = service.runWorkflow(run).getOutput();
+
+        Map<String, Object> codeOutput = castMap(castMap(output.get("nodeOutputs")).get("code-1"));
+        assertEquals("legacy input", codeOutput.get("output"));
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void workflowRunExecutesKnowledgeQueryNode() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
@@ -4734,6 +4790,22 @@ public class AppServiceImplTest {
                 + "],\"edges\":["
                 + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"llm-1\"},"
                 + "{\"sourceNodeID\":\"llm-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String unknownCodeSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"code-1\",\"type\":\"5\",\"data\":{\"nodeMeta\":{\"title\":\"Custom Code\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"custom\"}],\"inputs\":{"
+                + "\"inputParameters\":[{\"name\":\"input\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"code\":\"async def main(args): return {'custom': 'executed'}\"}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"code-1\",\"name\":\"output\"}}}}]}}}"
+                + "],\"edges\":[{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"code-1\"},"
+                + "{\"sourceNodeID\":\"code-1\",\"targetNodeID\":\"900001\"}]}";
     }
 
     private String chatflowMcpSchema() {

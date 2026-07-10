@@ -6947,7 +6947,7 @@ public class AppServiceImpl implements AppService {
             output.putAll(workflowToolOutput(node, input, userId, orgId,
                     chatflow));
         } else if (workflowIsCodeNode(node, type, lowerType)) {
-            output.putAll(workflowCodeOutput(node, input));
+            output.putAll(workflowCodeOutput(node, input, chatflow));
         } else if (workflowIsHttpNode(node, type, lowerType)) {
             output.putAll(workflowHttpOutput(node, input));
         } else if (workflowIsJsonSerializeNode(node, type, lowerType)) {
@@ -8336,7 +8336,9 @@ public class AppServiceImpl implements AppService {
         return "5".equals(type) || lowerType.contains("code") || semantic.contains("code");
     }
 
-    private Map<String, Object> workflowCodeOutput(Map<String, Object> node, Map<String, Object> input) {
+    private Map<String, Object> workflowCodeOutput(Map<String, Object> node,
+                                                    Map<String, Object> input,
+                                                    boolean strictIsolation) {
         String code = workflowCodeText(node);
         if (workflowLooksLikeJsonToCsvCode(node, code)) {
             return workflowJsonToCsvOutput(input);
@@ -8352,6 +8354,10 @@ public class AppServiceImpl implements AppService {
         }
         if (workflowLooksLikeExampleMultiOutputCode(node, code)) {
             return workflowExampleMultiOutput(input);
+        }
+        if (strictIsolation) {
+            throw new IllegalArgumentException(
+                    "unsupported chatflow code node; configure an isolated code runner");
         }
         Object value = workflowPrimaryNodeInput(input);
         Map<String, Object> output = new LinkedHashMap<>();
