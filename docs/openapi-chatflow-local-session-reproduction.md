@@ -45,6 +45,17 @@ Date: 2026-07-10
 - `WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies Chatflow OpenAPI service failures are not hidden by the BFF fallback and are counted as failed stream calls.
 - Full `AppServiceImplTest` regression passes on Java 8.
 
+### Docker acceptance
+
+```powershell
+docker compose --profile full up -d --build
+./scripts/chatflow-smoke.ps1
+```
+
+The smoke script creates a disposable Start-to-End Chatflow through the frontend API, creates an OpenAPI conversation, verifies the six SSE event types in order, reads the persisted user/assistant messages, and removes its test data. On 2026-07-10 it passed against `localhost:8080` with all backend containers healthy.
+
+Browser acceptance also passed at `http://localhost:3000/aibase/appSpace/workflow?type=chatflow`: development login completed without a gateway error, the Chatflow tab rendered, and the zero-change frontend opened the Create Chatflow dialog without console errors.
+
 ## Remaining Gap
 
 The Java runtime now executes the supported graph nodes and real model, knowledge, HTTP, and MCP integrations and reproduces the documented multi-frame SSE contract. Remaining Chatflow parity work is general-purpose code-node isolation, per-node retry/default-value failure policies, and exact provider/runtime usage attribution.
