@@ -1827,6 +1827,10 @@ public class AppServiceImpl implements AppService {
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
         AppRecord workflow = applicationRepository.findWorkflow(userId, orgId, command.getWorkflowId());
         if (workflow == null) {
+            workflow = applicationRepository.findWorkflow(
+                    userId, orgId, command.getWorkflowId(), APP_TYPE_CHATFLOW);
+        }
+        if (workflow == null) {
             throw new IllegalArgumentException("workflow draft not found");
         }
         long startedAt = clock.millis();
@@ -2040,6 +2044,21 @@ public class AppServiceImpl implements AppService {
         String orgId = defaultIfBlank(command.getOrgId(), DEV_ORG_ID);
         AssistantConversationRecord conversation = ensureChatflowOpenApiConversation(
                 userId, orgId, command.getChatflowId(), command.getConversationId());
+        Map<String, Object> input = chatflowRuntimeInput(userId, orgId, conversation, command);
+        WorkflowRunCommand runCommand = new WorkflowRunCommand();
+        runCommand.setWorkflowId(command.getChatflowId());
+        runCommand.setUserId(userId);
+        runCommand.setOrgId(orgId);
+        runCommand.setInput(input);
+        WorkflowRunResult execution = runWorkflow(runCommand);
+        Map<String, Object> executionOutput = execution.getOutput() == null
+                ? Collections.<String, Object>emptyMap()
+                : execution.getOutput();
+        List<Map<String, Object>> steps = objectMapList(executionOutput.get("steps"));
+        String response = chatflowExecutionResponse(steps, command.getQuery());
+        List<String> chunks = chatflowExecutionChunks(steps, response);
+        List<Map<String, Object>> searchList = chatflowExecutionSearchList(steps);
+        List<Map<String, Object>> nodeEvents = chatflowExecutionNodeEvents(steps);
         long now = clock.millis();
         AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
         message.setCreatedAt(now);
@@ -2051,12 +2070,12 @@ public class AppServiceImpl implements AppService {
         message.setDetailId(newDetailId());
         message.setPrompt(command.getQuery());
         message.setSysPrompt("");
-        message.setResponse("Chatflow response: " + command.getQuery());
-        message.setResponseListJson(toJsonOrNull(Collections.emptyList()));
-        message.setSearchListJson(toJsonOrNull(Collections.emptyList()));
+        message.setResponse(response);
+        message.setResponseListJson(toJsonOrNull(chunks));
+        message.setSearchListJson(toJsonOrNull(searchList));
         message.setRequestFilesJson(toJsonOrNull(command.getParameters()));
         message.setResponseFilesJson(toJsonOrNull(Collections.emptyList()));
-        message.setSubConversationListJson(toJsonOrNull(Collections.emptyList()));
+        message.setSubConversationListJson(toJsonOrNull(nodeEvents));
         message.setFileSize(0L);
         message.setFileName("");
         message.setQaType(0);
@@ -2069,6 +2088,10 @@ public class AppServiceImpl implements AppService {
         result.put("conversation_id", conversation.getConversationId());
         result.put("response", message.getResponse());
         result.put("finish", 1);
+        result.put("run_id", execution.getRunId());
+        result.put("chunks", chunks);
+        result.put("search_list", searchList);
+        result.put("node_events", nodeEvents);
         return result;
     }
 
@@ -3140,6 +3163,122 @@ public class AppServiceImpl implements AppService {
             throw new IllegalArgumentException("chatflow conversation not found");
         }
         return conversation;
+    }
+
+    private Map<String, Object> chatflowRuntimeInput(String userId,
+                                                     String orgId,
+                                                     AssistantConversationRecord conversation,
+                                                     ChatflowConversationChatCommand command) {
+        Map<String, Object> input = command.getParameters() == null
+                ? new LinkedHashMap<String, Object>()
+                : new LinkedHashMap<String, Object>(command.getParameters());
+        input.put("query", command.getQuery());
+        input.put("Query", command.getQuery());
+        input.put("question", command.getQuery());
+        input.put("message", command.getQuery());
+        input.put("input", command.getQuery());
+        input.put("conversationId", conversation.getConversationId());
+        input.put("conversation_id", conversation.getConversationId());
+        input.put("parameters", command.getParameters() == null
+                ? Collections.<String, Object>emptyMap()
+                : new LinkedHashMap<String, Object>(command.getParameters()));
+        List<Map<String, Object>> history = chatflowConversationHistory(
+                userId, orgId, conversation.getConversationId(), 50);
+        input.put("_chatHistory", history);
+        input.put("chatHistory", history);
+        return input;
+    }
+
+    private List<Map<String, Object>> chatflowConversationHistory(String userId,
+                                                                   String orgId,
+                                                                   String conversationId,
+                                                                   int limit) {
+        long total = applicationRepository.countConversationMessages(userId, orgId, conversationId);
+        int offset = (int) Math.max(0L, total - limit);
+        List<AssistantConversationMessageRecord> records = applicationRepository.listConversationMessages(
+                userId, orgId, conversationId, offset, limit);
+        List<Map<String, Object>> history = new ArrayList<Map<String, Object>>(records.size());
+        for (AssistantConversationMessageRecord record : records) {
+            Map<String, Object> turn = new LinkedHashMap<String, Object>();
+            turn.put("query", defaultIfBlank(record.getPrompt(), ""));
+            turn.put("response", defaultIfBlank(record.getResponse(), ""));
+            turn.put("createdAt", defaultLong(record.getCreatedAt()));
+            history.add(turn);
+        }
+        return history;
+    }
+
+    private String chatflowExecutionResponse(List<Map<String, Object>> steps, String fallback) {
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            Map<String, Object> output = mapValue(steps.get(i).get("output"));
+            Object candidate = firstPresent(output, "output", "result", "response", "text");
+            String text = chatflowResponseText(candidate);
+            if (!isBlank(text)) {
+                return text;
+            }
+        }
+        return defaultIfBlank(fallback, "");
+    }
+
+    private String chatflowResponseText(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String) {
+            return String.valueOf(value);
+        }
+        if (value instanceof Map || value instanceof List) {
+            return jsonString(value);
+        }
+        return String.valueOf(value);
+    }
+
+    private List<String> chatflowExecutionChunks(List<Map<String, Object>> steps, String response) {
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            Map<String, Object> output = mapValue(steps.get(i).get("output"));
+            List<Object> values = listValue(output.get("chunks"));
+            if (values.isEmpty()) {
+                continue;
+            }
+            List<String> chunks = new ArrayList<String>(values.size());
+            for (Object value : values) {
+                if (value != null) {
+                    chunks.add(String.valueOf(value));
+                }
+            }
+            if (!chunks.isEmpty()) {
+                return chunks;
+            }
+        }
+        return isBlank(response) ? Collections.<String>emptyList() : Collections.singletonList(response);
+    }
+
+    private List<Map<String, Object>> chatflowExecutionSearchList(List<Map<String, Object>> steps) {
+        List<Map<String, Object>> searchList = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> step : steps) {
+            Map<String, Object> output = mapValue(step.get("output"));
+            List<Map<String, Object>> current = objectMapList(output.get("searchList"));
+            if (current.isEmpty()) {
+                current = objectMapList(mapValue(output.get("output")).get("searchList"));
+            }
+            searchList.addAll(current);
+        }
+        return searchList;
+    }
+
+    private List<Map<String, Object>> chatflowExecutionNodeEvents(List<Map<String, Object>> steps) {
+        List<Map<String, Object>> events = new ArrayList<Map<String, Object>>(steps.size());
+        for (Map<String, Object> step : steps) {
+            Map<String, Object> event = new LinkedHashMap<String, Object>();
+            event.put("order", step.get("order"));
+            event.put("node_id", step.get("nodeId"));
+            event.put("node_name", step.get("name"));
+            event.put("node_type", step.get("type"));
+            event.put("status", step.get("status"));
+            event.put("output", step.get("output"));
+            events.add(event);
+        }
+        return events;
     }
 
     private Map<String, Object> chatflowConversationInfo(AssistantConversationRecord conversation) {
@@ -6703,13 +6842,18 @@ public class AppServiceImpl implements AppService {
                     ? defaultIfBlank(workflow.getName(), "Workflow") + " completed at " + name
                     : String.valueOf(result));
         } else if (workflowIsLlmNode(type, lowerType)) {
-            String prompt = workflowLlmPrompt(node, input);
-            String text = defaultIfBlank(prompt, defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name);
-            output.put("prompt", prompt);
-            output.put("text", text);
-            output.put("result", text);
-            output.put("response", text);
-            output.put("output", text);
+            if (APP_TYPE_CHATFLOW.equals(workflow.getAppType())) {
+                output.putAll(chatflowLlmOutput(node, input, userId, orgId));
+            } else {
+                String prompt = workflowLlmPrompt(node, input);
+                String text = defaultIfBlank(
+                        prompt, defaultIfBlank(workflow.getName(), "Workflow") + " executed " + name);
+                output.put("prompt", prompt);
+                output.put("text", text);
+                output.put("result", text);
+                output.put("response", text);
+                output.put("output", text);
+            }
         } else if (workflowIsIntentNode(node, type, lowerType)) {
             output.putAll(workflowIntentOutput(node, input));
         } else if (workflowIsSelectorNode(node, type, lowerType)) {
@@ -8421,6 +8565,199 @@ public class AppServiceImpl implements AppService {
             return String.valueOf(prompt);
         }
         return workflowConfiguredText(node, input, "prompt", "template", "text", "content", "expression");
+    }
+
+    private Map<String, Object> chatflowLlmOutput(Map<String, Object> node,
+                                                   Map<String, Object> input,
+                                                   String userId,
+                                                   String orgId) {
+        String prompt = chatflowLlmPrompt(node, input);
+        String modelId = chatflowLlmModelId(node, input);
+        ModelInvokeResult modelResult = null;
+        if (modelService != null && !isBlank(modelId)) {
+            ModelInvokeCommand invocation = new ModelInvokeCommand();
+            invocation.setUserId(userId);
+            invocation.setOrgId(orgId);
+            invocation.setModelId(modelId);
+            invocation.setOperation("chat");
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("stream", true);
+            payload.put("messages", chatflowLlmMessages(node, input, prompt));
+            copyChatflowLlmParameters(node, input, payload);
+            invocation.setPayload(payload);
+            try {
+                modelResult = modelService.invokeModel(invocation);
+            } catch (RuntimeException ignored) {
+                modelResult = null;
+            }
+        }
+        String response = modelResult == null ? "" : defaultIfBlank(modelResult.getContent(), "");
+        if (isBlank(response) && modelResult != null && modelResult.getChunks() != null) {
+            StringBuilder joined = new StringBuilder();
+            for (String chunk : modelResult.getChunks()) {
+                joined.append(defaultIfBlank(chunk, ""));
+            }
+            response = joined.toString();
+        }
+        response = defaultIfBlank(response, defaultIfBlank(prompt, chatflowInputQuestion(input)));
+        List<String> chunks = modelResult == null
+                ? (isBlank(response) ? Collections.<String>emptyList() : Collections.singletonList(response))
+                : ragResponseChunks(modelResult, response);
+
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("modelId", modelId);
+        output.put("prompt", prompt);
+        output.put("text", response);
+        output.put("result", response);
+        output.put("response", response);
+        output.put("output", response);
+        output.put("chunks", chunks);
+        output.put("providerFallback", modelResult == null);
+        if (modelResult != null) {
+            output.put("usage", modelResult.getUsage());
+            output.put("providerResponse", modelResult.getResponse());
+        }
+        return output;
+    }
+
+    private String chatflowLlmPrompt(Map<String, Object> node, Map<String, Object> input) {
+        Object prompt = workflowConfiguredParam(node, "llmParam", "prompt", input);
+        if (prompt != null) {
+            return String.valueOf(prompt);
+        }
+        return defaultIfBlank(
+                workflowConfiguredText(node, input, "prompt", "template", "text", "content", "expression"),
+                chatflowInputQuestion(input));
+    }
+
+    private String chatflowInputQuestion(Map<String, Object> input) {
+        Object question = firstPresent(input, "query", "Query", "question", "message", "input");
+        return question == null ? "" : String.valueOf(question);
+    }
+
+    private String chatflowLlmModelId(Map<String, Object> node, Map<String, Object> input) {
+        String[] parameterNames = new String[]{
+                "modelId", "model_id", "llmModelId", "llm_model_id", "modelUUID", "modelUuid"
+        };
+        for (String parameterName : parameterNames) {
+            String modelId = chatflowModelIdentifier(
+                    workflowConfiguredParam(node, "llmParam", parameterName, input), 0);
+            if (!isBlank(modelId)) {
+                return modelId;
+            }
+        }
+        String modelId = chatflowModelIdentifier(node, 0);
+        if (!isBlank(modelId)) {
+            return modelId;
+        }
+        Map<String, Object> data = mapValue(node.get("data"));
+        modelId = chatflowModelIdentifier(data, 0);
+        if (!isBlank(modelId)) {
+            return modelId;
+        }
+        return chatflowModelIdentifier(mapValue(data.get("inputs")), 0);
+    }
+
+    private String chatflowModelIdentifier(Object value, int depth) {
+        if (value == null || depth > 3) {
+            return "";
+        }
+        if (value instanceof String || value instanceof Number) {
+            return String.valueOf(value);
+        }
+        Map<String, Object> map = mapValue(value);
+        if (map.isEmpty()) {
+            return "";
+        }
+        String[] idKeys = new String[]{
+                "modelId", "model_id", "llmModelId", "llm_model_id", "modelUUID", "modelUuid", "uuid"
+        };
+        for (String key : idKeys) {
+            if (map.containsKey(key)) {
+                String id = chatflowModelIdentifier(map.get(key), depth + 1);
+                if (!isBlank(id)) {
+                    return id;
+                }
+            }
+        }
+        String[] containerKeys = new String[]{
+                "model", "modelInfo", "modelConfig", "llmModel", "llmModelInfo", "llmParam"
+        };
+        for (String key : containerKeys) {
+            if (map.containsKey(key)) {
+                String id = chatflowModelIdentifier(map.get(key), depth + 1);
+                if (!isBlank(id)) {
+                    return id;
+                }
+            }
+        }
+        return "";
+    }
+
+    private List<Map<String, Object>> chatflowLlmMessages(Map<String, Object> node,
+                                                           Map<String, Object> input,
+                                                           String prompt) {
+        List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+        Object configuredSystemPrompt = workflowConfiguredParam(node, "llmParam", "systemPrompt", input);
+        String systemPrompt = configuredSystemPrompt == null
+                ? workflowConfiguredText(node, input, "systemPrompt")
+                : String.valueOf(configuredSystemPrompt);
+        addChatflowTextMessage(messages, "system", systemPrompt);
+
+        Object enableHistory = workflowConfiguredParam(node, "llmParam", "enableChatHistory", input);
+        if (enabled(enableHistory)) {
+            int historyRound = Math.max(0, intValue(
+                    workflowConfiguredParam(node, "llmParam", "chatHistoryRound", input), 3));
+            List<Map<String, Object>> history = objectMapList(input.get("_chatHistory"));
+            int start = Math.max(0, history.size() - historyRound);
+            for (int i = start; i < history.size(); i++) {
+                Map<String, Object> turn = history.get(i);
+                addChatflowTextMessage(messages, "user", firstNonBlank(
+                        stringValue(turn.get("query")), stringValue(turn.get("question"))));
+                addChatflowTextMessage(messages, "assistant", firstNonBlank(
+                        stringValue(turn.get("response")), stringValue(turn.get("answer"))));
+            }
+        }
+        addChatflowTextMessage(messages, "user", prompt);
+        return messages;
+    }
+
+    private void addChatflowTextMessage(List<Map<String, Object>> messages, String role, String content) {
+        if (isBlank(content)) {
+            return;
+        }
+        Map<String, Object> message = new LinkedHashMap<String, Object>();
+        message.put("role", role);
+        message.put("content", content);
+        messages.add(message);
+    }
+
+    private void copyChatflowLlmParameters(Map<String, Object> node,
+                                            Map<String, Object> input,
+                                            Map<String, Object> payload) {
+        copyChatflowLlmParameter(node, input, payload, "temperature", "temperature");
+        copyChatflowLlmParameter(node, input, payload, "topP", "top_p");
+        copyChatflowLlmParameter(node, input, payload, "top_p", "top_p");
+        copyChatflowLlmParameter(node, input, payload, "frequencyPenalty", "frequency_penalty");
+        copyChatflowLlmParameter(node, input, payload, "frequency_penalty", "frequency_penalty");
+        Object maxTokens = workflowConfiguredParam(node, "llmParam", "maxTokens", input);
+        if (maxTokens == null) {
+            maxTokens = workflowConfiguredParam(node, "llmParam", "max_tokens", input);
+        }
+        if (intValue(maxTokens, 0) > 0) {
+            payload.put("max_tokens", maxTokens);
+        }
+    }
+
+    private void copyChatflowLlmParameter(Map<String, Object> node,
+                                          Map<String, Object> input,
+                                          Map<String, Object> payload,
+                                          String sourceKey,
+                                          String targetKey) {
+        Object value = workflowConfiguredParam(node, "llmParam", sourceKey, input);
+        if (value != null && !isBlank(String.valueOf(value)) && !payload.containsKey(targetKey)) {
+            payload.put(targetKey, value);
+        }
     }
 
     private String workflowConcatText(Map<String, Object> node, Map<String, Object> input) {

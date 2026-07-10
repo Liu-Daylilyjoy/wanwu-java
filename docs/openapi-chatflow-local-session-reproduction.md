@@ -1,20 +1,27 @@
 # OpenAPI Chatflow Session Reproduction
 
-Date: 2026-07-01
+Date: 2026-07-10
 
 ## Source Evidence
 
 - Go registers Chatflow OpenAPI routes in `internal/bff-service/server/http/handler/router/openapi/router.go`.
 - The handlers live in `internal/bff-service/server/http/handler/openapi/workflow.go` and cover conversation create/delete/list, message list, chat, and file upload.
 - The Go response models include `OpenAPIChatflowConversationListResponse` and `OpenAPIChatflowGetConversationMessageListResponse`.
+- Go persists the application/conversation association in BFF, but delegates graph execution and SSE events to the separately deployed `workflow-wanwu` runtime. That runtime source is not part of the Go repository.
 
 ## Java Reproduction
 
 - `AppService` now exposes Chatflow OpenAPI conversation create/list/message-list/chat/delete methods.
-- Chatflow OpenAPI conversations and deterministic development turns are persisted through the existing `assistant_conversations` and `assistant_conversation_messages` tables with `conversation_type=chatflow_openapi` and the Chatflow `appId` stored in `assistant_id`.
+- Chatflow OpenAPI conversations and turns are persisted through the existing `assistant_conversations` and `assistant_conversation_messages` tables with `conversation_type=chatflow_openapi` and the Chatflow `appId` stored in `assistant_id`.
 - `OpenApiChatflowSessionStore` remains a BFF-local fallback when AppService is unavailable or a development request targets a Chatflow id that has not been created in Java yet.
 - `POST /service/api/openapi/v1/chatflow/conversation` creates a scoped conversation and returns `conversation_id`, `conversationId`, `conversation_name`, and `uuid`.
-- `POST /service/api/openapi/v1/chatflow/chat` records a user message and deterministic assistant response, emits one legacy `text/event-stream` frame, and records OpenAPI-source app statistics. Service-layer validation failures now return `400` JSON and still record `success=false`, `stream=true`, `source=openapi` app statistics, matching the Go `ChatflowChat` deferred statistic behavior.
+- `POST /service/api/openapi/v1/chatflow/chat` executes the saved Chatflow graph, persists a workflow run, records the user/model turn, emits the legacy `text/event-stream` response frame, and records OpenAPI-source app statistics.
+- Runtime input contains the OpenAPI `parameters` plus reserved aliases `query`, `Query`, `question`, `message`, and `input`, so existing start-node schemas can consume the current user message without frontend changes.
+- LLM nodes invoke `ModelService` only when the owning application is a Chatflow. Workflow LLM behavior remains unchanged.
+- LLM configuration resolves Coze-style `llmParam` values for model id, prompt, system prompt, history switch/rounds, temperature, top-p, frequency penalty, and max tokens.
+- When `enableChatHistory=true`, the configured number of persisted prior turns is inserted before the current prompt. Provider chunks and usage metadata are retained in node output.
+- Chat responses expose `run_id`, `chunks`, `search_list`, and `node_events`; chunks, knowledge hits, and node events are also stored with the conversation message.
+- Empty development canvases fall back to the current user query instead of the removed hard-coded `Chatflow response:` placeholder.
 - `POST /service/api/openapi/v1/chatflow/conversation/message/list` returns Go-shaped message rows under `data`, with `has_more`, `first_id`, and `last_id`.
 - `POST /service/api/openapi/v1/chatflow/conversation/list` returns `conversations`, `list`, and `total`.
 - `DELETE /service/api/openapi/v1/chatflow/conversation` removes the persisted scoped conversation and its messages.
@@ -22,9 +29,11 @@ Date: 2026-07-01
 ## Verification
 
 - `AppServiceImplTest#chatflowOpenApiConversationsPersistMessagesAndListState` verifies persisted create, chat, message list, conversation list, and delete behavior.
+- `AppServiceImplTest#chatflowOpenApiChatExecutesConfiguredModelWithConversationHistory` verifies start-to-LLM-to-end graph execution, provider chunks, model parameters, persisted answers, and second-turn history ordering.
 - `WanwuOpenApiControllerTest#chatflowOpenApiRoutesUseAppServiceConversationState` verifies the OpenAPI route family uses AppService first while preserving the Go-shaped response contracts.
 - `WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies Chatflow OpenAPI service failures are not hidden by the BFF fallback and are counted as failed stream calls.
+- Full `AppServiceImplTest` regression passes on Java 8.
 
 ## Remaining Gap
 
-This is still a deterministic development Chatflow loop, not the Go Coze runtime. Full parity still needs real project execution, streaming event sequencing, published-app authorization, workflow node execution, and exact provider/runtime usage attribution.
+The Java runtime now executes the supported graph nodes and real model/knowledge/HTTP integrations. Remaining Chatflow parity work is exact multi-frame SSE event sequencing, published-versus-draft OpenAPI selection and authorization, real tool/MCP/code-node providers, file upload consumption, failure-node policies, and provider/runtime usage attribution.

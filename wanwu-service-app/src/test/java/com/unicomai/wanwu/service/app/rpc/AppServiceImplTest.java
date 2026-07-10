@@ -169,6 +169,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -2730,7 +2731,8 @@ public class AppServiceImplTest {
         Map<String, Object> chatResult = service.chatflowOpenApiChat(chat);
         assertEquals(0, chatResult.get("code"));
         assertEquals(conversationId, chatResult.get("conversation_id"));
-        assertEquals("Chatflow response: hello chatflow", chatResult.get("response"));
+        assertEquals("hello chatflow", chatResult.get("response"));
+        assertTrue(String.valueOf(chatResult.get("run_id")).startsWith("workflow-run-"));
 
         ChatflowConversationMessageListQuery messages = new ChatflowConversationMessageListQuery();
         messages.setChatflowId(chatflow.getWorkflowId());
@@ -2745,7 +2747,7 @@ public class AppServiceImplTest {
         assertEquals("hello chatflow", rows.get(0).get("content"));
         assertEquals("Beijing", castMap(rows.get(0).get("meta_data")).get("city"));
         assertEquals("assistant", rows.get(1).get("role"));
-        assertEquals("Chatflow response: hello chatflow", rows.get(1).get("content"));
+        assertEquals("hello chatflow", rows.get(1).get("content"));
 
         ChatflowConversationListQuery listQuery = new ChatflowConversationListQuery();
         listQuery.setChatflowId(chatflow.getWorkflowId());
@@ -2762,6 +2764,80 @@ public class AppServiceImplTest {
         delete.setOrgId("default-org");
         service.deleteChatflowOpenApiConversation(delete);
         assertEquals(0L, service.listChatflowOpenApiConversations(listQuery).get("total"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void chatflowOpenApiChatExecutesConfiguredModelWithConversationHistory() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        ModelService modelService = mock(ModelService.class);
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock(), new ObjectMapper(),
+                null, null, modelService);
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("SupportChat");
+        create.setDesc("stateful model chatflow");
+        create.setSchema(chatflowModelSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Support conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        ModelInvokeResult firstModelResult = new ModelInvokeResult();
+        firstModelResult.setContent("first provider answer");
+        firstModelResult.setChunks(Arrays.asList("first provider ", "answer"));
+        ModelInvokeResult secondModelResult = new ModelInvokeResult();
+        secondModelResult.setContent("second provider answer");
+        secondModelResult.setChunks(Arrays.asList("second provider ", "answer"));
+        when(modelService.invokeModel(any(ModelInvokeCommand.class)))
+                .thenReturn(firstModelResult, secondModelResult);
+
+        ChatflowConversationChatCommand firstChat = chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "first question");
+        Map<String, Object> firstResult = service.chatflowOpenApiChat(firstChat);
+        assertEquals("first provider answer", firstResult.get("response"));
+        assertEquals(firstModelResult.getChunks(), firstResult.get("chunks"));
+
+        ChatflowConversationChatCommand secondChat = chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "second question");
+        Map<String, Object> secondResult = service.chatflowOpenApiChat(secondChat);
+        assertEquals("second provider answer", secondResult.get("response"));
+        assertEquals(secondModelResult.getChunks(), secondResult.get("chunks"));
+        assertEquals(3, castList(secondResult.get("node_events")).size());
+
+        ArgumentCaptor<ModelInvokeCommand> captor = ArgumentCaptor.forClass(ModelInvokeCommand.class);
+        verify(modelService, times(2)).invokeModel(captor.capture());
+        List<ModelInvokeCommand> invocations = captor.getAllValues();
+        assertEquals("llm-chatflow-001", invocations.get(1).getModelId());
+        assertEquals("chat", invocations.get(1).getOperation());
+        assertEquals(0.2D, Double.parseDouble(String.valueOf(
+                invocations.get(1).getPayload().get("temperature"))), 0.001D);
+        String messagesJson = String.valueOf(invocations.get(1).getPayload().get("messages"));
+        assertTrue(messagesJson.contains("Support system"));
+        assertTrue(messagesJson.contains("first question"));
+        assertTrue(messagesJson.contains("first provider answer"));
+        assertTrue(messagesJson.contains("Answer second question for Beijing"));
+        assertTrue(messagesJson.indexOf("first provider answer")
+                < messagesJson.indexOf("Answer second question for Beijing"));
+
+        ChatflowConversationMessageListQuery messages = new ChatflowConversationMessageListQuery();
+        messages.setChatflowId(chatflow.getWorkflowId());
+        messages.setConversationId(conversationId);
+        messages.setLimit(10);
+        messages.setUserId("dev-admin");
+        messages.setOrgId("default-org");
+        List<Map<String, Object>> rows = castList(
+                service.listChatflowOpenApiConversationMessages(messages).get("data"));
+        assertEquals(4, rows.size());
+        assertEquals("first provider answer", rows.get(1).get("content"));
+        assertEquals("second provider answer", rows.get(3).get("content"));
     }
 
     @Test
@@ -4234,6 +4310,54 @@ public class AppServiceImplTest {
         command.setUserId("dev-admin");
         command.setOrgId("default-org");
         return command;
+    }
+
+    private ChatflowConversationChatCommand chatflowChatCommand(String chatflowId,
+                                                                 String conversationId,
+                                                                 String query) {
+        ChatflowConversationChatCommand command = new ChatflowConversationChatCommand();
+        command.setChatflowId(chatflowId);
+        command.setConversationId(conversationId);
+        command.setQuery(query);
+        command.setParameters(Collections.<String, Object>singletonMap("city", "Beijing"));
+        command.setUserId("dev-admin");
+        command.setOrgId("default-org");
+        return command;
+    }
+
+    private String chatflowModelSchema() {
+        return "{"
+                + "\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"llm-1\",\"type\":\"3\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"Answer\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"output\"}],"
+                + "\"inputs\":{"
+                + "\"inputParameters\":[{\"name\":\"Query\",\"input\":{\"type\":\"string\","
+                + "\"value\":{\"type\":\"ref\",\"content\":{\"blockID\":\"100001\",\"name\":\"input\"}}}}],"
+                + "\"llmParam\":["
+                + literalChatflowParam("modelId", "llm-chatflow-001") + ","
+                + literalChatflowParam("prompt", "Answer {{Query}} for {{city}}") + ","
+                + literalChatflowParam("systemPrompt", "Support system") + ","
+                + literalChatflowParam("enableChatHistory", true) + ","
+                + literalChatflowParam("chatHistoryRound", 2) + ","
+                + literalChatflowParam("temperature", 0.2)
+                + "]}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{"
+                + "\"nodeMeta\":{\"title\":\"End\"},\"inputs\":{\"inputParameters\":[{"
+                + "\"name\":\"output\",\"input\":{\"type\":\"string\",\"value\":{"
+                + "\"type\":\"ref\",\"content\":{\"blockID\":\"llm-1\",\"name\":\"output\"}}}}]}}}"
+                + "],\"edges\":["
+                + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"llm-1\"},"
+                + "{\"sourceNodeID\":\"llm-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String literalChatflowParam(String name, Object value) {
+        String content = value instanceof String ? "\"" + value + "\"" : String.valueOf(value);
+        return "{\"name\":\"" + name + "\",\"input\":{\"value\":{\"type\":\"literal\",\"content\":"
+                + content + "}}}";
     }
 
     private RagChatCommand ragChatCommand(String ragId, String question, boolean draft) {
