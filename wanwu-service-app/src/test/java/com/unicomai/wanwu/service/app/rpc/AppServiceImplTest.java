@@ -2825,6 +2825,76 @@ public class AppServiceImplTest {
     }
 
     @Test
+    public void chatflowInputNodeWaitsAndResumesFromNextConversationTurn() {
+        InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
+        AppServiceImpl service = new AppServiceImpl(repository, fixedClock());
+
+        WorkflowCreateCommand create = new WorkflowCreateCommand();
+        create.setName("InputResumeChat");
+        create.setSchema(chatflowInputResumeSchema());
+        create.setUserId("dev-admin");
+        create.setOrgId("default-org");
+        WorkflowCreateResult chatflow = service.createChatflow(create);
+
+        ChatflowConversationCreateCommand createConversation = new ChatflowConversationCreateCommand();
+        createConversation.setChatflowId(chatflow.getWorkflowId());
+        createConversation.setConversationName("Input resume conversation");
+        createConversation.setUserId("dev-admin");
+        createConversation.setOrgId("default-org");
+        String conversationId = String.valueOf(
+                service.createChatflowOpenApiConversation(createConversation).get("conversation_id"));
+
+        ChatflowConversationChatCommand first = chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "Which local policy applies?");
+        first.setParameters(Collections.<String, Object>emptyMap());
+        Map<String, Object> waiting = service.chatflowOpenApiChat(first);
+
+        assertEquals("waiting_input", waiting.get("status"));
+        assertEquals(0, waiting.get("finish"));
+        Map<String, Object> required = castMap(waiting.get("input_required"));
+        assertEquals("input-1", required.get("node_id"));
+        assertEquals("city", castList(required.get("fields")).get(0).get("name"));
+        List<WorkflowRunRecord> waitingRuns = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(1, waitingRuns.size());
+        assertEquals("waiting_input", waitingRuns.get(0).getStatus());
+        assertEquals(1L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
+
+        ChatflowConversationMessageListQuery messageQuery = new ChatflowConversationMessageListQuery();
+        messageQuery.setChatflowId(chatflow.getWorkflowId());
+        messageQuery.setConversationId(conversationId);
+        messageQuery.setLimit(10);
+        messageQuery.setUserId("dev-admin");
+        messageQuery.setOrgId("default-org");
+        List<Map<String, Object>> waitingMessages = castList(
+                service.listChatflowOpenApiConversationMessages(messageQuery).get("data"));
+        assertEquals("question", waitingMessages.get(1).get("type"));
+        assertEquals("waiting_input", castMap(waitingMessages.get(1).get("meta_data")).get("status"));
+
+        ChatflowConversationChatCommand resume = chatflowChatCommand(
+                chatflow.getWorkflowId(), conversationId, "Shanghai");
+        resume.setParameters(Collections.<String, Object>emptyMap());
+        Map<String, Object> completed = service.chatflowOpenApiChat(resume);
+
+        assertEquals("completed", completed.get("status"));
+        assertEquals(1, completed.get("finish"));
+        assertEquals("Shanghai", completed.get("response"));
+        assertEquals(2L, repository.countConversationMessages(
+                "dev-admin", "default-org", conversationId));
+        List<WorkflowRunRecord> runs = repository.listWorkflowRuns(
+                "dev-admin", "default-org", chatflow.getWorkflowId(), 10);
+        assertEquals(2, runs.size());
+        assertTrue(runs.stream().anyMatch(run -> "success".equals(run.getStatus())));
+        assertTrue(runs.stream().anyMatch(run -> "waiting_input".equals(run.getStatus())));
+        List<Map<String, Object>> completedMessages = castList(
+                service.listChatflowOpenApiConversationMessages(messageQuery).get("data"));
+        assertEquals(4, completedMessages.size());
+        assertEquals("answer", completedMessages.get(3).get("type"));
+        assertEquals("Shanghai", completedMessages.get(3).get("content"));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     public void chatflowOpenApiChatExecutesConfiguredModelWithConversationHistory() {
         InMemoryApplicationRepository repository = new InMemoryApplicationRepository();
@@ -4790,6 +4860,22 @@ public class AppServiceImplTest {
                 + "],\"edges\":["
                 + "{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"llm-1\"},"
                 + "{\"sourceNodeID\":\"llm-1\",\"targetNodeID\":\"900001\"}]}";
+    }
+
+    private String chatflowInputResumeSchema() {
+        return "{\"nodes\":["
+                + "{\"id\":\"100001\",\"type\":\"1\",\"data\":{\"nodeMeta\":{\"title\":\"Start\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"input\"}]}},"
+                + "{\"id\":\"input-1\",\"type\":\"30\",\"data\":{\"nodeMeta\":{\"title\":\"Location\"},"
+                + "\"outputs\":[{\"type\":\"string\",\"name\":\"city\",\"required\":true,"
+                + "\"description\":\"City for the policy lookup\"}],\"inputs\":{\"inputParameters\":null,"
+                + "\"outputSchema\":\"[{\\\"type\\\":\\\"string\\\",\\\"name\\\":\\\"city\\\","
+                + "\\\"required\\\":true}]\"}}},"
+                + "{\"id\":\"900001\",\"type\":\"2\",\"data\":{\"nodeMeta\":{\"title\":\"End\"},"
+                + "\"inputs\":{\"inputParameters\":[{\"name\":\"output\",\"input\":{\"value\":{\"type\":\"ref\","
+                + "\"content\":{\"blockID\":\"input-1\",\"name\":\"city\"}}}}]}}}"
+                + "],\"edges\":[{\"sourceNodeID\":\"100001\",\"targetNodeID\":\"input-1\"},"
+                + "{\"sourceNodeID\":\"input-1\",\"targetNodeID\":\"900001\"}]}";
     }
 
     private String unknownCodeSchema() {

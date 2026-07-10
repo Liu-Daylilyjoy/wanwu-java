@@ -1696,6 +1696,9 @@ public class WanwuOpenApiController {
         String messageId = runId + "-message";
         String sectionId = runId + "-section";
         String response = text(data, "response");
+        boolean waitingInput = "waiting_input".equals(text(data, "status"))
+                || intValue(data.get("finish"), 1) == 0;
+        Map<String, Object> inputRequired = objectMap(data.get("input_required"));
         StringBuilder stream = new StringBuilder();
 
         Map<String, Object> created = chatflowChatState(
@@ -1707,21 +1710,41 @@ public class WanwuOpenApiController {
 
         int eventId = 3;
         for (String chunk : chatflowChunks(data, response)) {
-            appendChatflowSseEvent(stream, eventId++, "conversation.message.delta",
-                    chatflowMessageState(messageId, runId, conversationId, chatflowId, sectionId, chunk));
+            Map<String, Object> delta = chatflowMessageState(
+                    messageId, runId, conversationId, chatflowId, sectionId, chunk);
+            if (waitingInput) {
+                delta.put("type", "question");
+                delta.put("input_required", inputRequired);
+            }
+            appendChatflowSseEvent(stream, eventId++, "conversation.message.delta", delta);
         }
         Map<String, Object> completedMessage = chatflowMessageState(
                 messageId, runId, conversationId, chatflowId, sectionId, response);
         completedMessage.put("search_list", data.get("search_list"));
         completedMessage.put("node_events", data.get("node_events"));
+        completedMessage.put("finish", waitingInput ? 0 : 1);
+        if (waitingInput) {
+            completedMessage.put("type", "question");
+            completedMessage.put("status", "waiting_input");
+            completedMessage.put("input_required", inputRequired);
+        }
         appendChatflowSseEvent(stream, eventId++, "conversation.message.completed", completedMessage);
 
         Map<String, Object> completed = chatflowChatState(
                 runId, conversationId, chatflowId, sectionId, "completed");
         completed.put("usage", chatflowUsage(data.get("usage")));
+        completed.put("finish", waitingInput ? 0 : 1);
+        if (waitingInput) {
+            completed.put("input_required", inputRequired);
+        }
         appendChatflowSseEvent(stream, eventId++, "conversation.chat.completed", completed);
         Map<String, Object> done = new LinkedHashMap<>();
         done.put("debug_url", "/workflow?execute_id=" + runId + "&workflow_id=" + chatflowId);
+        done.put("finish", waitingInput ? 0 : 1);
+        if (waitingInput) {
+            done.put("status", "waiting_input");
+            done.put("input_required", inputRequired);
+        }
         appendChatflowSseEvent(stream, eventId, "done", done);
         return stream.toString();
     }

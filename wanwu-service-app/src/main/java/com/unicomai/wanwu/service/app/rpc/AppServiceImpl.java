@@ -232,6 +232,7 @@ public class AppServiceImpl implements AppService {
     private static final String CONVERSATION_TYPE_PUBLISHED = "published";
     private static final String CONVERSATION_TYPE_DRAFT = "draft";
     private static final String CONVERSATION_TYPE_CHATFLOW_OPENAPI = "chatflow_openapi";
+    private static final String CHATFLOW_PENDING_INPUT_PREFIX = "__chatflow_pending_input__:";
     private static final String CONVERSATION_TYPE_MODEL_USE_CHATLLM = "model_use_chatllm";
     private static final String MODEL_USE_CHATLLM_ASSISTANT_ID = "model-use-chatllm";
     private static final String MODEL_USE_KNOWLEDGE_FILE_PREFIX = "model-use-knowledge-file-";
@@ -1858,6 +1859,19 @@ public class AppServiceImpl implements AppService {
         try {
             WorkflowDraftRecord draft = workflowRuntimeDraft(userId, orgId, command.getWorkflowId());
             output = workflowRunOutput(workflow, draft, input, userId, orgId);
+        } catch (ChatflowInputRequiredException ex) {
+            long waitingAt = Math.max(startedAt, clock.millis());
+            output = chatflowInputRequiredRunOutput(command.getWorkflowId(), ex);
+            WorkflowRunRecord record = persistWorkflowRun(
+                    userId, orgId, command.getWorkflowId(), runId, "waiting_input",
+                    input, output, startedAt, waitingAt);
+            WorkflowRunResult result = new WorkflowRunResult(command.getWorkflowId(), output);
+            result.setRunId(runId);
+            result.setStatus(record.getStatus());
+            result.setCreatedAt(startedAt);
+            result.setFinishedAt(waitingAt);
+            result.setCostMillis(record.getCostMillis());
+            return result;
         } catch (RuntimeException ex) {
             long failedAt = Math.max(startedAt, clock.millis());
             Map<String, Object> failedOutput = new LinkedHashMap<String, Object>();
@@ -1880,6 +1894,40 @@ public class AppServiceImpl implements AppService {
         result.setFinishedAt(finishedAt);
         result.setCostMillis(record.getCostMillis());
         return result;
+    }
+
+    private Map<String, Object> chatflowInputRequiredRunOutput(String chatflowId,
+                                                                ChatflowInputRequiredException exception) {
+        Map<String, Object> inputRequired = new LinkedHashMap<String, Object>();
+        inputRequired.put("node_id", exception.nodeId);
+        inputRequired.put("node_name", exception.nodeName);
+        inputRequired.put("fields", exception.fields);
+
+        Map<String, Object> stepOutput = new LinkedHashMap<String, Object>();
+        stepOutput.put("input_required", inputRequired);
+        stepOutput.put("output", "");
+        stepOutput.put("result", "");
+        stepOutput.put("response", "");
+        stepOutput.put("text", "");
+        Map<String, Object> step = new LinkedHashMap<String, Object>();
+        step.put("order", 1);
+        step.put("nodeId", exception.nodeId);
+        step.put("name", exception.nodeName);
+        step.put("type", "30");
+        step.put("status", "waiting_input");
+        step.put("input", Collections.<String, Object>emptyMap());
+        step.put("output", stepOutput);
+
+        Map<String, Object> nodeOutputs = new LinkedHashMap<String, Object>();
+        nodeOutputs.put(exception.nodeId, stepOutput);
+        Map<String, Object> output = new LinkedHashMap<String, Object>();
+        output.put("workflowId", chatflowId);
+        output.put("workflow_id", chatflowId);
+        output.put("status", "waiting_input");
+        output.put("input_required", inputRequired);
+        output.put("steps", Collections.singletonList(step));
+        output.put("nodeOutputs", nodeOutputs);
+        return output;
     }
 
     private WorkflowRunRecord persistWorkflowRun(String userId,
@@ -2097,11 +2145,21 @@ public class AppServiceImpl implements AppService {
                 ? Collections.<String, Object>emptyMap()
                 : execution.getOutput();
         List<Map<String, Object>> steps = objectMapList(executionOutput.get("steps"));
-        String response = chatflowExecutionResponse(steps, command.getQuery());
-        List<String> chunks = chatflowExecutionChunks(steps, response);
-        List<Map<String, Object>> searchList = chatflowExecutionSearchList(steps);
+        boolean waitingInput = "waiting_input".equals(execution.getStatus());
+        Map<String, Object> inputRequired = mapValue(executionOutput.get("input_required"));
+        String response = waitingInput
+                ? chatflowInputRequiredPrompt(inputRequired)
+                : chatflowExecutionResponse(steps, command.getQuery());
+        List<String> chunks = waitingInput
+                ? Collections.singletonList(response)
+                : chatflowExecutionChunks(steps, response);
+        List<Map<String, Object>> searchList = waitingInput
+                ? Collections.<Map<String, Object>>emptyList()
+                : chatflowExecutionSearchList(steps);
         List<Map<String, Object>> nodeEvents = chatflowExecutionNodeEvents(steps);
-        Map<String, Object> usage = chatflowExecutionUsage(steps);
+        Map<String, Object> usage = waitingInput
+                ? Collections.<String, Object>emptyMap()
+                : chatflowExecutionUsage(steps);
         long now = clock.millis();
         AssistantConversationMessageRecord message = new AssistantConversationMessageRecord();
         message.setCreatedAt(now);
@@ -2112,7 +2170,9 @@ public class AppServiceImpl implements AppService {
         message.setConversationId(conversation.getConversationId());
         message.setDetailId(newDetailId());
         message.setPrompt(command.getQuery());
-        message.setSysPrompt("");
+        message.setSysPrompt(waitingInput
+                ? chatflowPendingInputJson(inputRequired, input, command.getQuery())
+                : "");
         message.setResponse(response);
         message.setResponseListJson(toJsonOrNull(chunks));
         message.setSearchListJson(toJsonOrNull(searchList));
@@ -2130,12 +2190,16 @@ public class AppServiceImpl implements AppService {
         result.put("message", "success");
         result.put("conversation_id", conversation.getConversationId());
         result.put("response", message.getResponse());
-        result.put("finish", 1);
+        result.put("finish", waitingInput ? 0 : 1);
+        result.put("status", waitingInput ? "waiting_input" : "completed");
         result.put("run_id", execution.getRunId());
         result.put("chunks", chunks);
         result.put("search_list", searchList);
         result.put("node_events", nodeEvents);
         result.put("usage", usage);
+        if (waitingInput) {
+            result.put("input_required", inputRequired);
+        }
         return result;
     }
 
@@ -3213,24 +3277,103 @@ public class AppServiceImpl implements AppService {
                                                      String orgId,
                                                      AssistantConversationRecord conversation,
                                                      ChatflowConversationChatCommand command) {
-        Map<String, Object> input = command.getParameters() == null
-                ? new LinkedHashMap<String, Object>()
-                : new LinkedHashMap<String, Object>(command.getParameters());
-        input.put("query", command.getQuery());
-        input.put("Query", command.getQuery());
-        input.put("question", command.getQuery());
-        input.put("message", command.getQuery());
-        input.put("input", command.getQuery());
+        Map<String, Object> pending = chatflowPendingInputState(
+                userId, orgId, conversation.getConversationId());
+        Map<String, Object> input;
+        Map<String, Object> parameters = new LinkedHashMap<String, Object>();
+        if (!pending.isEmpty()) {
+            input = new LinkedHashMap<String, Object>(mapValue(pending.get("runtime_input")));
+            parameters.putAll(mapValue(input.get("parameters")));
+            if (command.getParameters() != null) {
+                parameters.putAll(command.getParameters());
+            }
+            input.putAll(parameters);
+            chatflowApplyPendingInput(input, mapValue(pending.get("input_required")), command.getQuery());
+        } else {
+            input = command.getParameters() == null
+                    ? new LinkedHashMap<String, Object>()
+                    : new LinkedHashMap<String, Object>(command.getParameters());
+            parameters.putAll(input);
+            input.put("query", command.getQuery());
+            input.put("Query", command.getQuery());
+            input.put("question", command.getQuery());
+            input.put("message", command.getQuery());
+            input.put("input", command.getQuery());
+        }
         input.put("conversationId", conversation.getConversationId());
         input.put("conversation_id", conversation.getConversationId());
-        input.put("parameters", command.getParameters() == null
-                ? Collections.<String, Object>emptyMap()
-                : new LinkedHashMap<String, Object>(command.getParameters()));
+        input.put("parameters", parameters);
         List<Map<String, Object>> history = chatflowConversationHistory(
                 userId, orgId, conversation.getConversationId(), 50);
         input.put("_chatHistory", history);
         input.put("chatHistory", history);
         return input;
+    }
+
+    private Map<String, Object> chatflowPendingInputState(String userId,
+                                                           String orgId,
+                                                           String conversationId) {
+        long total = applicationRepository.countConversationMessages(userId, orgId, conversationId);
+        if (total <= 0L) {
+            return Collections.emptyMap();
+        }
+        List<AssistantConversationMessageRecord> messages = applicationRepository.listConversationMessages(
+                userId, orgId, conversationId, (int) Math.max(0L, total - 1L), 1);
+        if (messages.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return chatflowPendingInputState(messages.get(0).getSysPrompt());
+    }
+
+    private Map<String, Object> chatflowPendingInputState(String sysPrompt) {
+        if (isBlank(sysPrompt) || !sysPrompt.startsWith(CHATFLOW_PENDING_INPUT_PREFIX)) {
+            return Collections.emptyMap();
+        }
+        return mapOrDefault(sysPrompt.substring(CHATFLOW_PENDING_INPUT_PREFIX.length()),
+                new LinkedHashMap<String, Object>());
+    }
+
+    private void chatflowApplyPendingInput(Map<String, Object> input,
+                                           Map<String, Object> inputRequired,
+                                           String answer) {
+        boolean answerUsed = false;
+        for (Map<String, Object> field : objectMapList(inputRequired.get("fields"))) {
+            String name = textValue(field, "name", "key", "field");
+            if (isBlank(name) || chatflowInputFieldSupplied(field, input)) {
+                continue;
+            }
+            if (!answerUsed) {
+                input.put(name, defaultIfBlank(answer, ""));
+                answerUsed = true;
+            }
+        }
+    }
+
+    private String chatflowPendingInputJson(Map<String, Object> inputRequired,
+                                            Map<String, Object> runtimeInput,
+                                            String originalQuery) {
+        Map<String, Object> safeInput = new LinkedHashMap<String, Object>(runtimeInput);
+        safeInput.remove("_chatHistory");
+        safeInput.remove("chatHistory");
+        Map<String, Object> state = new LinkedHashMap<String, Object>();
+        state.put("input_required", new LinkedHashMap<String, Object>(inputRequired));
+        state.put("runtime_input", safeInput);
+        state.put("original_query", defaultIfBlank(originalQuery, ""));
+        return CHATFLOW_PENDING_INPUT_PREFIX + defaultIfBlank(toJsonOrNull(state), "{}");
+    }
+
+    private String chatflowInputRequiredPrompt(Map<String, Object> inputRequired) {
+        List<String> fields = new ArrayList<String>();
+        for (Map<String, Object> field : objectMapList(inputRequired.get("fields"))) {
+            String name = textValue(field, "name", "key", "field");
+            String description = textValue(field, "description", "desc");
+            if (!isBlank(name)) {
+                fields.add(isBlank(description) ? name : name + " (" + description + ")");
+            }
+        }
+        String nodeName = textValue(inputRequired, "node_name", "nodeName");
+        String prefix = isBlank(nodeName) ? "Additional input required" : nodeName;
+        return fields.isEmpty() ? prefix : prefix + ": please provide " + join(fields, ", ");
     }
 
     private List<Map<String, Object>> chatflowConversationHistory(String userId,
@@ -3348,6 +3491,8 @@ public class AppServiceImpl implements AppService {
     private Map<String, Object> chatflowOpenApiMessage(AssistantConversationMessageRecord record, String role, int index) {
         long turnId = defaultLong(record.getId()) <= 0L ? index + 1L : defaultLong(record.getId());
         long messageId = turnId * 2L + ("assistant".equals(role) ? 0L : -1L);
+        Map<String, Object> pendingInput = chatflowPendingInputState(record.getSysPrompt());
+        boolean inputQuestion = "assistant".equals(role) && !pendingInput.isEmpty();
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("id", String.valueOf(messageId));
         item.put("bot_id", defaultIfBlank(record.getAssistantId(), ""));
@@ -3356,14 +3501,21 @@ public class AppServiceImpl implements AppService {
                 ? defaultIfBlank(record.getResponse(), "")
                 : defaultIfBlank(record.getPrompt(), ""));
         item.put("conversation_id", defaultIfBlank(record.getConversationId(), ""));
-        item.put("meta_data", "assistant".equals(role)
-                ? Collections.<String, Object>emptyMap()
-                : mapOrDefault(record.getRequestFilesJson(), new LinkedHashMap<String, Object>()));
+        if (inputQuestion) {
+            Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+            metadata.put("status", "waiting_input");
+            metadata.put("input_required", mapValue(pendingInput.get("input_required")));
+            item.put("meta_data", metadata);
+        } else {
+            item.put("meta_data", "assistant".equals(role)
+                    ? Collections.<String, Object>emptyMap()
+                    : mapOrDefault(record.getRequestFilesJson(), new LinkedHashMap<String, Object>()));
+        }
         item.put("created_at", defaultLong(record.getCreatedAt()));
         item.put("updated_at", defaultLong(record.getUpdatedAt()));
         item.put("chat_id", String.valueOf(messageId));
         item.put("content_type", "text");
-        item.put("type", "answer");
+        item.put("type", inputQuestion ? "question" : "answer");
         item.put("section_id", "");
         item.put("reasoning_content", "");
         return item;
@@ -6921,7 +7073,7 @@ public class AppServiceImpl implements AppService {
         } else if (workflowIsSelectorNode(node, type, lowerType)) {
             output.putAll(workflowSelectorOutput(node, input));
         } else if (workflowIsInputNode(node, type, lowerType)) {
-            output.putAll(workflowInputNodeOutput(node, input));
+            output.putAll(workflowInputNodeOutput(node, input, chatflow, nodeId, name));
         } else if (workflowIsSetVariableNode(node, type, lowerType)) {
             output.putAll(workflowSetVariableOutput(node, input));
         } else if (workflowIsLoopNode(node, type, lowerType)) {
@@ -7303,9 +7455,25 @@ public class AppServiceImpl implements AppService {
         return "30".equals(type) || semantic.contains("input");
     }
 
-    private Map<String, Object> workflowInputNodeOutput(Map<String, Object> node, Map<String, Object> input) {
+    private Map<String, Object> workflowInputNodeOutput(Map<String, Object> node,
+                                                         Map<String, Object> input,
+                                                         boolean chatflow,
+                                                         String nodeId,
+                                                         String nodeName) {
+        List<Map<String, Object>> declarations = workflowInputNodeDeclarations(node);
+        if (chatflow) {
+            List<Map<String, Object>> missing = new ArrayList<Map<String, Object>>();
+            for (Map<String, Object> declaration : declarations) {
+                if (!chatflowInputFieldSupplied(declaration, input)) {
+                    missing.add(chatflowInputField(declaration));
+                }
+            }
+            if (!missing.isEmpty()) {
+                throw new ChatflowInputRequiredException(nodeId, nodeName, missing);
+            }
+        }
         Map<String, Object> fields = new LinkedHashMap<>();
-        for (Map<String, Object> declaration : workflowInputNodeDeclarations(node)) {
+        for (Map<String, Object> declaration : declarations) {
             String name = textValue(declaration, "name", "key", "field", "variable");
             if (isBlank(name)) {
                 continue;
@@ -7319,6 +7487,28 @@ public class AppServiceImpl implements AppService {
         output.put("response", new LinkedHashMap<>(fields));
         output.put("text", workflowJsonText(fields));
         return output;
+    }
+
+    private boolean chatflowInputFieldSupplied(Map<String, Object> declaration,
+                                                Map<String, Object> input) {
+        String name = textValue(declaration, "name", "key", "field", "variable");
+        if (isBlank(name) || !input.containsKey(name)) {
+            return false;
+        }
+        if (!Boolean.TRUE.equals(declaration.get("required"))) {
+            return true;
+        }
+        Object value = input.get(name);
+        return value != null && !isBlank(String.valueOf(value));
+    }
+
+    private Map<String, Object> chatflowInputField(Map<String, Object> declaration) {
+        Map<String, Object> field = new LinkedHashMap<String, Object>();
+        field.put("name", textValue(declaration, "name", "key", "field", "variable"));
+        field.put("type", defaultIfBlank(textValue(declaration, "type", "valueType"), "string"));
+        field.put("required", Boolean.TRUE.equals(declaration.get("required")));
+        field.put("description", textValue(declaration, "description", "desc"));
+        return field;
     }
 
     private List<Map<String, Object>> workflowInputNodeDeclarations(Map<String, Object> node) {
@@ -9978,6 +10168,21 @@ public class AppServiceImpl implements AppService {
             this.userId = userId;
             this.orgId = orgId;
             this.conversation = conversation;
+        }
+    }
+
+    private static class ChatflowInputRequiredException extends RuntimeException {
+        private final String nodeId;
+        private final String nodeName;
+        private final List<Map<String, Object>> fields;
+
+        private ChatflowInputRequiredException(String nodeId,
+                                               String nodeName,
+                                               List<Map<String, Object>> fields) {
+            super("chatflow input required at node " + nodeId);
+            this.nodeId = nodeId;
+            this.nodeName = nodeName;
+            this.fields = fields;
         }
     }
 }

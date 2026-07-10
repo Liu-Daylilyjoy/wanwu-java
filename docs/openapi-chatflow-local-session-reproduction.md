@@ -29,6 +29,9 @@ Date: 2026-07-10
 - When `enableChatHistory=true`, the configured number of persisted prior turns is inserted before the current prompt. Provider chunks and usage metadata are retained in node output.
 - Model calls record provider/model attribution, prompt/completion/total tokens, first-token latency, duration, stream mode, and success/failure in the existing model-statistic aggregate.
 - `settingOnError.processType=1` is enforced as fail-fast. `timeoutMs` is propagated through Chatflow LLM, intent, MCP, and HTTP nodes; BFF-to-App and App-to-provider Dubbo calls permit the bundled-template maximum of 180 seconds.
+- Chatflow `type=30` intermediate-input nodes suspend before downstream execution when declared fields have not been supplied. The run is persisted with `status=waiting_input`; the OpenAPI result carries `finish=0` and a structured `input_required` object.
+- The assistant turn emitted for a suspended input node has `type=question`. The existing six SSE event names remain unchanged, while delta/completed/done data includes `finish=0`, `status=waiting_input`, and the requested field schema.
+- Pending input state is scoped to the persisted Chatflow conversation. The next user turn fills the first unresolved field (explicit `parameters` win), reconstructs the original runtime input, and reruns the graph to completion; a later input node can suspend the same conversation again.
 - The five code-node programs shipped in Go templates (JSON-to-CSV, log-level statistics, text length, category/value shaping, and example multi-output) execute through bounded Java implementations. Unknown Chatflow code is rejected with an explicit isolation error instead of executing arbitrary Python/JavaScript in the App process. Workflow behavior is unchanged.
 - Chat responses expose `run_id`, `chunks`, `search_list`, and `node_events`; chunks, knowledge hits, and node events are also stored with the conversation message.
 - SSE output follows the repository manual: `conversation.chat.created`, `conversation.chat.in_progress`, one `conversation.message.delta` per provider chunk, `conversation.message.completed`, `conversation.chat.completed`, and `done`. Provider token usage is normalized to `input_count`, `output_count`, and `token_count`.
@@ -52,10 +55,12 @@ Date: 2026-07-10
 - `AppServiceImplTest#chatflowOpenApiChatPersistsFailedGraphRuns` verifies failed-run diagnostics and no false assistant message.
 - `AppServiceImplTest#chatflowDocumentNodeDownloadsOpenApiUploadedFileUrl` verifies cross-service upload consumption.
 - `AppServiceImplTest#chatflowRejectsUndocumentedNodeErrorProcessType` verifies unsupported, source-undocumented failure policies are rejected explicitly.
+- `AppServiceImplTest#chatflowInputNodeWaitsAndResumesFromNextConversationTurn` verifies waiting-run persistence, question-message metadata, next-turn field binding, resumed graph output, and final history.
 - `AppServiceImplTest#chatflowRejectsUnknownCodeOutsideSafeBuiltInPatterns` verifies arbitrary code is not executed in-process; `workflowUnknownCodeRetainsLegacyPassThrough` protects the requested Workflow non-change.
 - `ModelServiceImplTest#invokeModelHonorsCommandReadTimeout` verifies a real delayed HTTP provider is interrupted by the Chatflow-provided read timeout.
 - `WanwuOpenApiControllerTest#chatflowOpenApiRoutesUseAppServiceConversationState` verifies the OpenAPI route family uses AppService first while preserving the Go-shaped response contracts.
 - `WanwuOpenApiControllerTest#chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest` verifies Chatflow OpenAPI service failures are not hidden by the BFF fallback and are counted as failed stream calls.
+- `WanwuOpenApiControllerTest#chatflowOpenApiSseCarriesIntermediateInputRequest` verifies the unchanged SSE event family carries the question type and structured input request.
 - Full `AppServiceImplTest` regression passes on Java 8.
 
 ### Docker acceptance
@@ -65,7 +70,7 @@ docker compose --profile full up -d --build
 ./scripts/chatflow-smoke.ps1
 ```
 
-The smoke script creates a disposable Start-to-End Chatflow through the frontend API, creates an OpenAPI conversation, verifies the six SSE event types in order, reads the persisted user/assistant messages, and removes its test data. On 2026-07-10 it passed against `localhost:8080` with all backend containers healthy.
+The smoke script creates disposable Start-to-End and Start-to-Input-to-End Chatflows through the frontend API. It verifies the six SSE event types, persisted turns, `finish=0` input suspension, question metadata, next-turn resume output, and test-data cleanup.
 
 Browser acceptance also passed at `http://localhost:3000/aibase/appSpace/workflow?type=chatflow`: development login completed without a gateway error, the Chatflow tab rendered, and the zero-change frontend opened the Create Chatflow dialog without console errors.
 

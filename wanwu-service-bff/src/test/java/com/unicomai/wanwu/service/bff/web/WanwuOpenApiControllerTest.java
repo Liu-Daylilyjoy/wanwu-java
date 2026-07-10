@@ -714,6 +714,53 @@ public class WanwuOpenApiControllerTest {
     }
 
     @Test
+    public void chatflowOpenApiSseCarriesIntermediateInputRequest() throws Exception {
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("name", "city");
+        field.put("type", "string");
+        field.put("required", true);
+        field.put("description", "City for policy lookup");
+        Map<String, Object> inputRequired = new LinkedHashMap<>();
+        inputRequired.put("node_id", "input-1");
+        inputRequired.put("node_name", "Location");
+        inputRequired.put("fields", Collections.singletonList(field));
+        Map<String, Object> waiting = new LinkedHashMap<>();
+        waiting.put("code", 0);
+        waiting.put("message", "success");
+        waiting.put("conversation_id", "conversation-input-001");
+        waiting.put("response", "Location: please provide city");
+        waiting.put("finish", 0);
+        waiting.put("status", "waiting_input");
+        waiting.put("run_id", "workflow-run-input-001");
+        waiting.put("chunks", Collections.singletonList("Location: please provide city"));
+        waiting.put("search_list", Collections.emptyList());
+        waiting.put("node_events", Collections.emptyList());
+        waiting.put("usage", Collections.emptyMap());
+        waiting.put("input_required", inputRequired);
+        when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class))).thenReturn(waiting);
+
+        String stream = mockMvc.perform(post("/service/api/openapi/v1/chatflow/chat")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uuid\":\"chatflow-input-001\","
+                                + "\"conversation_id\":\"conversation-input-001\","
+                                + "\"query\":\"Which policy?\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(containsString("event: conversation.chat.created")))
+                .andExpect(content().string(containsString("event: conversation.chat.completed")))
+                .andExpect(content().string(containsString("\"type\":\"question\"")))
+                .andExpect(content().string(containsString("\"status\":\"waiting_input\"")))
+                .andExpect(content().string(containsString("\"finish\":0")))
+                .andExpect(content().string(containsString("\"node_id\":\"input-1\"")))
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(stream.indexOf("event: conversation.message.completed")
+                < stream.indexOf("event: conversation.chat.completed"));
+        assertTrue(stream.indexOf("event: conversation.chat.completed") < stream.indexOf("event: done"));
+    }
+
+    @Test
     public void chatflowOpenApiChatRecordsFailureStatisticWhenServiceRejectsRequest() throws Exception {
         when(appService.chatflowOpenApiChat(any(ChatflowConversationChatCommand.class)))
                 .thenThrow(new IllegalArgumentException("query is required"));
