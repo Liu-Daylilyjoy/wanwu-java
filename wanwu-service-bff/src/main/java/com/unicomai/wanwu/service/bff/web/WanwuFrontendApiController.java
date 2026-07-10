@@ -3018,7 +3018,9 @@ public class WanwuFrontendApiController {
     private boolean isBinaryKnowledgeImport(String extension) {
         return "xlsx".equals(extension) || "xls".equals(extension)
                 || "docx".equals(extension) || "doc".equals(extension)
-                || "pdf".equals(extension);
+                || "pptx".equals(extension) || "ppt".equals(extension)
+                || "pdf".equals(extension) || "zip".equals(extension)
+                || "gz".equals(extension);
     }
 
     private boolean hasImportContent(Map<String, Object> body) {

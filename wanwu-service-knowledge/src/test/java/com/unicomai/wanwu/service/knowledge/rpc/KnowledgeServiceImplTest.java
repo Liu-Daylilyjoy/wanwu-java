@@ -5,6 +5,12 @@ import com.unicomai.wanwu.api.model.dto.ModelInvokeCommand;
 import com.unicomai.wanwu.api.model.dto.ModelInvokeResult;
 import com.unicomai.wanwu.service.knowledge.persistence.entity.KnowledgeRecordEntity;
 import com.unicomai.wanwu.service.knowledge.persistence.mapper.KnowledgeRecordMapper;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextBox;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +26,7 @@ import java.util.Map;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -873,6 +880,36 @@ public class KnowledgeServiceImplTest {
         assertEquals(1, searchList.size());
         assertEquals("Guide.docx", searchList.get(0).get("title"));
         assertTrue(String.valueOf(searchList.get(0).get("snippet")).contains("RAG search can find DOCX paragraphs."));
+    }
+
+    @Test
+    public void documentImportExtractsPresentationLegacySpreadsheetAndZipArchive() throws Exception {
+        String knowledgeId = (String) service.createKnowledge("dev-admin", "default-org",
+                createKnowledge("Extended Formats", 0)).get("knowledgeId");
+
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-pptx", "Roadmap.pptx",
+                        pptxBase64("Wanwu presentation roadmap", "RAG can retrieve PPTX slide text.")));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-xls", "Legacy.xls",
+                        xlsBase64("Legacy spreadsheet", "RAG can retrieve XLS cell text.")));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-zip", "Bundle.zip",
+                        zipBase64("nested/guide.txt", "RAG can retrieve text inside ZIP archives.")));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-html", "Guide.html",
+                        Base64.getEncoder().encodeToString(("<html><body><h1>HTML Guide</h1>"
+                                + "<p>RAG can retrieve semantic HTML text.</p></body></html>")
+                                .getBytes(StandardCharsets.UTF_8))));
+        service.importDocs("dev-admin", "default-org",
+                docImportWithBase64(knowledgeId, "doc-targz", "Bundle.tar.gz",
+                        tarGzBase64("nested/archive.txt", "RAG can retrieve TAR GZ archive text.")));
+
+        assertEquals("Roadmap.pptx", firstHitTitle(knowledgeId, "PPTX slide text"));
+        assertEquals("Legacy.xls", firstHitTitle(knowledgeId, "XLS cell text"));
+        assertEquals("Bundle.zip", firstHitTitle(knowledgeId, "inside ZIP archives"));
+        assertEquals("Guide.html", firstHitTitle(knowledgeId, "semantic HTML text"));
+        assertEquals("Bundle.tar.gz", firstHitTitle(knowledgeId, "TAR GZ archive text"));
     }
 
     @Test
@@ -1842,6 +1879,65 @@ public class KnowledgeServiceImplTest {
         addZipEntry(zip, "word/document.xml", documentXml(paragraphs));
         zip.close();
         return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private String pptxBase64(String... lines) throws Exception {
+        XMLSlideShow show = new XMLSlideShow();
+        try {
+            XSLFSlide slide = show.createSlide();
+            XSLFTextBox textBox = slide.createTextBox();
+            textBox.setText(String.join("\n", lines));
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            show.write(output);
+            return Base64.getEncoder().encodeToString(output.toByteArray());
+        } finally {
+            show.close();
+        }
+    }
+
+    private String xlsBase64(String... cells) throws Exception {
+        HSSFWorkbook workbook = new HSSFWorkbook();
+        try {
+            org.apache.poi.ss.usermodel.Row row = workbook.createSheet("Knowledge").createRow(0);
+            for (int i = 0; i < cells.length; i++) {
+                row.createCell(i).setCellValue(cells[i]);
+            }
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            workbook.write(output);
+            return Base64.getEncoder().encodeToString(output.toByteArray());
+        } finally {
+            workbook.close();
+        }
+    }
+
+    private String zipBase64(String entryName, String content) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ZipOutputStream zip = new ZipOutputStream(output);
+        addZipEntry(zip, entryName, content);
+        zip.close();
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private String tarGzBase64(String entryName, String content) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        GZIPOutputStream gzip = new GZIPOutputStream(output);
+        TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        TarArchiveEntry entry = new TarArchiveEntry(entryName);
+        entry.setSize(bytes.length);
+        tar.putArchiveEntry(entry);
+        tar.write(bytes);
+        tar.closeArchiveEntry();
+        tar.finish();
+        tar.close();
+        return Base64.getEncoder().encodeToString(output.toByteArray());
+    }
+
+    private String firstHitTitle(String knowledgeId, String question) {
+        List<Map<String, Object>> hits = listOfMaps(service.hitKnowledge("dev-admin", "default-org",
+                knowledgeHit(knowledgeId, question)).get("searchList"));
+        assertFalse(hits.isEmpty());
+        return String.valueOf(hits.get(0).get("title"));
     }
 
     private String legacyDocBase64(String... paragraphs) throws Exception {

@@ -23,6 +23,8 @@ Model credentials remain in model-service configuration. RAG and BFF code pass o
 
 Document segments and QA pairs persist their embedding and embedding model ID in the knowledge snapshot. Text, vector, and weighted hybrid retrieval share one ranking path. Provider rerank updates both the final score and the evidence card; provider failures fall back to the recall score without failing the chat.
 
+Knowledge imports parse text/Markdown/CSV, PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, HTML, ZIP, and TAR.GZ content before splitting and indexing. Archive parsing is bounded and never extracts files to disk. The RAG chat attachment contract intentionally remains image-only because that is the behavior of the Go runtime and unchanged frontend.
+
 ## Model Inference Contract
 
 `ModelInvokeCommand` supports these operations:
@@ -46,6 +48,8 @@ Docker development remains usable without provider credentials. If no active con
 - `AppServiceImplTest#ragChatRetrievesEvidenceBeforeInvokingConfiguredModel`
 - `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredEmbeddingModelForVectorRetrieval`
 - `KnowledgeServiceImplTest#knowledgeHitUsesConfiguredProviderRerankOrderAndScores`
+- `KnowledgeServiceImplTest#documentImportExtractsPresentationLegacySpreadsheetAndZipArchive`
+- `WanwuFrontendApiControllerTest#knowledgeDocImportPreservesPresentationAndArchiveBytes`
 - Full `ModelServiceImplTest`
 - Full `AppServiceImplTest`
 - Frontend and OpenAPI RAG delegation/SSE tests

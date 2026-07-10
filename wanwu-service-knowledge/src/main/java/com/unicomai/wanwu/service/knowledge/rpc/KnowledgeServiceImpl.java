@@ -16,6 +16,21 @@ import com.unicomai.wanwu.service.knowledge.retrieval.LocalSemanticVectorizer;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.hslf.usermodel.HSLFShape;
+import org.apache.poi.hslf.usermodel.HSLFSlide;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextShape;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +42,7 @@ import org.xml.sax.InputSource;
 
 import javax.annotation.PostConstruct;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.swing.text.html.HTMLEditorKit;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,6 +59,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -79,6 +96,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final String EXPORT_TYPE_DOC = "doc";
     private static final String TYPE_SNAPSHOT = "snapshot";
     private static final String SNAPSHOT_ID = "state";
+    private static final int MAX_ARCHIVE_ENTRIES = 100;
+    private static final int MAX_ARCHIVE_ENTRY_BYTES = 20 * 1024 * 1024;
+    private static final int MAX_ARCHIVE_TEXT_CHARS = 5 * 1024 * 1024;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final LocalSemanticVectorizer LOCAL_VECTORIZER = new LocalSemanticVectorizer();
 
@@ -3356,10 +3376,20 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (bytes.length == 0) {
             return "";
         }
+        return documentText(bytes, extension, 0);
+    }
+
+    private String documentText(byte[] bytes, String extension, int archiveDepth) {
         if ("xlsx".equals(extension)) {
             String xlsxText = xlsxDelimitedText(bytes);
             if (!isBlank(xlsxText)) {
                 return xlsxText;
+            }
+        }
+        if ("xls".equals(extension)) {
+            String xlsText = xlsDelimitedText(bytes);
+            if (!isBlank(xlsText)) {
+                return xlsText;
             }
         }
         if ("docx".equals(extension)) {
@@ -3379,6 +3409,31 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (!isBlank(pdfText)) {
                 return pdfText;
             }
+        }
+        if ("pptx".equals(extension)) {
+            String text = pptxText(bytes);
+            if (!isBlank(text)) {
+                return text;
+            }
+        }
+        if ("ppt".equals(extension)) {
+            String text = legacyPptText(bytes);
+            if (!isBlank(text)) {
+                return text;
+            }
+        }
+        if ("html".equals(extension) || "htm".equals(extension)) {
+            String text = htmlText(bytes);
+            if (!isBlank(text)) {
+                return text;
+            }
+        }
+        if (archiveDepth < 2 && "zip".equals(extension)) {
+            return zipArchiveText(bytes, archiveDepth + 1);
+        }
+        if (archiveDepth < 2 && ("tar.gz".equals(extension) || "targz".equals(extension)
+                || "gz".equals(extension))) {
+            return tarGzArchiveText(bytes, archiveDepth + 1);
         }
         return new String(bytes, StandardCharsets.UTF_8);
     }
@@ -3405,6 +3460,205 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    private String xlsDelimitedText(byte[] bytes) {
+        try {
+            HSSFWorkbook workbook = new HSSFWorkbook(new ByteArrayInputStream(bytes));
+            try {
+                DataFormatter formatter = new DataFormatter(Locale.ENGLISH);
+                StringBuilder result = new StringBuilder();
+                for (int sheetIndex = 0; sheetIndex < workbook.getNumberOfSheets(); sheetIndex++) {
+                    Sheet sheet = workbook.getSheetAt(sheetIndex);
+                    for (Row row : sheet) {
+                        StringBuilder line = new StringBuilder();
+                        for (Cell cell : row) {
+                            String value = formatter.formatCellValue(cell).trim();
+                            if (isBlank(value)) {
+                                continue;
+                            }
+                            if (line.length() > 0) {
+                                line.append('\t');
+                            }
+                            line.append(value);
+                        }
+                        if (line.length() > 0) {
+                            if (result.length() > 0) {
+                                result.append('\n');
+                            }
+                            result.append(line);
+                        }
+                    }
+                }
+                return result.toString();
+            } finally {
+                workbook.close();
+            }
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String pptxText(byte[] bytes) {
+        try {
+            XMLSlideShow show = new XMLSlideShow(new ByteArrayInputStream(bytes));
+            try {
+                StringBuilder result = new StringBuilder();
+                for (XSLFSlide slide : show.getSlides()) {
+                    for (XSLFShape shape : slide.getShapes()) {
+                        if (shape instanceof XSLFTextShape) {
+                            appendParsedText(result, ((XSLFTextShape) shape).getText());
+                        }
+                    }
+                }
+                return result.toString();
+            } finally {
+                show.close();
+            }
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String legacyPptText(byte[] bytes) {
+        try {
+            HSLFSlideShow show = new HSLFSlideShow(new ByteArrayInputStream(bytes));
+            try {
+                StringBuilder result = new StringBuilder();
+                for (HSLFSlide slide : show.getSlides()) {
+                    for (HSLFShape shape : slide.getShapes()) {
+                        if (shape instanceof HSLFTextShape) {
+                            appendParsedText(result, ((HSLFTextShape) shape).getText());
+                        }
+                    }
+                }
+                return result.toString();
+            } finally {
+                show.close();
+            }
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String htmlText(byte[] bytes) {
+        try {
+            HTMLEditorKit kit = new HTMLEditorKit();
+            javax.swing.text.Document document = kit.createDefaultDocument();
+            kit.read(new StringReader(new String(bytes, StandardCharsets.UTF_8)), document, 0);
+            return normalizeWhitespace(document.getText(0, document.getLength()));
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String zipArchiveText(byte[] bytes, int archiveDepth) {
+        StringBuilder result = new StringBuilder();
+        try {
+            ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes));
+            try {
+                ZipEntry entry;
+                int entries = 0;
+                while ((entry = zip.getNextEntry()) != null && entries++ < MAX_ARCHIVE_ENTRIES
+                        && result.length() < MAX_ARCHIVE_TEXT_CHARS) {
+                    if (entry.isDirectory()) {
+                        continue;
+                    }
+                    String extension = archiveEntryExtension(entry.getName());
+                    if (!supportedArchiveDocument(extension)) {
+                        continue;
+                    }
+                    byte[] content = readArchiveEntry(zip);
+                    appendArchiveDocument(result, entry.getName(), documentText(content, extension, archiveDepth));
+                }
+            } finally {
+                zip.close();
+            }
+        } catch (Exception ignored) {
+            return result.toString();
+        }
+        return result.toString();
+    }
+
+    private String tarGzArchiveText(byte[] bytes, int archiveDepth) {
+        StringBuilder result = new StringBuilder();
+        try {
+            TarArchiveInputStream tar = new TarArchiveInputStream(
+                    new GZIPInputStream(new ByteArrayInputStream(bytes)));
+            try {
+                TarArchiveEntry entry;
+                int entries = 0;
+                while ((entry = tar.getNextTarEntry()) != null && entries++ < MAX_ARCHIVE_ENTRIES
+                        && result.length() < MAX_ARCHIVE_TEXT_CHARS) {
+                    if (entry.isDirectory()) {
+                        continue;
+                    }
+                    String extension = archiveEntryExtension(entry.getName());
+                    if (!supportedArchiveDocument(extension)) {
+                        continue;
+                    }
+                    byte[] content = readArchiveEntry(tar);
+                    appendArchiveDocument(result, entry.getName(), documentText(content, extension, archiveDepth));
+                }
+            } finally {
+                tar.close();
+            }
+        } catch (Exception ignored) {
+            return result.toString();
+        }
+        return result.toString();
+    }
+
+    private byte[] readArchiveEntry(java.io.InputStream input) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > MAX_ARCHIVE_ENTRY_BYTES) {
+                throw new IOException("archive entry exceeds limit");
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private void appendArchiveDocument(StringBuilder result, String name, String text) {
+        if (isBlank(text) || result.length() >= MAX_ARCHIVE_TEXT_CHARS) {
+            return;
+        }
+        String block = "File: " + name + "\n" + text.trim();
+        int remaining = MAX_ARCHIVE_TEXT_CHARS - result.length();
+        if (result.length() > 0 && remaining > 2) {
+            result.append("\n\n");
+            remaining -= 2;
+        }
+        result.append(block, 0, Math.min(block.length(), Math.max(0, remaining)));
+    }
+
+    private void appendParsedText(StringBuilder result, String text) {
+        String value = normalizeWhitespace(text);
+        if (isBlank(value)) {
+            return;
+        }
+        if (result.length() > 0) {
+            result.append('\n');
+        }
+        result.append(value);
+    }
+
+    private String archiveEntryExtension(String name) {
+        String lower = defaultIfBlank(name, "").toLowerCase(Locale.ENGLISH);
+        if (lower.endsWith(".tar.gz")) {
+            return "tar.gz";
+        }
+        return fileType(lower);
+    }
+
+    private boolean supportedArchiveDocument(String extension) {
+        return Arrays.asList("txt", "md", "csv", "html", "htm", "pdf", "doc", "docx", "xls", "xlsx",
+                "ppt", "pptx", "zip", "tar.gz").contains(extension);
     }
 
     private String docxText(byte[] bytes) {
@@ -4589,7 +4843,26 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private String documentExtension(Map<String, Object> docInfo) {
         String type = firstText(docInfo, "docType", "fileType", "type");
         if (!isBlank(type)) {
-            return type.replace(".", "").toLowerCase(Locale.ENGLISH);
+            String normalized = type.toLowerCase(Locale.ENGLISH).trim();
+            if (normalized.contains("tar.gz")) {
+                return "tar.gz";
+            }
+            if (normalized.startsWith(".")) {
+                normalized = normalized.substring(1);
+            }
+            if (normalized.contains("/")) {
+                normalized = normalized.substring(normalized.lastIndexOf('/') + 1);
+            }
+            if ("vnd.openxmlformats-officedocument.presentationml.presentation".equals(normalized)) {
+                return "pptx";
+            }
+            if ("vnd.openxmlformats-officedocument.spreadsheetml.sheet".equals(normalized)) {
+                return "xlsx";
+            }
+            if ("vnd.openxmlformats-officedocument.wordprocessingml.document".equals(normalized)) {
+                return "docx";
+            }
+            return normalized;
         }
         String name = firstText(docInfo, "docName", "fileName", "name", "docUrl", "url", "filePath");
         return fileType(name);

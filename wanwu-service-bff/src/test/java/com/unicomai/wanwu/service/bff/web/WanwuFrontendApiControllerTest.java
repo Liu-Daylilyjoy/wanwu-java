@@ -3399,6 +3399,33 @@ public class WanwuFrontendApiControllerTest {
     }
 
     @Test
+    public void knowledgeDocImportPreservesPresentationAndArchiveBytes() throws Exception {
+        String pptxFileId = "doc-upload-bff-test.pptx";
+        String zipFileId = "doc-upload-bff-test.zip";
+        byte[] pptxBytes = new byte[]{80, 75, 3, 4, 21, 22, 23, 24};
+        byte[] zipBytes = new byte[]{80, 75, 3, 4, 31, 32, 33, 34};
+        UploadedFileStore.defaultStore().writeBytes(pptxFileId, pptxBytes);
+        UploadedFileStore.defaultStore().writeBytes(zipFileId, zipBytes);
+
+        mockMvc.perform(post("/user/api/v1/knowledge/doc/import")
+                        .header("Authorization", "Bearer dev-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"knowledgeId\":\"knowledge-doc-001\",\"docInfoList\":["
+                                + "{\"fileUploadId\":\"" + pptxFileId + "\",\"docName\":\"Roadmap.pptx\"},"
+                                + "{\"fileUploadId\":\"" + zipFileId + "\",\"docName\":\"Bundle.zip\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Map> captor = forClass(Map.class);
+        verify(knowledgeService).importDocs(anyString(), anyString(), captor.capture());
+        List<Map<String, Object>> docs = listMap(captor.getValue().get("docInfoList"));
+        assertEquals(Base64.getEncoder().encodeToString(pptxBytes), docs.get(0).get("contentBase64"));
+        assertEquals("pptx", docs.get(0).get("docType"));
+        assertEquals(Base64.getEncoder().encodeToString(zipBytes), docs.get(1).get("contentBase64"));
+        assertEquals("zip", docs.get(1).get("docType"));
+    }
+
+    @Test
     public void batchSegmentImportReadsUploadedCsvContent() throws Exception {
         String segmentFileId = "segment-upload-bff-test.csv";
         String csv = "content,labels\n"
